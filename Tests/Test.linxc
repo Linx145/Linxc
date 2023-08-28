@@ -1,0 +1,45 @@
+#include <Linxc.h>
+#include <stdlib.h>
+
+NAMESPACE(Testing)
+
+int addFunction(int a, int b)
+{
+    return a + b;
+}
+
+struct StructA
+{
+    static int integer;
+    bool boolean;
+    float floatingPoint;
+    int *someMemory;
+
+    CONSTRUCTOR(StructA, int i)
+    {
+        someMemory = (int*)malloc(sizeof(int));
+        boolean = true;
+        floatingPoint = 0.2f;
+    }
+    CONSTRUCTOR(StructA)
+    {
+        someMemory = nullptr;
+        integer = 0;
+        boolean = false;
+        floatingPoint = 0.0f;
+    }
+    DESTRUCTOR(StructA)
+    {
+        if (someMemory != nullptr)
+        {
+            free(someMemory);
+        }
+    }
+
+    void ManipulateData(int integerIncrement)
+    {
+        integer += integerIncrement;
+        boolean = !boolean;
+        floatingPoint += 1.5f;
+    }
+};
