@@ -5,7 +5,7 @@ struct StructA
 {
     int integer;
     bool boolean;
-    float floatingPoint;
+    static float floatingPoint;
     int *someMemory;
 
     CONSTRUCTOR(StructA, int i)

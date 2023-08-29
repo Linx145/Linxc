@@ -59,7 +59,8 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                 break;
             },
             .LineComment, .MultiLineComment => continue,
-            .LParen => {
+            .LParen => 
+            {
                 if (foundIdentifier != null) //reached a function
                 {
                     var functionData = try ParseFunction(allocator, token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
@@ -99,13 +100,15 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                     }
                 }
             },
-            .LBrace => {
+            .LBrace => 
+            {
                 if (!skipUntilLineBreak)
                 {
                     indent += 1;
                 }
             },
-            .RBrace => {
+            .RBrace => 
+            {
                 if (!skipUntilLineBreak)
                 {
                     indent -= 1;
@@ -115,7 +118,8 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                     }
                 }
             },
-            .Hash => {
+            .Hash => 
+            {
                 skipUntilLineBreak = true;
             },
             .Nl => {
@@ -123,6 +127,10 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                 {
                     skipUntilLineBreak = false;
                 }
+            },
+            .Keyword_static =>
+            {
+                nextIsStatic = true;
             },
             .Identifier => {
                 if (!skipUntilLineBreak)
@@ -144,11 +152,6 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                         if (std.mem.eql(u8, foundIdentifier.?, "bool"))
                         {
                             foundIdentifier = null; //if we hit the 'bool' identifier, we did not indeed find an identifier
-                        }
-                        else if (std.mem.eql(u8, foundIdentifier.?, "static"))
-                        {
-                            nextIsStatic = true;
-                            foundIdentifier = null;
                         }
                         else if (std.mem.eql(u8, fileContents[recordingStart.?..recordingEnd], "struct"))
                         {

@@ -153,8 +153,6 @@ pub const FieldData = struct
     const Self = @This();
 
     name: string,
-    //do not store type as ID of structdata as not 
-    //all fields are guaranteed to have types that are reflected
     type: string,
     tags: ?[]TagData,
     isStatic: bool,
@@ -168,6 +166,23 @@ pub const FieldData = struct
         }
         std.debug.print("{s}variable: {s}\n", .{isStatic, self.name.str()});
         std.debug.print("-type: {s}\n", .{self.type.str()});
+    }
+    pub fn OutputReflection(self: *Self, writer: *std.fs.File.Writer, structName: []const u8) !void
+    {
+        if (!self.isStatic)
+        {
+            try writer.print("   type.variables[\"{s}\"]", .{self.name.str()});
+            _ = try writer.write(" = [](void *instance) -> void * { return &((");
+            try writer.print("{s}*)instance)->{s};", .{structName, self.name.str()});
+            _ = try writer.write(" };\n");
+        }
+        else
+        {
+            try writer.print("   type.variables[\"{s}\"]", .{self.name.str()});
+            _ = try writer.write(" = [](void *instance) -> void * { return &");
+            try writer.print("{s}::{s};", .{structName, self.name.str()});
+            _ = try writer.write(" };\n");
+        }
     }
     pub fn deinit(self: *Self) void
     {
@@ -319,7 +334,12 @@ pub const StructData = struct
         while (i < self.fields.len) : (i += 1)
         {
             const field: *FieldData = &self.fields[i];
-            try writer.print("   {s} {s};\n", .{field.type.str(), field.name.str()});
+            var isStatic: []const u8 = "";
+            if (field.isStatic)
+            {
+                isStatic = "static ";
+            }
+            try writer.print("   {s}{s} {s};\n", .{isStatic, field.type.str(), field.name.str()});
         }
 
         _ = try writer.write("\n");
@@ -388,15 +408,12 @@ pub const StructData = struct
         _ = try writer.write("   Reflection::Type type;\n");
         try writer.print("   type.ID = {d};\n", .{ID.*});
         try writer.print("   type.name = \"{s}\";\n", .{self.name.str()});
-        for (self.fields) |field|
+
+        var i: usize = 0;
+        while (i < self.fields.len) : (i += 1)
         {
-            if (!field.isStatic)
-            {
-                try writer.print("   type.variables[\"{s}\"]", .{field.name.str()});
-                _ = try writer.write(" = [](void *instance) -> void * { return &((");
-                try writer.print("{s}*)instance)->{s};", .{self.name.str(), field.name.str()});
-                _ = try writer.write(" };\n");
-            }
+            var field: *FieldData = &self.fields[i];
+            try field.OutputReflection(writer, self.name.str());
         }
         try writer.print("   Typeof<{s}>::type = type;\n", .{self.name.str()});
         _ = try writer.write("}\n");
