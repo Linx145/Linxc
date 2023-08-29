@@ -1,13 +1,6 @@
 #include <Linxc.h>
 #include <stdlib.h>
 
-NAMESPACE(Testing)
-
-int addFunction(int a, int b)
-{
-    return a + b;
-}
-
 struct StructA
 {
     static int integer;
@@ -18,6 +11,7 @@ struct StructA
     CONSTRUCTOR(StructA, int i)
     {
         someMemory = (int*)malloc(sizeof(int));
+        *someMemory = i;
         boolean = true;
         floatingPoint = 0.2f;
     }

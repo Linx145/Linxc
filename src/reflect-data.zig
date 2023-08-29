@@ -5,21 +5,23 @@ pub const FileData = struct
 {
     const Self = @This();
 
-    includeDirs: std.ArrayList([]const u8),
+    includeDirs: std.ArrayList(string),
     functions: std.ArrayList(FunctionData),
     structs: std.ArrayList(StructData),
-    namespace: []const u8,
+    namespace: ?string,
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self 
         {
-            .includeDirs = std.ArrayList([]const u8).init(allocator),
+            .includeDirs = std.ArrayList(string).init(allocator),
             .functions = std.ArrayList(FunctionData).init(allocator),
             .structs = std.ArrayList(StructData).init(allocator),
-            .namespace = ""
+            .namespace = null
         };
     }
     pub fn deinit(self: *Self) void {
+        
+
         self.functions.deinit();
         self.structs.deinit();
         self.includeDirs.deinit();
@@ -31,7 +33,7 @@ pub const FileData = struct
         try headerPath.concat(".h");
         defer headerPath.deinit();
 
-        var headerName = try string.init_with_contents(allocator, std.fs.path.basename(fileWithoutExtension.buffer.?[0..fileWithoutExtension.size]));
+        var headerName = try string.init_with_contents(allocator, std.fs.path.basename(fileWithoutExtension.str()));
         try headerName.concat(".h");
         defer headerName.deinit();
 
@@ -41,8 +43,8 @@ pub const FileData = struct
 
         //header file
         {
-            std.debug.print("Writing to {s}\n", .{headerPath.buffer.?[0..headerPath.size]});
-            var headerFile: std.fs.File = try std.fs.createFileAbsolute(headerPath.buffer.?[0..headerPath.size], .{.truncate = true});
+            std.debug.print("Writing to {s}\n", .{headerPath.str()});
+            var headerFile: std.fs.File = try std.fs.createFileAbsolute(headerPath.str(), .{.truncate = true});
             const writer = headerFile.writer();
             
             var i: usize = 0;
@@ -51,13 +53,13 @@ pub const FileData = struct
 
             while (i < self.includeDirs.items.len) : (i += 1)
             {
-                try writer.print("#include {s}\n", .{self.includeDirs.items[i]});
+                try writer.print("#include {s}\n", .{self.includeDirs.items[i].str()});
             }
 
-            if (self.namespace.len > 0)
+            if (self.namespace != null)
             {
                 _ = try writer.write("namespace ");
-                _ = try writer.write(self.namespace);
+                _ = try writer.write(self.namespace.?.str());
                 _ = try writer.write("\n{\n");
             }
 
@@ -66,7 +68,7 @@ pub const FileData = struct
             while (i < self.functions.items.len) : (i += 1)
             {
                 const func: *FunctionData = &self.functions.items[i];
-                try writer.print("{s} {s}({s});\n", .{func.returnType, func.name, func.paramsText});
+                try writer.print("{s} {s}({s});\n", .{func.returnType.str(), func.name.str(), func.paramsText.str()});
             }
 
             i = 0;
@@ -77,7 +79,7 @@ pub const FileData = struct
                 try structDat.OutputHeader(allocator, &writer);
             }
 
-            if (self.namespace.len > 0)
+            if (self.namespace != null)
             {
                 _ = try writer.write("}");
             }
@@ -86,17 +88,17 @@ pub const FileData = struct
         }
         //cpp file
         {
-            std.debug.print("Writing to {s}\n", .{filePath.buffer.?[0..filePath.size]});
-            var cFile: std.fs.File = try std.fs.createFileAbsolute(filePath.buffer.?[0..filePath.size], .{.truncate = true});
+            std.debug.print("Writing to {s}\n", .{filePath.str()});
+            var cFile: std.fs.File = try std.fs.createFileAbsolute(filePath.str(), .{.truncate = true});
             const writer = cFile.writer();
             
-            try writer.print("#include <{s}>\n", .{headerName.buffer.?[0..headerName.size]});
+            try writer.print("#include <{s}>\n", .{headerName.str()});
             _ = try writer.write("\n");
 
-            if (self.namespace.len > 0)
+            if (self.namespace != null)
             {
                 _ = try writer.write("namespace ");
-                _ = try writer.write(self.namespace);
+                _ = try writer.write(self.namespace.?.str());
                 _ = try writer.write("\n{\n");
             }
 
@@ -104,9 +106,9 @@ pub const FileData = struct
             while (i < self.functions.items.len) : (i += 1)
             {
                 const func: *FunctionData = &self.functions.items[i];
-                try writer.print("{s} {s}({s})\n", .{func.returnType, func.name, func.paramsText});
+                try writer.print("{s} {s}({s})\n", .{func.returnType.str(), func.name.str(), func.paramsText.str()});
                 _ = try writer.write("{\n");
-                try writer.print("{s}", .{func.bodyText});
+                try writer.print("{s}", .{func.bodyText.str()});
                 _ = try writer.write("}\n");
             }
 
@@ -118,7 +120,7 @@ pub const FileData = struct
                 try structDat.OutputCpp(allocator, &writer);
             }
 
-            if (self.namespace.len > 0)
+            if (self.namespace != null)
             {
                 _ = try writer.write("}");
             }
@@ -131,8 +133,8 @@ pub const FileData = struct
 pub const TagData = struct 
 {
     const Self = @This();
-    name: []const u8,
-    args: []const u8,
+    name: string,
+    args: string,
 
     pub inline fn GetArgsTokenizer(self: *Self) std.c.Tokenizer
     {
@@ -146,10 +148,10 @@ pub const FieldData = struct
 {
     const Self = @This();
 
-    name: []const u8,
+    name: string,
     //do not store type as ID of structdata as not 
     //all fields are guaranteed to have types that are reflected
-    type: []const u8,
+    type: string,
     tags: ?[]TagData,
     isStatic: bool,
 
@@ -160,8 +162,20 @@ pub const FieldData = struct
         {
             isStatic = "static ";
         }
-        std.debug.print("{s}variable: {s}\n", .{isStatic, self.name});
-        std.debug.print("-type: {s}\n", .{self.type});
+        std.debug.print("{s}variable: {s}\n", .{isStatic, self.name.str()});
+        std.debug.print("-type: {s}\n", .{self.type.str()});
+    }
+    pub fn deinit(self: *Self) void
+    {
+        self.name.deinit();
+        self.type.deinit();
+        if (self.tags != null)
+        {
+            for (self.tags.?) |tag|
+            {
+                tag.deinit();
+            }
+        }
     }
 };
 
@@ -169,12 +183,28 @@ pub const FunctionData = struct
 {
     const Self = @This();
 
-    name: []const u8,
-    returnType: [] const u8,
-    paramsText: [] const u8,
-    bodyText: [] const u8,
+    name: string,
+    returnType: string,
+    paramsText: string,
+    bodyText: string,
     tags: ?[]TagData,
     isStatic: bool,
+
+    pub fn deinit(self: *Self) void
+    {
+        self.name.deinit();
+        self.returnType.deinit();
+        self.paramsText.deinit();
+        self.bodyText.deinit();
+
+        if (self.tags != null)
+        {
+            for (self.tags.?) |tag|
+            {
+                tag.deinit();
+            }
+        }
+    }
 
     pub inline fn IsConstructor(self: *Self) bool
     {
@@ -185,9 +215,9 @@ pub const FunctionData = struct
     {
         if (self.returnType.len == 0)
         {
-            std.debug.print("constructor: {s}\n", .{self.name});
+            std.debug.print("constructor: {s}\n", .{self.name.str()});
         }
-        else std.debug.print("function: {s}\n", .{self.name});
+        else std.debug.print("function: {s}\n", .{self.name.str()});
 
         std.debug.print("-TAGS: ", .{});
         var i: usize = 0;
@@ -195,13 +225,13 @@ pub const FunctionData = struct
         {
             while (i < self.tags.?.len) : (i += 1)
             {
-                std.debug.print("{s}, ", .{self.tags.?[i].name});
+                std.debug.print("{s}, ", .{self.tags.?[i].name.str()});
             }
         }
         std.debug.print("\n", .{});
-        std.debug.print("-return type: {s}\n", .{self.returnType});
-        std.debug.print("-params text: {s}\n", .{self.paramsText});
-        std.debug.print("-body text: {s}\n", .{self.bodyText});
+        std.debug.print("-return type: {s}\n", .{self.returnType.str()});
+        std.debug.print("-params text: {s}\n", .{self.paramsText.str()});
+        std.debug.print("-body text: {s}\n", .{self.bodyText.str()});
     }
 };
 
@@ -209,12 +239,40 @@ pub const StructData = struct
 {
     const Self = @This();
 
-    name: []const u8,
+    name: string,
     fields: []FieldData,
     methods: []FunctionData,
     ctors: []FunctionData,
     dtor: ?FunctionData,
     tags: ?[]TagData,
+
+    pub fn deinit(self: *Self) void 
+    {
+        self.name.deinit();
+        for (self.fields) |field|
+        {
+            field.deinit();
+        }
+        for (self.methods) |method|
+        {
+            method.deinit();
+        }
+        for (self.ctors) |ctor|
+        {
+            ctor.deinit();
+        }
+        if (self.dtor != null)
+        {
+            self.dtor.?.deinit();
+        }
+        if (self.tags != null)
+        {
+            for (self.tags.?) |tag|
+            {
+                tag.deinit();
+            }
+        }
+    }
 
     pub fn OutputCpp(self: *Self, allocator: std.mem.Allocator, writer: *const std.fs.File.Writer) !void
     {
@@ -224,9 +282,9 @@ pub const StructData = struct
         {
             const func: *FunctionData = &self.ctors[i];
 
-            try writer.print("{s}::{s}({s})\n", .{self.name, self.name, func.paramsText});
+            try writer.print("{s}::{s}({s})\n", .{self.name.str(), self.name.str(), func.paramsText.str()});
             _ = try writer.write("{");
-            _ = try writer.write(func.bodyText);
+            _ = try writer.write(func.bodyText.str());
             _ = try writer.write("\n}\n");
         }
         
@@ -235,36 +293,29 @@ pub const StructData = struct
         {
             const func: *FunctionData = &self.methods[i];
 
-            //var funcFullName: string = try string.init_with_contents(allocator, self.name);
-            //try funcFullName.concat("::");
-            //try funcFullName.concat(func.name);
-
-            //var owned: []const u8 = (try funcFullName.toOwned()).?;
-
-            try writer.print("{s} {s}::{s}({s})\n", .{func.returnType, self.name, func.name, func.paramsText});
+            try writer.print("{s} {s}::{s}({s})\n", .{func.returnType.str(), self.name.str(), func.name.str(), func.paramsText.str()});
             _ = try writer.write("{");
-            _ = try writer.write(func.bodyText);
+            _ = try writer.write(func.bodyText.str());
             _ = try writer.write("\n}\n");
         }
         if (self.dtor != null)
         {
-            try writer.print("{s}::~{s}()\n", .{self.name, self.name});
+            try writer.print("{s}::~{s}()\n", .{self.name.str(), self.name.str()});
             _ = try writer.write("{");
-            _ = try writer.write(self.dtor.?.bodyText);
+            _ = try writer.write(self.dtor.?.bodyText.str());
             _ = try writer.write("\n}\n");
         }
     }
     pub fn OutputHeader(self: *Self, allocator: std.mem.Allocator, writer: *const std.fs.File.Writer) !void
     {
-        _ = allocator;
-        try writer.print("struct {s}\n", .{self.name});
+        try writer.print("struct {s}\n", .{self.name.str()});
         _ = try writer.write("{\n");
 
         var i: usize = 0;
         while (i < self.fields.len) : (i += 1)
         {
             const field: *FieldData = &self.fields[i];
-            try writer.print("   {s} {s};\n", .{field.type, field.name});
+            try writer.print("   {s} {s};\n", .{field.type.str(), field.name.str()});
         }
 
         _ = try writer.write("\n");
@@ -281,7 +332,7 @@ pub const StructData = struct
 
             var tokenizer: std.c.Tokenizer = std.c.Tokenizer
             {
-                .buffer = func.paramsText
+                .buffer = func.paramsText.str()
             };
             while (true)
             {
@@ -307,20 +358,22 @@ pub const StructData = struct
                     }
                 }
             }
-            func.paramsText = func.paramsText[strStart..strEnd]; //set this so that the cpp outputter will have an easier job lataer
-            try writer.print("   {s}({s});\n", .{self.name, func.paramsText});
+            const newParamsText = try string.init_with_contents(allocator, func.paramsText.str()[strStart..strEnd]);
+            func.paramsText.deinit();
+            func.paramsText = newParamsText; //set this so that the cpp outputter will have an easier job lataer
+            try writer.print("   {s}({s});\n", .{self.name.str(), func.paramsText.str()});
         }
 
         i = 0;
         while (i < self.methods.len) : (i += 1)
         {
             const func: *FunctionData = &self.methods[i];
-            try writer.print("   {s} {s}({s});\n", .{func.returnType, func.name, func.paramsText});
+            try writer.print("   {s} {s}({s});\n", .{func.returnType.str(), func.name.str(), func.paramsText.str()});
         }
 
         if (self.dtor != null)
         {
-            try writer.print("   ~{s}();\n", .{self.name});
+            try writer.print("   ~{s}();\n", .{self.name.str()});
         }
 
         _ = try writer.write("};\n");
@@ -328,7 +381,7 @@ pub const StructData = struct
 
     pub fn Print(self: *Self) void
     {
-        std.debug.print("struct: {s}\n", .{self.name});
+        std.debug.print("struct: {s}\n", .{self.name.str()});
         var i: usize = 0;
         while (i < self.fields.len) : (i += 1)
         {
@@ -347,18 +400,4 @@ pub const StructData = struct
             self.ctors[i].Print();
         }
     }
-    // const Self = @This();
-    // var lastID: usize = 0;
-
-    // name: []const u8,
-    // ID: usize,
-
-    // pub fn init() Self {
-    //     lastID += 1;
-    //     return Self
-    //     {
-    //         .name = "",
-    //         .ID = lastID
-    //     };
-    // }
 };

@@ -1,0 +1,15 @@
+#include <Reflection.h>
+#include <Test.h>
+
+int main()
+{
+    Reflection::Type *type = typeof(StructA);
+    StructA instance = StructA(4);
+
+    int* variable = (int*)type->GetVariable("someMemory", &instance);
+    *variable = 5;
+
+    printf("{s}\n", *instance.someMemory);
+
+    return 0;
+}

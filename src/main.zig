@@ -3,72 +3,70 @@ const sysdata = @import("reflect-systems.zig");
 const structdata = @import("reflect-data.zig");
 const translator = @import("translator.zig");
 const string = @import("zig-string.zig").String;
+const project = @import("project.zig").project;
 
 pub const Errors = error
 {
     InsufficientArguments
 };
 
-pub fn ReadFile(path: []const u8, allocator: *const std.mem.Allocator) ![]const u8 {
-    var file = try std.fs.openFileAbsolute(path, .{});
-    defer file.close();
-
-    const fileStats = try file.stat();
-    const endpos: u64 = fileStats.size;
-
-    var result: [] u8 = try allocator.alloc(u8, endpos);
-    _ = try file.readAll(result);
-
-    return result;
+pub fn PathIsDir(path: []const u8) bool
+{
+    var dir = std.fs.openDirAbsolute(path, std.fs.Dir.OpenDirOptions{}) catch
+    {
+        return false;
+    };
+    dir.close();
+    return true;
 }
 
 pub fn main() !void {
-    var arenaAllocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-    var alloc = arenaAllocator.allocator();
-    defer arenaAllocator.deinit();
-    //defer arenaAllocator.deinit();
+    const args = try std.process.argsAlloc(std.heap.c_allocator);
+    defer std.process.argsFree(std.heap.c_allocator, args);
 
-    //const source: []const u8 = try ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/Test.linxc", &alloc);
-    //var outputPath: string = try string.init_with_contents(alloc, "C:/Users/Linus/source/repos/Linxc/Tests/Generated/Test");
-    //defer outputPath.deinit();
-
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
-
-    if (args.len != 3 and args.len != 2)
+    if (args.len != 3)// and args.len != 2)
     {
         return Errors.InsufficientArguments;
     }
 
-    var sourceData: []const u8 = try ReadFile(args[1], &alloc);
-    defer alloc.free(sourceData);
-    var destStr: string = undefined;
-    if (args.len == 3)
+    var sourcePath: []const u8 = args[1];
+
+    var destDirPath: string = try string.init_with_contents(std.heap.c_allocator, args[2]);
+    defer destDirPath.deinit();
+
+    if (PathIsDir(sourcePath)) //parsed folder
     {
-        destStr = try string.init_with_contents(alloc, args[2]);
+        var proj: project = project.init(std.heap.c_allocator, sourcePath);
+
+        try proj.GetFilesToParse();
+        try proj.Compile(destDirPath.str());
+
+        proj.deinit();
+        // var sourceData: []const u8 = try ReadFile(sourcePath, &std.heap.c_allocator);
+        // defer std.heap.c_allocator.free(sourceData);
+
+        // try destDirPath.concat(std.fs.path.stem(args[1]));
+
+        // var result = try translator.TranslateFile(std.heap.c_allocator, sourceData);
+        
+        // try result.OutputTo(std.heap.c_allocator, destDirPath);
+
+        // result.deinit();
     }
-    else 
+    else
     {
-        const stem = std.fs.path.stem(args[1]);
-        const dirname = std.fs.path.dirname(args[1]).?;
+        // var dir = try std.fs.openIterableDirAbsolute(sourcePath, std.fs.Dir.OpenDirOptions{});
+        // var walker = try dir.walk(std.heap.c_allocator);
+        // defer walker.deinit();
+        // while (try walker.next()) |entry| {
+        //     const extension: []const u8 = std.fs.path.extension(entry.path);
+        //     if (std.mem.eql(u8, extension, ".linxc"))
+        //     {
+                
+        //     }
+        //     //std.debug.print("{s}\n", .{entry.path});
+        // }
 
-        destStr = try string.init_with_contents(alloc, dirname);
-        try destStr.concat("/Generated/");
-
-        std.fs.makeDirAbsolute(destStr.buffer.?[0..destStr.size]) catch
-        {
-            
-        };
-
-        try destStr.concat(stem);
+        //dir.close();
     }
-    //const dest = destStr.buffer.?[0..destStr.size];
-
-    //std.debug.print("{s}", .{dest});
-
-    //const source: []const u8 = try ReadFile(args[0]);
-
-    try translator.TranslateFile(alloc, destStr, sourceData);//ParseFile(alloc, source);
-
-    //alloc.free(source);
 }

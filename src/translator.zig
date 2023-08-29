@@ -29,7 +29,7 @@ pub fn HasTag(tags: std.ArrayList(data.TagData), tag: []const u8) bool
     return false;
 }
 
-pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileContents: []const u8, tokenizer: *std.c.tokenizer.Tokenizer) !data.StructData
+pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileContents: []const u8, tokenizer: *std.c.tokenizer.Tokenizer) !data.StructData
 {
     var fields = std.ArrayList(data.FieldData).init(allocator);
     var methods = std.ArrayList(data.FunctionData).init(allocator);
@@ -62,7 +62,7 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
             .LParen => {
                 if (foundIdentifier != null) //reached a function
                 {
-                    var functionData = try ParseFunction(token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
+                    var functionData = try ParseFunction(allocator, token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
                     if (tags.items.len > 0)
                     {
                         var ownedSlice = try tags.toOwnedSlice();
@@ -87,9 +87,11 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                 {
                     if (foundTag != null and recordingStart != null)
                     {
+                        const tagArgs = try string.init_with_contents(allocator, fileContents[recordingStart.?..recordingEnd]);
+                        const tagName = try string.init_with_contents(allocator, foundTag.?);
                         try tags.append(data.TagData{
-                            .args = fileContents[recordingStart.?..recordingEnd],
-                            .name = foundTag.?
+                            .args = tagArgs,
+                            .name = tagName
                         });
                         foundTag = null;
                         recordingStart = null;
@@ -151,7 +153,7 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                         else if (std.mem.eql(u8, fileContents[recordingStart.?..recordingEnd], "struct"))
                         {
                             //nested struct
-                            const structData = try ParseStruct(foundIdentifier.?, allocator, fileContents, tokenizer);
+                            const structData = try ParseStruct(allocator, foundIdentifier.?, fileContents, tokenizer);
                             _ = structData;
                             //todo: See how we should implement nested structs (Probably by translation into _'d functions in C)
                             nextIsStatic = false;
@@ -169,7 +171,7 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                             if (token2.id == .LParen)
                             {
                                 var startparams = token2.end;
-                                var ctor = try ParseFunction(startparams, "", fileContents[token.start..token.end], fileContents, tokenizer);
+                                var ctor = try ParseFunction(allocator, startparams, "", fileContents[token.start..token.end], fileContents, tokenizer);
                                 if (tags.items.len > 0)
                                 {
                                     var ownedSlice = try tags.toOwnedSlice();
@@ -183,7 +185,6 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                                 return Errors.SyntaxError;
                             }
                         }
-                        //ParseFunction(token.end, functionReturnType: []const u8, functionName: []const u8, fileContents: []const u8, tokenizer: *std.c.tokenizer.Tokenizer)
                     }
                     else if (std.mem.eql(u8, fileContents[token.start..token.end], "DESTRUCTOR"))
                     {
@@ -197,7 +198,7 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                             if (token2.id == .LParen)
                             {
                                 var startparams = token2.end;
-                                destructor = try ParseFunction(startparams, "", fileContents[token.start..token.end], fileContents, tokenizer);
+                                destructor = try ParseFunction(allocator, startparams, "", fileContents[token.start..token.end], fileContents, tokenizer);
                                 if (tags.items.len > 0)
                                 {
                                     var ownedSlice = try tags.toOwnedSlice();
@@ -224,11 +225,13 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
                 {
                     if (foundIdentifier != null) //declaring a variable
                     {
+                        const nameStr: string = try string.init_with_contents(allocator, foundIdentifier.?);
+                        const typeStr: string = try string.init_with_contents(allocator, fileContents[recordingStart.?..recordingEnd]);
                         var fieldData = data.FieldData
                         {
                             .isStatic = nextIsStatic,
-                            .name = foundIdentifier.?,
-                            .type = fileContents[recordingStart.?..recordingEnd],
+                            .name = nameStr,
+                            .type = typeStr,
                             .tags = null
                         };
                         if (tags.items.len > 0)
@@ -258,10 +261,11 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
     const fieldsOwnedSlice = try fields.toOwnedSlice();
     const methodsOwnedSlice = try methods.toOwnedSlice();
     const ctorsOwnedSlice = try ctors.toOwnedSlice();
+    const name = try string.init_with_contents(allocator, structName);
     
     return data.StructData
     {
-        .name = structName,
+        .name = name,
         .fields = fieldsOwnedSlice,
         .methods = methodsOwnedSlice,
         .ctors = ctorsOwnedSlice,
@@ -270,7 +274,7 @@ pub fn ParseStruct(structName: []const u8, allocator: std.mem.Allocator, fileCon
     };
     //try filedata.structs.append(structData);
 }
-pub fn ParseFunction(startparams: usize, functionReturnType: []const u8, functionName: []const u8, fileContents: []const u8, tokenizer: *std.c.tokenizer.Tokenizer) !data.FunctionData
+pub fn ParseFunction(alloc: std.mem.Allocator, startparams: usize, functionReturnType: []const u8, functionName: []const u8, fileContents: []const u8, tokenizer: *std.c.tokenizer.Tokenizer) !data.FunctionData
 {
     var indents: i32 = 0;
     //by this point, we would have already parsed the starting parenthesis (
@@ -336,12 +340,17 @@ pub fn ParseFunction(startparams: usize, functionReturnType: []const u8, functio
         }
     }
 
+    const bodyText = try string.init_with_contents(alloc, fileContents[startfunction..endfunction]);
+    const paramsText = try string.init_with_contents(alloc, fileContents[startparams..endparams]);
+    const returnType = try string.init_with_contents(alloc, functionReturnType);
+    const funcName = try string.init_with_contents(alloc, functionName);
+
     return data.FunctionData
     {
-        .bodyText = fileContents[startfunction..endfunction],
-        .paramsText = fileContents[startparams..endparams],
-        .name = functionName,
-        .returnType = functionReturnType,
+        .bodyText = bodyText,
+        .paramsText = paramsText,
+        .name = funcName,
+        .returnType = returnType,
         .isStatic = false,
         .tags = null
     };
@@ -381,7 +390,7 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
             },
             .MacroString => 
             {
-                const tokenString: []const u8 = fileContents[token.start..token.end];
+                const tokenString: string = try string.init_with_contents(allocator, fileContents[token.start..token.end]);
                 //std.debug.print("includes {s}\n", .{tokenString});
                 try filedata.includeDirs.append(tokenString);
             },
@@ -409,7 +418,7 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
                             
                             if (std.mem.eql(u8, fileContents[recordingStart.?..recordingEnd], "struct"))
                             {
-                                var structData = try ParseStruct(foundIdentifier.?, allocator, fileContents, tokenizer);
+                                var structData = try ParseStruct(allocator, foundIdentifier.?, fileContents, tokenizer);
                                 if (tags.items.len > 0)
                                 {
                                     var ownedSlice = try tags.toOwnedSlice();
@@ -437,7 +446,8 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
                             else if (token2.id == .RParen)
                             {
                                 recordingEnd = token2.start;
-                                filedata.namespace = fileContents[recordingStart.?..recordingEnd];
+                                const namespaceString: string = try string.init_with_contents(allocator, fileContents[recordingStart.?..recordingEnd]);
+                                filedata.namespace = namespaceString;
 
                                 recordingStart = null;
                                 recordingEnd = 0;
@@ -462,7 +472,7 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
                 {
                     if (foundIdentifier != null) //reached a function
                     {
-                        var functionData = try ParseFunction(token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
+                        var functionData = try ParseFunction(allocator, token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
                         if (tags.items.len > 0)
                         {
                             var ownedSlice = try tags.toOwnedSlice();
@@ -486,9 +496,11 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
                 {
                     if (foundTag != null and recordingStart != null)
                     {
+                        const tagArgs = try string.init_with_contents(allocator, fileContents[recordingStart.?..recordingEnd]);
+                        const tagName = try string.init_with_contents(allocator, foundTag.?);
                         try tags.append(data.TagData{
-                            .args = fileContents[recordingStart.?..recordingEnd],
-                            .name = foundTag.?
+                            .args = tagArgs,
+                            .name = tagName
                         });
                         foundTag = null;
                         recordingStart = null;
@@ -511,17 +523,17 @@ pub fn ParseRoot(allocator: std.mem.Allocator, filedata: *data.FileData, fileCon
         }
     }
 }
-pub fn TranslateFile(allocator: std.mem.Allocator, outputPath: string, fileContents: []const u8) !void
+pub fn TranslateFile(allocator: std.mem.Allocator, fileContents: []const u8) !data.FileData
 {
-    var tokenizer = std.c.Tokenizer{
+    var tokenizer = std.c.Tokenizer {
         .buffer = fileContents
     };
 
     var filedata = data.FileData.init(allocator);
-    defer filedata.deinit();
 
     try ParseRoot(allocator, &filedata, fileContents, &tokenizer);
 
+    return filedata;
     // var i: usize = 0;
 
     // while (i < filedata.includeDirs.items.len) : (i += 1)
@@ -544,7 +556,7 @@ pub fn TranslateFile(allocator: std.mem.Allocator, outputPath: string, fileConte
     //     structData.Print();
     // }
 
-    std.debug.print("WRITING TO DISK\n", .{});
+    //std.debug.print("WRITING TO DISK\n", .{});
 
-    try filedata.OutputTo(allocator, outputPath);
+    //try filedata.OutputTo(allocator, outputPath);
 }

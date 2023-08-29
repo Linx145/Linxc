@@ -5,4 +5,4 @@ zig-out/
 /build/
 /build-*/
 /docgen_tmp/
-Tests/Generated/
+linxc-out
