@@ -9,6 +9,7 @@ pub const FileData = struct
     functions: std.ArrayList(FunctionData),
     structs: std.ArrayList(StructData),
     namespace: ?string,
+    headerName: ?string,
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self 
@@ -16,7 +17,8 @@ pub const FileData = struct
             .includeDirs = std.ArrayList(string).init(allocator),
             .functions = std.ArrayList(FunctionData).init(allocator),
             .structs = std.ArrayList(StructData).init(allocator),
-            .namespace = null
+            .namespace = null,
+            .headerName = null
         };
     }
     pub fn deinit(self: *Self) void {
@@ -27,19 +29,21 @@ pub const FileData = struct
         self.includeDirs.deinit();
     }
 
-    pub fn OutputTo(self: *Self, allocator: std.mem.Allocator, fileWithoutExtension: string) !void
+    pub fn OutputTo(self: *Self, allocator: std.mem.Allocator, fileWithoutExtension: string, rootPath: []const u8) !void
     {
         var headerPath = try fileWithoutExtension.clone();
         try headerPath.concat(".h");
         defer headerPath.deinit();
 
-        var headerName = try string.init_with_contents(allocator, std.fs.path.basename(fileWithoutExtension.str()));
-        try headerName.concat(".h");
-        defer headerName.deinit();
-
         var filePath = try fileWithoutExtension.clone();
         try filePath.concat(".cpp");
         defer filePath.deinit();
+
+        var headerName = string.init(allocator);
+        const relative = try std.fs.path.relative(allocator, rootPath, fileWithoutExtension.str());
+        try headerName.concat(relative);
+        try headerName.concat(".h");
+        self.headerName = headerName;
 
         //header file
         {
@@ -377,6 +381,27 @@ pub const StructData = struct
         }
 
         _ = try writer.write("};\n");
+    }
+    pub fn OutputReflection(self: *Self, writer: *std.fs.File.Writer, ID: *usize) !void
+    {
+        _ = try writer.write("{\n");
+        _ = try writer.write("   Reflection::Type type;\n");
+        try writer.print("   type.ID = {d};\n", .{ID.*});
+        try writer.print("   type.name = \"{s}\";\n", .{self.name.str()});
+        for (self.fields) |field|
+        {
+            if (!field.isStatic)
+            {
+                try writer.print("   type.variables[\"{s}\"]", .{field.name.str()});
+                _ = try writer.write(" = [](void *instance) -> void * { return &((");
+                try writer.print("{s}*)instance)->{s};", .{self.name.str(), field.name.str()});
+                _ = try writer.write(" };\n");
+            }
+        }
+        try writer.print("   Typeof<{s}>::type = type;\n", .{self.name.str()});
+        _ = try writer.write("}\n");
+
+        ID.* += 1;
     }
 
     pub fn Print(self: *Self) void

@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "Debug",
+            "program": "${workspaceFolder}/linxc-out/bin/Debug/Test.exe",
+            "args": [""],
+            "cwd": "${workspaceFolder}",
+            
+        }
+    ]
+}

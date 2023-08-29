@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "*.linxc": "cpp",
-        "unordered_map": "cpp"
+        "unordered_map": "cpp",
+        "vector": "cpp"
     }
 }

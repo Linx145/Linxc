@@ -1,6 +1,6 @@
 const std = @import("std");
 const string = @import("zig-string.zig").String;
-const structdata = @import("reflect-data.zig");
+const data = @import("reflect-data.zig");
 const translator = @import("translator.zig");
 const io = @import("io.zig");
 
@@ -9,7 +9,9 @@ const StringList = std.ArrayList(string);
 pub const project = struct {
     const Self = @This();
     linxcFiles: StringList,
+    compiledFiles: std.ArrayList(data.FileData),
     allocator: std.mem.Allocator,
+    outputPath: ?[]const u8,
     rootPath: []const u8,
 
     pub fn init(allocator: std.mem.Allocator, pathToProjFolder: []const u8) Self
@@ -22,6 +24,8 @@ pub const project = struct {
 
         return Self
         {
+            .outputPath = null,
+            .compiledFiles = std.ArrayList(data.FileData).init(allocator),
             .rootPath = rootPath,
             .allocator = allocator,
             .linxcFiles = StringList.init(allocator)
@@ -34,7 +38,13 @@ pub const project = struct {
         {
             self.linxcFiles.items[i].deinit();
         }
+        i = 0;
+        while (i < self.compiledFiles.items.len) : (i += 1)
+        {
+            self.compiledFiles.items[i].deinit();
+        }
         self.linxcFiles.deinit();
+        self.compiledFiles.deinit();
     }
 
     pub fn GetFilesToParse(self: *Self) !void
@@ -60,7 +70,6 @@ pub const project = struct {
 
     pub fn Compile(self: *Self, outputPath: []const u8) !void
     {
-
         //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
         //let outputPath be "C:\Users\Linus\source\repos\Linxc\linxc-out"
         var i: usize = 0;
@@ -94,9 +103,51 @@ pub const project = struct {
             
             var fileData = try translator.TranslateFile(self.allocator, fileContents);
         
-            try fileData.OutputTo(self.allocator, newFilePath);
+            try fileData.OutputTo(self.allocator, newFilePath, outputPath);
 
-            fileData.deinit();
+            try self.compiledFiles.append(fileData);
+            //fileData.deinit();
         }
+        self.outputPath = outputPath;
+    }
+    pub fn Reflect(self: *Self, outputFile: []const u8) !void
+    {
+        var i: usize = 0;
+        std.debug.print("Writing to {s}\n", .{outputFile});
+        var lastTypeID: usize = 0;
+
+        var cppFile: std.fs.File = try std.fs.createFileAbsolute(outputFile, .{.truncate = true});
+        var writer = cppFile.writer();
+
+        _ = try writer.write("#include <Reflection.h>\n");
+
+        while (i < self.compiledFiles.items.len) : (i += 1)
+        {
+            const compiled: *data.FileData = &self.compiledFiles.items[i];
+            try writer.print("#include <{s}>\n", .{compiled.headerName.?.str()});
+        }
+
+        _ = try writer.write("\n");
+        _ = try writer.write("namespace Reflection\n");
+        _ = try writer.write("{\n\n");
+        _ = try writer.write("void initReflection()\n");
+        _ = try writer.write("{\n");
+
+        i = 0;
+        while (i < self.compiledFiles.items.len) : (i += 1)
+        {
+            const compiled: *data.FileData = &self.compiledFiles.items[i];
+
+            var j: usize = 0;
+            while (j < compiled.structs.items.len) : (j += 1)
+            {
+                const structData: *data.StructData = &compiled.structs.items[j];
+                try structData.OutputReflection(&writer, &lastTypeID);
+            }
+        }
+
+        _ = try writer.write("}\n");
+        _ = try writer.write("}\n");
+        cppFile.close();
     }
 };

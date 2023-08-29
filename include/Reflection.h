@@ -2,11 +2,29 @@
 #include <stdint.h>
 #include <unordered_map>
 #include <string>
+#include <vector>
 
 #define typeof(T) &Reflection::Typeof<T>::type;
 
 namespace Reflection
 {
+    void initReflection();
+
+    struct Type
+    {
+        uint32_t ID;
+        std::string name;
+
+        //variables.push_back([](void *instance) -> void * { return &((Type*)instance)->ID; });
+
+        std::unordered_map<std::string, void *(*)(void *)> variables;
+
+        inline void *GetVariable(std::string name, void *instance)
+        {
+            return variables[name](instance);
+        }
+    };
+
     struct Database
     {
         //to be filled in by Linxc compiler
@@ -22,22 +40,6 @@ namespace Reflection
     struct Typeof
     {
         static Type type;
-    };
-
-    struct Type
-    {
-        uint32_t ID;
-        std::string name;
-
-        std::unordered_map<std::string, uint32_t> nameToVariable;
-        void *(**variables)(void *);
-        uint32_t numVariables;
-
-        inline void *GetVariable(std::string name, void *instance)
-        {
-            uint32_t index = nameToVariable[name];
-            return variables[index](instance);
-        }
     };
 }
 

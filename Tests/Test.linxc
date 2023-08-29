@@ -3,7 +3,7 @@
 
 struct StructA
 {
-    static int integer;
+    int integer;
     bool boolean;
     float floatingPoint;
     int *someMemory;

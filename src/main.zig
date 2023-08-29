@@ -41,32 +41,14 @@ pub fn main() !void {
         try proj.GetFilesToParse();
         try proj.Compile(destDirPath.str());
 
+        var destReflPath: string = try destDirPath.clone();
+        defer destReflPath.deinit();
+        try destReflPath.concat("/Reflected.gen.cpp");
+        try proj.Reflect(destReflPath.str());
+
         proj.deinit();
-        // var sourceData: []const u8 = try ReadFile(sourcePath, &std.heap.c_allocator);
-        // defer std.heap.c_allocator.free(sourceData);
-
-        // try destDirPath.concat(std.fs.path.stem(args[1]));
-
-        // var result = try translator.TranslateFile(std.heap.c_allocator, sourceData);
-        
-        // try result.OutputTo(std.heap.c_allocator, destDirPath);
-
-        // result.deinit();
     }
     else
     {
-        // var dir = try std.fs.openIterableDirAbsolute(sourcePath, std.fs.Dir.OpenDirOptions{});
-        // var walker = try dir.walk(std.heap.c_allocator);
-        // defer walker.deinit();
-        // while (try walker.next()) |entry| {
-        //     const extension: []const u8 = std.fs.path.extension(entry.path);
-        //     if (std.mem.eql(u8, extension, ".linxc"))
-        //     {
-                
-        //     }
-        //     //std.debug.print("{s}\n", .{entry.path});
-        // }
-
-        //dir.close();
     }
 }
