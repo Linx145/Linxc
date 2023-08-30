@@ -4,13 +4,6 @@ const string = @import("zig-string.zig").String;
 
 //const ActionStack = std.ArrayList(fn(tokenizer: std.c.Tokenizer) void);
 
-pub const ParsingTypeID = enum {
-    Searching,
-    DetectedDeclaration,
-    FunctionParams,
-    FunctionBody,
-    Structure
-};
 pub const Errors = error {
     SyntaxError,
     RepeatIdentifierError,
@@ -61,20 +54,45 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
             .LineComment, .MultiLineComment => continue,
             .LParen => 
             {
-                if (foundIdentifier != null) //reached a function
+                if (foundIdentifier != null) //reached either a function or function pointer
                 {
-                    var functionData = try ParseFunction(allocator, token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
-                    if (tags.items.len > 0)
+                    //if function, we will hit a { right after the ), otherwise, it's a function pointer
+                    const originalPos = tokenizer.index;
+                    while (true)
                     {
-                        var ownedSlice = try tags.toOwnedSlice();
-                        functionData.tags = ownedSlice;
+                        const token2 = tokenizer.next();
+
+                        if (token2.id == .Eof)
+                        {
+                            return Errors.SyntaxError;
+                        }
+                        else if (token2.id == .Semicolon) //it's a function pointer
+                        {
+                            tokenizer.index = originalPos;
+
+                            
+                            break;
+                        }
+                        else if (token2.id == .LBrace) //it's a method
+                        {
+                            tokenizer.index = originalPos;
+
+                            var functionData = try ParseFunction(allocator, token.end, fileContents[recordingStart.?..recordingEnd], foundIdentifier.?, fileContents, tokenizer);
+                            if (tags.items.len > 0)
+                            {
+                                var ownedSlice = try tags.toOwnedSlice();
+                                functionData.tags = ownedSlice;
+                            }
+                            functionData.isStatic = nextIsStatic;
+                            try methods.append(functionData);
+                            nextIsStatic = false;
+                            foundIdentifier = null;
+                            recordingStart = null;
+                            recordingEnd = 0;
+                            break;
+                        }
                     }
-                    functionData.isStatic = nextIsStatic;
-                    try methods.append(functionData);
-                    nextIsStatic = false;
-                    foundIdentifier = null;
-                    recordingStart = null;
-                    recordingEnd = 0;
+
                 }
                 else if (foundTag != null)
                 {
@@ -152,6 +170,10 @@ pub fn ParseStruct(allocator: std.mem.Allocator, structName: []const u8, fileCon
                         if (std.mem.eql(u8, foundIdentifier.?, "bool"))
                         {
                             foundIdentifier = null; //if we hit the 'bool' identifier, we did not indeed find an identifier
+                        }
+                        else if (std.mem.eql(u8, foundIdentifier.?, "func"))
+                        {
+
                         }
                         else if (std.mem.eql(u8, fileContents[recordingStart.?..recordingEnd], "struct"))
                         {

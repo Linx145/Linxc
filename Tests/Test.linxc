@@ -6,28 +6,22 @@ struct StructA
     int integer;
     bool boolean;
     static float floatingPoint;
-    int *someMemory;
+    void (*functionPointer)(int);
 
     CONSTRUCTOR(StructA, int i)
     {
-        someMemory = (int*)malloc(sizeof(int));
-        *someMemory = i;
+        integer = i;
         boolean = true;
         floatingPoint = 0.2f;
     }
     CONSTRUCTOR(StructA)
     {
-        someMemory = nullptr;
         integer = 0;
         boolean = false;
         floatingPoint = 0.0f;
     }
     DESTRUCTOR(StructA)
     {
-        if (someMemory != nullptr)
-        {
-            free(someMemory);
-        }
     }
 
     void ManipulateData(int integerIncrement)

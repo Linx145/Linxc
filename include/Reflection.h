@@ -18,6 +18,7 @@ namespace Reflection
         //variables.push_back([](void *instance) -> void * { return &((Type*)instance)->ID; });
 
         std::unordered_map<std::string, void *(*)(void *)> variables;
+        std::unordered_map<std::string, void *> functions;
 
         inline void *GetVariable(std::string name, void *instance)
         {
