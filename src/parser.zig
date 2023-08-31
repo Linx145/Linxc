@@ -47,12 +47,16 @@ pub const Parser = struct {
         self.result.deinit();
         for (self.expressionListPool.pool.items) |*expressionList|
         {
-            var node = expressionList.first;
-            while (node != null)
+            for (expressionList.unlinkedList.items) |*node|
             {
-                node.?.data.deinit(self.allocator);
-                node = node.?.next;
+                node.data.deinit(self.allocator);
             }
+            // var node = expressionList.first;
+            // while (node != null)
+            // {
+            //     node.?.data.deinit(self.allocator);
+            //     node = node.?.next;
+            // }
             expressionList.deinit();
         }
         self.expressionListPool.deinit();
@@ -60,7 +64,7 @@ pub const Parser = struct {
 
     pub fn WriteError(self: *Self, message: []const u8) !string
     {
-        var err: string = string.init(self.allocator);
+        var err: string = try self.stringPool.Rent();//(self.allocator);
         try err.concat(message);
         try err.concat("\n");
         //var formatted: u8 = try std.fmt.allocPrint(self.allocator, "{d}", .{});
@@ -312,6 +316,15 @@ pub const Parser = struct {
 
         return newNode;
     }
+    pub inline fn ReturnExpressionList(self: *Self, expressionList: *LinkedList) !void
+    {
+        for (expressionList.unlinkedList.items) |*item|
+        {
+            item.data.deinit(self.allocator);
+        }
+        expressionList.clear();
+        try self.expressionListPool.Return(expressionList.*);
+    }
     pub fn ParseExpression(self: *Self, openParentheses: i32) !ExpressionData
     {
         var expressionList = try self.expressionListPool.Rent();
@@ -335,6 +348,7 @@ pub const Parser = struct {
                 .Eof =>
                 {
                     var err = try self.WriteError("Syntax Error: Expected expression, but reached end of file!");
+                    try self.ReturnExpressionList(&expressionList);
                     try self.errorStatements.append(err);
                     return Errors.SyntaxError;
                 },
@@ -347,17 +361,65 @@ pub const Parser = struct {
                     else
                     {
                         var err = try self.WriteError("Syntax Error: Open parenthesis is not closed");
+                        try self.ReturnExpressionList(&expressionList);
                         try self.errorStatements.append(err);
                         return Errors.SyntaxError;
                     }
                 },
+                .Minus =>
+                {
+                    //if operator is connected to right and not left and right is identifier or literal, token is identifier/literal
+                    const next = self.peekNext();
+
+                    if ((token.start == 0 or self.tokenizer.buffer[token.start - 1] == ' ') and (token.end != self.tokenizer.buffer.len and self.tokenizer.buffer[token.end] != ' '))
+                    {
+                        if (next.id == .Identifier)
+                        {
+                            _ = self.tokenizer.next();
+                            var str = try string.init_with_contents(self.allocator, "-");
+                            try str.concat(self.SourceTokenSlice(next));
+                            _ = try expressionList.append(ExpressionData
+                            {
+                                .Variable = str
+                            });
+                            numIdentifiersAndLiterals += 1;
+                        }
+                        else if (next.id == .IntegerLiteral or next.id == .FloatLiteral)
+                        {
+                            _ = self.tokenizer.next();
+                            var str = try string.init_with_contents(self.allocator, "-");
+                            try str.concat(self.SourceTokenSlice(next));
+                            _ = try expressionList.append(ExpressionData
+                            {
+                                .Literal = str
+                            });
+                            numIdentifiersAndLiterals += 1;
+                        }
+                        else 
+                        {
+                            _ = try expressionList.append(ExpressionData
+                            {
+                                .IncompleteOp = Operator.Minus
+                            });
+                            numOperators += 1;
+                        }
+                    }
+                    else 
+                    {
+                        _ = try expressionList.append(ExpressionData
+                        {
+                            .IncompleteOp = Operator.Minus
+                        });
+                        numOperators += 1;
+                    }
+                },
                 .Asterisk =>
                 {
-                    //if operator is connected to right and right is identifier, token is identifier
+                    //if operator is connected to right and not left and right is identifier, token is identifier
 
                     const next = self.peekNext();
 
-                    if (next.id == .Identifier and (token.end != self.tokenizer.buffer.len and self.tokenizer.buffer[token.end] != ' '))
+                    if ((token.start == 0 or self.tokenizer.buffer[token.start - 1] == ' ') and next.id == .Identifier and (token.end != self.tokenizer.buffer.len and self.tokenizer.buffer[token.end] != ' '))
                     {
                         //ignore next token as we are processing it right now
                         _ = self.tokenizer.next();
@@ -445,6 +507,7 @@ pub const Parser = struct {
             else
             {
                 const errorStr = try self.WriteError("Syntax Error: invalid expression ");
+                try self.ReturnExpressionList(&expressionList);
                 try self.errorStatements.append(errorStr);
                 return Errors.SyntaxError;
             }
@@ -452,6 +515,7 @@ pub const Parser = struct {
         if (numIdentifiersAndLiterals != numOperators + 1)
         {
             const str = try self.WriteError("Syntax Error: Stray operator ");
+            try self.ReturnExpressionList(&expressionList);
             try self.errorStatements.append(str);
             return Errors.SyntaxError;
         }
@@ -516,38 +580,56 @@ pub const Parser = struct {
         {
             const errorStr = try self.WriteError("Syntax Error: invalid expression ");
             try self.errorStatements.append(errorStr);
-            expressionList.clear();
-            try self.expressionListPool.Return(expressionList);
+            try self.ReturnExpressionList(&expressionList);
             return Errors.SyntaxError;
         }
     }
 };
 
-test "expression parsing"
+pub fn TestExpressionParsing() !void
 {
-    const buffer: []const u8 = "1 + 2 * 3;";
+    const buffer: []const u8 = "a;";//*b-c/d;";
+    var arenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+    defer arenaAllocator.deinit();
+    var alloc = arenaAllocator.allocator();
+
     var tokenizer: lexer.Tokenizer = lexer.Tokenizer
     {
         .buffer = buffer
     };
-    var parser: Parser = try Parser.init(std.testing.allocator, tokenizer);
+    var parser: Parser = try Parser.init(alloc, tokenizer);
     std.debug.print("\n", .{});
 
-    var expr = parser.ParseExpression(0) catch
+    var timer = try std.time.Timer.start();
+    
+    var i: usize = 0;
+    while (i < 100000) : (i += 1)
     {
-        for (parser.errorStatements.items) |errorStatement|
+        parser.tokenizer.index = 0;
+        _ = parser.ParseExpression(0) catch
         {
-            std.debug.print("Caught error:\n   {s}\n", .{errorStatement.str()});
-        }
-        parser.deinit();
-        return;
-    };
-    var str = try expr.ToString(std.testing.allocator);
-    std.debug.print("{s}\n", .{str.str()});
-    str.deinit();
-    expr.deinit(std.testing.allocator);
+            for (parser.errorStatements.items) |errorStatement|
+            {
+                std.debug.print("Caught error:\n   {s}\n", .{errorStatement.str()});
+            }
+            parser.deinit();
+            return;
+        };
+    }
+
+    var ms: f32 = @intToFloat(f32, timer.read()) / 1000000.0;
+    std.debug.print("{d}\n", .{ms});
+    //var str = try expr.ToString(alloc);
+    //std.debug.print("{s}\n", .{str.str()});
+    //str.deinit();
+    //expr.deinit(alloc);
 
     parser.deinit();
+}
+
+test "expression parsing"
+{
+    try TestExpressionParsing();
 }
 
 // (isConst? const : ) typeName name

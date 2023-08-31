@@ -85,10 +85,12 @@ pub const String = struct {
         // If the index is >= len, then simply push to the end.
         // If not, then copy contents over and insert literal.
         if (index == self.len()) {
-            var i: usize = 0;
-            while (i < literal.len) : (i += 1) {
-                buffer[self.size + i] = literal[i];
-            }
+            const extents: usize = self.size + literal.len;
+            @memcpy(buffer[self.size..extents], literal);
+            //var i: usize = 0;
+            // while (i < literal.len) : (i += 1) {
+            //     buffer[self.size + i] = literal[i];
+            // }
         } else {
             if (String.getIndex(buffer, index, true)) |k| {
                 // Move existing contents over
