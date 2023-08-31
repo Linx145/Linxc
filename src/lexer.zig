@@ -64,6 +64,8 @@ pub const TokenID = union(enum)
     Hash,
     HashHash,
 
+    Keyword_true,
+    Keyword_false,
     Keyword_auto,
     Keyword_break,
     Keyword_case,
@@ -190,6 +192,8 @@ pub const TokenID = union(enum)
             .Tilde => "~",
             .Hash => "#",
             .HashHash => "##",
+            .Keyword_true => "true",
+            .Keyword_false => "false",
             .Keyword_auto => "auto",
             .Keyword_break => "break",
             .Keyword_case => "case",
@@ -244,6 +248,8 @@ pub const TokenID = union(enum)
     }
 
     pub const keywords = std.ComptimeStringMap(TokenID, .{
+        .{ "true", .Keyword_true },
+        .{ "false", .Keyword_false },
         .{ "auto", .Keyword_auto },
         .{ "break", .Keyword_break },
         .{ "case", .Keyword_case },

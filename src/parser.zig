@@ -274,13 +274,21 @@ pub const Parser = struct {
     {
         switch (ID)
         {
-            .Asterisk, .Slash =>
+            .Asterisk, .Slash, .Percent =>
+            {
+                return 3;
+            },
+            .Plus, .Minus, .Ampersand, .Caret, .Tilde, .Pipe, .AngleBracketAngleBracketLeft, .AngleBracketAngleBracketRight =>
             {
                 return 2;
             },
-            .Plus, .Minus =>
+            .AmpersandAmpersand =>
             {
                 return 1;
+            },
+            .PipePipe, .BangEqual, .EqualEqual =>
+            {
+                return 0;
             },
             else =>
             {
@@ -341,6 +349,34 @@ pub const Parser = struct {
                 const nextToken = self.peekNext();
                 //if (nextToken.id == .IntegerLiteral or nextToken.id == .StringLiteral or nextToken.id == .FloatLiteral or nextToken.id == .CharLiteral)
                 if (nextToken.id == .Identifier)
+                {
+                    _ = self.tokenizer.next();
+                    return ExpressionData
+                    {
+                        .Variable = self.tokenizer.buffer[token.start..nextToken.end]
+                    };
+                }
+                else
+                {
+                    return Errors.SyntaxError;
+                }
+            }
+            else return Errors.SyntaxError;
+        }
+        else if (token.id == .Bang)
+        {
+            if (self.tokenizer.buffer[token.end] != ' ')
+            {
+                const nextToken = self.peekNext();
+                if (nextToken.id == .Keyword_true or nextToken.id == .Keyword_false)
+                {
+                    _ = self.tokenizer.next();
+                    return ExpressionData
+                    {
+                        .Literal = self.tokenizer.buffer[token.start..nextToken.end]
+                    };
+                }
+                else if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
                     return ExpressionData
@@ -421,7 +457,7 @@ pub const Parser = struct {
 
 pub fn TestExpressionParsing() !void
 {
-    const buffer: []const u8 = "a*((b-*c)/d);";
+    const buffer: []const u8 = "a || (!c && b) || !true;";//"a*((b-*c)/d);";
     //var arenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     //defer arenaAllocator.deinit();
     var alloc = std.testing.allocator;//alloc = arenaAllocator.allocator();
@@ -553,20 +589,14 @@ pub const FunctionData = struct
 pub const ExpressionDataTag = enum
 {
     Literal,
-    NotLiteral,
     Variable,
-    NotVariable,
-    Op,
-    IncompleteOp
+    Op
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
-    Literal: []const u8, //true
-    NotLiteral: []const u8, // !true, should raise warning
-    Variable: []const u8, //variableName
-    NotVariable: []const u8, // !variableName
-    Op: *OperatorData, //A == 0
-    IncompleteOp: Operator,
+    Literal: []const u8,
+    Variable: []const u8,
+    Op: *OperatorData,
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
@@ -590,15 +620,7 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 try str.concat(literal);
             },
-            ExpressionDataTag.NotLiteral => |literal|
-            {
-                try str.concat(literal);
-            },
             ExpressionDataTag.Variable => |literal|
-            {
-                try str.concat(literal);
-            },
-            ExpressionDataTag.NotVariable => |literal|
             {
                 try str.concat(literal);
             },
@@ -606,8 +628,7 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 str.deinit();
                 return op.ToString(allocator);
-            },
-            ExpressionDataTag.IncompleteOp => |op| try str.concat(@tagName(op))
+            }
         }
         return str;
     }
