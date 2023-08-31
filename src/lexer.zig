@@ -351,7 +351,7 @@ pub const Tokenizer = struct {
     prev_tok_id: std.meta.Tag(TokenID) = .Invalid,
     pp_directive: bool = false,
 
-    pub fn next(self: *Tokenizer) Token 
+    pub fn next(self: *@This()) Token 
     {
         var result = Token
         {
@@ -1312,16 +1312,6 @@ pub const Tokenizer = struct {
 
         self.prev_tok_id = result.id;
         result.end = self.index;
-        return result;
-    }
-    pub fn peekNext(self: *Tokenizer) Token
-    {
-        const currentIndex = self.index;
-
-        const result = self.next();
-
-        self.index = currentIndex;
-
         return result;
     }
 };

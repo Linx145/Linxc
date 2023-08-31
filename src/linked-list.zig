@@ -34,8 +34,11 @@ pub fn LinkedList(comptime T: type) type {
         }
         pub fn deinit(self: *Self) void
         {
-            self.unlinkedList.deinit();
-            self.emptyIndices.deinit();
+            self.first = null;
+            self.last = null;
+            self.len = 0;
+            self.unlinkedList.clearAndFree();
+            self.emptyIndices.clearAndFree();
         }
 
         /// Insert a new node after an existing one.
@@ -88,6 +91,13 @@ pub fn LinkedList(comptime T: type) type {
             list.len += 1;
 
             return new_node;
+        }
+        pub inline fn clear(list: *Self) void {
+            list.first = null;
+            list.last = null;
+            list.len = 0;
+            list.unlinkedList.clearRetainingCapacity();
+            list.emptyIndices.clearRetainingCapacity();
         }
 
         /// Insert a new node at the end of the list.

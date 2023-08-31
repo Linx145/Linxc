@@ -2,11 +2,19 @@ const std = @import("std");
 const string = @import("zig-string.zig").String;
 const lexer = @import("lexer.zig");
 const linkedLists = @import("linked-list.zig");
+const objPool = @import("object-pool.zig");
+const exprPool = objPool.ObjectPool(linkedLists.LinkedList(ExpressionData));
 
 pub const Errors = error
 {
     SyntaxError
 };
+
+pub fn generateNewExpressionList(allocator: std.mem.Allocator) objPool.Errors!linkedLists.LinkedList(ExpressionData)
+{
+    var result = linkedLists.LinkedList(ExpressionData).init(allocator);
+    return result;
+}
 
 pub const Parser = struct {
     pub const LinkedList = linkedLists.LinkedList(ExpressionData);
@@ -15,30 +23,39 @@ pub const Parser = struct {
     tokenizer: lexer.Tokenizer,
     result: CompoundStatementData,
     errorStatements: std.ArrayList(string),
-    expressionList: LinkedList,
+    expressionListPool: exprPool,
 
-    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) Self 
+    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
     {
+        var expressionListPool = exprPool.init(allocator, &generateNewExpressionList);
         return Self
         {
             .allocator = allocator,
             .tokenizer = tokenizer,
             .errorStatements = std.ArrayList(string).init(allocator),
             .result = CompoundStatementData.init(allocator),
-            .expressionList = LinkedList.init(allocator)
+            .expressionListPool = expressionListPool
         };
     }
     pub fn deinit(self: *Self) void
     {
+        for (self.errorStatements.items) |*errorStatement|
+        {
+            errorStatement.deinit();
+        }
         self.errorStatements.deinit();
         self.result.deinit();
-        var node = self.expressionList.first;
-        while (node != null)
+        for (self.expressionListPool.pool.items) |*expressionList|
         {
-            node.?.data.deinit();
-            node = node.?.next;
+            var node = expressionList.first;
+            while (node != null)
+            {
+                node.?.data.deinit(self.allocator);
+                node = node.?.next;
+            }
+            expressionList.deinit();
         }
-        self.expressionList.deinit();
+        self.expressionListPool.deinit();
     }
 
     pub fn WriteError(self: *Self, message: []const u8) !string
@@ -226,7 +243,7 @@ pub const Parser = struct {
                             {
                                 //is variable
 
-                                const expression: ExpressionData = try self.ParseExpression();
+                                const expression: ExpressionData = try self.ParseExpression(null);
                                 const varName = try string.init_with_contents(self.allocator, foundIdentifier.?);
                                 const typeName = try string.init_with_contents(self.allocator, self.SourceSlice(typeNameStart, typeNameEnd));
                                 const varData: VarData = VarData
@@ -252,18 +269,63 @@ pub const Parser = struct {
             }
         }
     }
-    pub fn ParseExpression(self: *Self, openParentheses: i32) !void
+    pub fn peekNext(self: *@This()) lexer.Token
     {
-        var nextNode: ?*LinkedList.Node = self.expressionList.first;
-        while (nextNode != null)
+        const currentIndex = self.tokenizer.index;
+
+        const result = self.tokenizer.next();
+
+        self.tokenizer.index = currentIndex;
+
+        return result;
+    }
+    pub fn CreateOperatorFrom(self: *Self, node: *LinkedList.Node, expressionList: *LinkedList) !*LinkedList.Node
+    {
+        if (node.prev == null or node.next == null)
         {
-            nextNode.?.data.deinit();
-            nextNode = nextNode.?.next;
+            const errorStr = try self.WriteError("Syntax Error: Operator is missing symbol either to the left or right ");
+            try self.errorStatements.append(errorStr);
+            return Errors.SyntaxError;
         }
-        self.expressionList.emptyIndices.clearRetainingCapacity();
-        self.expressionList.unlinkedList.clearRetainingCapacity();
+        const leftValue = node.prev.?.data;
+        const rightValue = node.next.?.data;
+
+        var opDataPtr = try self.allocator.create(OperatorData);
+        opDataPtr.leftExpression = leftValue;
+        opDataPtr.rightExpression = rightValue;
+        opDataPtr.operator = node.data.IncompleteOp;
+            // {
+            //     .leftExpression = leftValue,
+            //     .rightExpression = rightValue,
+            //     .operator = node.data.IncompleteOp
+            // };
+
+        const expr = ExpressionData
+        {
+            .Op = opDataPtr
+        };
+
+        const newNode = try expressionList.insertBefore(node.prev.?, expr);
+        try expressionList.remove(node.prev.?);
+        try expressionList.remove(node.next.?);
+        try expressionList.remove(node);
+
+        return newNode;
+    }
+    pub fn ParseExpression(self: *Self, openParentheses: i32) !ExpressionData
+    {
+        var expressionList = try self.expressionListPool.Rent();
+        var nextNode: ?*LinkedList.Node = null;
 
         var openParen: i32 = openParentheses;
+        if (openParentheses != 0)
+        {
+            openParen += 1;
+        }
+
+        //these can be used to return a syntax error early
+        var numIdentifiersAndLiterals: i32 = 0;
+        var numOperators: i32 = 0;
         
         while (true)
         {
@@ -291,13 +353,52 @@ pub const Parser = struct {
                 },
                 .Asterisk =>
                 {
-                    //self.tokenizer.peekNext();
                     //if operator is connected to right and right is identifier, token is identifier
 
+                    const next = self.peekNext();
+
+                    if (next.id == .Identifier and (token.end != self.tokenizer.buffer.len and self.tokenizer.buffer[token.end] != ' '))
+                    {
+                        //ignore next token as we are processing it right now
+                        _ = self.tokenizer.next();
+                        var str = try string.init_with_contents(self.allocator, "*");
+                        try str.concat(self.SourceTokenSlice(next));
+                        _ = try expressionList.append(ExpressionData
+                        {
+                            .Variable = str
+                        });
+                        numIdentifiersAndLiterals += 1;
+                    }
+                    else 
+                    {
+                        _ = try expressionList.append(ExpressionData
+                        {
+                            .IncompleteOp = Operator.Multiply
+                        });
+                        numOperators += 1;
+                    }
+                },
+                .Identifier =>
+                {
+                    var str = try string.init_with_contents(self.allocator, self.SourceTokenSlice(token));
+                    _ = try expressionList.append(ExpressionData
+                    {
+                        .Variable = str
+                    });
+                    numIdentifiersAndLiterals += 1;
                 },
                 .LParen =>
                 {
                     openParen += 1;
+                    const expr = try self.ParseExpression(openParen);
+
+                    // var debugStr = try expr.ToString(self.allocator);
+                    // defer debugStr.deinit();
+                    // std.debug.print("{s}\n", .{debugStr.str()});
+
+                    _ = try expressionList.append(expr);
+
+                    numIdentifiersAndLiterals += 1;
                 },
                 .RParen =>
                 {
@@ -307,50 +408,145 @@ pub const Parser = struct {
                         break;
                     }
                 },
-                .Minus =>
-                {
-
-                },
                 .StringLiteral, .CharLiteral, .IntegerLiteral, .FloatLiteral, =>
                 {
                     const str = try string.init_with_contents(self.allocator, self.SourceTokenSlice(token));
-                    _ = try self.expressionList.append(ExpressionData
+                    _ = try expressionList.append(ExpressionData
                     {
                         .Literal = str
                     });
+                    numIdentifiersAndLiterals += 1;
                     //var node: *LinkedList.Node = self.allocator.alloc(comptime T: type, n: usize)
                     //expressionList.append();
                 },
                 else =>
                 {
-
+                    const operator: ?Operator = TokenToOperator.get(@tagName(token.id));
+                    if (operator != null)
+                    {
+                        _ = try expressionList.append(ExpressionData
+                        {
+                            .IncompleteOp = operator.?
+                        });
+                        numOperators += 1;
+                    }
                 }
             }
+        }
+        if (numOperators == 0)
+        {
+            //return
+            if (expressionList.first != null)
+            {
+                const result = expressionList.first.?.data;
+                expressionList.clear();
+                return result;
+            }
+            else
+            {
+                const errorStr = try self.WriteError("Syntax Error: invalid expression ");
+                try self.errorStatements.append(errorStr);
+                return Errors.SyntaxError;
+            }
+        }
+        if (numIdentifiersAndLiterals != numOperators + 1)
+        {
+            const str = try self.WriteError("Syntax Error: Stray operator ");
+            try self.errorStatements.append(str);
+            return Errors.SyntaxError;
+        }
+
+        nextNode = expressionList.first;
+        while (nextNode != null)
+        {
+            switch (nextNode.?.data)
+            {
+                ExpressionDataTag.IncompleteOp => |op|
+                {
+                    if (op == Operator.Divide
+                    or op == Operator.Multiply
+                    or op == Operator.Modulo
+                    or op == Operator.NotEquals //all boolean operators have equal precedence
+                    or op == Operator.Equals
+                        or op == Operator.And
+                        or op == Operator.LessThan
+                        or op == Operator.LessThanEquals
+                        or op == Operator.MoreThan
+                            or op == Operator.MoreThanEquals)
+                    {
+                        nextNode = try self.CreateOperatorFrom(nextNode.?, &expressionList);
+                    }
+                },
+                else => {}
+            }
+            nextNode = nextNode.?.next;
+        }
+        if (expressionList.len == 1)
+        {
+            const result = expressionList.first.?.data;
+            expressionList.clear();
+            try self.expressionListPool.Return(expressionList);
+            return result;
+        }
+
+        nextNode = expressionList.first;
+        while (nextNode != null)
+        {
+            switch (nextNode.?.data)
+            {
+                ExpressionDataTag.IncompleteOp => |op|
+                {
+                    if (op == Operator.Minus or op == Operator.Plus)
+                    {
+                        nextNode = try self.CreateOperatorFrom(nextNode.?, &expressionList);
+                    }
+                },
+                else => {}
+            }
+            nextNode = nextNode.?.next;
+        }
+        if (expressionList.len == 1)
+        {
+            const result = expressionList.first.?.data;
+            expressionList.clear();
+            try self.expressionListPool.Return(expressionList);
+            return result;
+        }
+        else
+        {
+            const errorStr = try self.WriteError("Syntax Error: invalid expression ");
+            try self.errorStatements.append(errorStr);
+            expressionList.clear();
+            try self.expressionListPool.Return(expressionList);
+            return Errors.SyntaxError;
         }
     }
 };
 
 test "expression parsing"
 {
-    const buffer: []const u8 = "1 + 1;";
+    const buffer: []const u8 = "1 + 2 * 3;";
     var tokenizer: lexer.Tokenizer = lexer.Tokenizer
     {
         .buffer = buffer
     };
-    var parser: Parser = Parser.init(std.testing.allocator, tokenizer);
+    var parser: Parser = try Parser.init(std.testing.allocator, tokenizer);
     std.debug.print("\n", .{});
-    try parser.ParseExpression(0);
 
-    var node: ?*Parser.LinkedList.Node = parser.expressionList.first;
-    while (node != null)
+    var expr = parser.ParseExpression(0) catch
     {
-        var str = try node.?.data.ToString(std.testing.allocator);
+        for (parser.errorStatements.items) |errorStatement|
+        {
+            std.debug.print("Caught error:\n   {s}\n", .{errorStatement.str()});
+        }
+        parser.deinit();
+        return;
+    };
+    var str = try expr.ToString(std.testing.allocator);
+    std.debug.print("{s}\n", .{str.str()});
+    str.deinit();
+    expr.deinit(std.testing.allocator);
 
-        std.debug.print("{s}\n", .{str.str()});
-        node = node.?.next;
-
-        str.deinit();
-    }
     parser.deinit();
 }
 
@@ -438,7 +634,8 @@ pub const ExpressionDataTag = enum
     NotLiteral,
     Variable,
     NotVariable,
-    Op
+    Op,
+    IncompleteOp
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
@@ -447,8 +644,9 @@ pub const ExpressionData = union(ExpressionDataTag)
     Variable: string, //variableName
     NotVariable: string, // !variableName
     Op: *OperatorData, //A == 0
+    IncompleteOp: Operator,
 
-    pub fn deinit(self: *@This()) void
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
         switch (self.*)
         {
@@ -456,24 +654,43 @@ pub const ExpressionData = union(ExpressionDataTag)
             ExpressionDataTag.NotLiteral => |*value| value.deinit(),
             ExpressionDataTag.Variable => |*value| value.deinit(),
             ExpressionDataTag.NotVariable => |*value| value.deinit(),
-            ExpressionDataTag.Op => |value| value.deinit()
+            ExpressionDataTag.Op => |*value|
+            {
+                
+                value.*.deinit(alloc);
+                alloc.destroy(value.*);
+            },
+            ExpressionDataTag.IncompleteOp => {}
         }
     }
 
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
+    pub fn ToString(self: @This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
-        switch (self.*)
+        switch (self)
         {
-            ExpressionDataTag.Literal => |literal| try str.concat(literal.str()),
-            ExpressionDataTag.NotLiteral => |literal| try str.concat(literal.str()),
-            ExpressionDataTag.Variable => |literal| try str.concat(literal.str()),
-            ExpressionDataTag.NotVariable => |literal| try str.concat(literal.str()),
+            ExpressionDataTag.Literal => |literal| 
+            {
+                try str.concat(literal.str());
+            },
+            ExpressionDataTag.NotLiteral => |literal|
+            {
+                try str.concat(literal.str());
+            },
+            ExpressionDataTag.Variable => |literal|
+            {
+                try str.concat(literal.str());
+            },
+            ExpressionDataTag.NotVariable => |literal|
+            {
+                try str.concat(literal.str());
+            },
             ExpressionDataTag.Op => |op| 
             {
                 str.deinit();
                 return op.ToString(allocator);
-            }
+            },
+            ExpressionDataTag.IncompleteOp => |op| try str.concat(@tagName(op))
         }
         return str;
     }
@@ -502,16 +719,38 @@ pub const Operator = enum
     RightShift, // >>
     BitwiseNot, // ~
 };
+pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
+    .{"Plus", Operator.Plus},
+    .{"Minus", Operator.Minus},
+    .{"Slash", Operator.Divide},
+    .{"Asterisk", Operator.Multiply},
+    .{"Bang", Operator.Not},
+    .{"EqualEqual", Operator.Equals},
+    .{"BangEqual", Operator.NotEquals},
+    .{"AngleBracketLeft", Operator.LessThan},
+    .{"AngleBracketLeftEqual", Operator.LessThanEquals},
+    .{"AngleBracketRight", Operator.MoreThan},
+    .{"AngleBracketRightEqual", Operator.MoreThanEquals},
+    .{"AmpersandAmpersand", Operator.And},
+    .{"PipePipe", Operator.Or},
+    .{"Percent", Operator.Modulo},
+    .{"Ampersand", Operator.BitwiseAnd},
+    .{"Pipe", Operator.BitwiseOr},
+    .{"Caret", Operator.BitwiseXOr},
+    .{"AngleBracketAngleBracketLeft", Operator.LeftShift},
+    .{"AngleBracketAngleBracketRight", Operator.RightShift},
+    .{"Tilde", Operator.BitwiseNot},
+});
 pub const OperatorData = struct
 {
     leftExpression: ExpressionData,
     operator: Operator,
     rightExpression: ExpressionData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
-        self.leftExpression.deinit();
-        self.rightExpression.deinit();
+        self.leftExpression.deinit(alloc);
+        self.rightExpression.deinit(alloc);
     }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -521,11 +760,13 @@ pub const OperatorData = struct
         defer rightString.deinit();
 
         var str: string = string.init(allocator);
+        try str.concat("{");
         try str.concat(leftString.str());
         try str.concat(" ");
         try str.concat(@tagName(self.operator));
         try str.concat(" ");
         try str.concat(rightString.str());
+        try str.concat("}");
 
         return str;
     }
