@@ -23,6 +23,7 @@ pub fn PathIsDir(path: []const u8) bool
 
 pub fn main() !void {
     try parser.TestExpressionParsing();
+
     // const args = try std.process.argsAlloc(std.heap.c_allocator);
     // defer std.process.argsFree(std.heap.c_allocator, args);
 

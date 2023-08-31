@@ -69,6 +69,11 @@ pub const String = struct {
         try self.insert(char, self.len());
     }
 
+    pub fn concat_deinit(self: *String, other: *String) Error!void {
+        try self.insert(other.str(), self.len());
+        other.deinit();
+    }
+
     /// Inserts a string literal into the String at an index
     pub fn insert(self: *String, literal: []const u8, index: usize) Error!void {
         // Make sure buffer has enough space

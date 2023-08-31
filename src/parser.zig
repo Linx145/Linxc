@@ -8,7 +8,8 @@ const ExprPool = objPool.ObjectPool(linkedLists.LinkedList(ExpressionData));
 pub const Errors = error
 {
     SyntaxError,
-    OutOfMemoryError
+    OutOfMemoryError,
+    NotImplemented
 };
 
 pub const Parser = struct {
@@ -35,8 +36,12 @@ pub const Parser = struct {
             .result = CompoundStatementData.init(allocator)
         };
     }
-    pub fn deinit(self: *Self) void
+    pub fn deinit(self: *Self) !void
     {
+        for (self.result.items) |*stmt|
+        {
+            stmt.deinit(self.allocator);
+        }
         for (self.errorStatements.items) |*errorStatement|
         {
             errorStatement.deinit();
@@ -98,6 +103,10 @@ pub const Parser = struct {
                 {
                     skipThisLine = true;
                 },
+                .MultiLineComment, .LineComment =>
+                {
+                    continue;
+                },
                 .Keyword_include =>
                 {
                     if (braceCont > 0)
@@ -110,7 +119,7 @@ pub const Parser = struct {
                     const token2: lexer.Token = self.tokenizer.next();
                     if (token2.id == .MacroString)
                     {
-                        const str = try self.SourceTokenSlice(token2);
+                        const str = self.SourceTokenSlice(token2);
                         const statement: StatementData = StatementData
                         {
                             .includeStatement = str
@@ -150,7 +159,7 @@ pub const Parser = struct {
                         typeNameEnd = token.end;
                     }
                 },
-                .Keyword_const
+                .Keyword_const => 
                 {
                     if (!skipThisLine)
                     {
@@ -173,16 +182,12 @@ pub const Parser = struct {
                 {
                     if (!skipThisLine)
                     {
-                        if (typeNameStart == null)
-                        {
-                            typeNameStart = token.start;
-                        }
-                        else
+                        if (typeNameStart != null)
                         {
                             //reached a declaration of either a variable or function
                             foundIdentifier = self.SourceTokenSlice(token);
                         }
-                        typeNameEnd = token.end;
+                        //typeNameEnd = token.start;
                     }
                 },
                 .Semicolon =>
@@ -193,7 +198,7 @@ pub const Parser = struct {
                         {
                             //is variable
                             const varName = foundIdentifier.?;
-                            const typeName = self.SourceSlice(typeNameStart, typeNameEnd);
+                            const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
                             const varData: VarData = VarData
                             {
                                 .name = varName,
@@ -201,7 +206,7 @@ pub const Parser = struct {
                                 .typeName = typeName,
                                 .defaultValue = null
                             };
-                            try self.result.append(varData);
+                            try self.result.append(StatementData{.variableDeclaration = varData});
                             nextIsConst = false;
                             foundIdentifier = null;
                             typeNameStart = null;
@@ -219,10 +224,10 @@ pub const Parser = struct {
                             if (foundIdentifier != null)
                             {
                                 //is variable
-
-                                const expression: ExpressionData = try self.ParseExpression(null);
+                                var primary = try self.ParsePrimary();
+                                const expression: ExpressionData = try self.ParseExpression(primary, 0);
                                 const varName = foundIdentifier.?;
-                                const typeName = self.SourceSlice(typeNameStart, typeNameEnd);
+                                const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
                                 const varData: VarData = VarData
                                 {
                                     .name = varName,
@@ -230,7 +235,7 @@ pub const Parser = struct {
                                     .typeName = typeName,
                                     .defaultValue = expression
                                 };
-                                try self.result.append(varData);
+                                try self.result.append(StatementData{.variableDeclaration = varData});
                                 nextIsConst = false;
                                 foundIdentifier = null;
                                 typeNameStart = null;
@@ -482,30 +487,43 @@ pub fn TestExpressionParsing() !void
         {
             std.debug.print("Caught error:\n   {s}\n", .{errorStatement.str()});
         }
-        parser.deinit();
+        try parser.deinit();
         return err;
     };
-    //primary.deinit(alloc);
-    //expr.deinit(alloc);
-    //}
-    //std.debug.print("{d}\n", .{@intToFloat(f32, timer.read()) / 1000000.0});
     var str = try expr.ToString(alloc);
     defer str.deinit();
     std.debug.print("{s}\n", .{str.str()});
 
     expr.deinit(alloc);
-    //}
-
-    //var ms: f32 = @intToFloat(f32, timer.read()) / 1000000.0;
-    //parser.timer0 += ms;
-    //std.debug.print("{d}, {d}\n", .{parser.timer0, parser.timer1});
     
-    parser.deinit();
+    try parser.deinit();
 }
 
-test "expression parsing"
+// test "expression parsing"
+// {
+//     try TestExpressionParsing();
+// }
+
+test "file parsing"
 {
-    try TestExpressionParsing();
+    var alloc = std.testing.allocator;
+
+    const buffer: []const u8 = "#include<stdint.h>\nint i = 1 + 2;";
+
+    var tokenizer: lexer.Tokenizer = lexer.Tokenizer
+    {
+        .buffer = buffer
+    };
+    var parser: Parser = try Parser.init(alloc, tokenizer);
+    std.debug.print("\n", .{});
+
+    try parser.Parse();
+
+    var str = try CompoundStatementToString(parser.result, alloc);
+    std.debug.print("{s}\n", .{str.str()});
+    str.deinit();
+
+    try parser.deinit();
 }
 
 // (isConst? const : ) typeName name
@@ -519,13 +537,32 @@ pub const VarData = struct
     isConst: bool,
     defaultValue: ?ExpressionData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
+    {
+        var str = string.init(allocator);
+        if (self.isConst)
+        {
+            try str.concat("const ");
+        }
+        try str.concat(self.typeName);
+        try str.concat(" ");
+        try str.concat(self.name);
+        if (self.defaultValue != null)
+        {
+            try str.concat(" = ");
+            var defaultValueStr = try self.defaultValue.?.ToString(allocator);
+            
+            try str.concat_deinit(&defaultValueStr);
+        }
+        return str;
+    }
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         //self.name.deinit();
         //self.typeName.deinit();
         if (self.defaultValue != null)
         {
-            self.defaultValue.deinit();
+            self.defaultValue.?.deinit(allocator);
         }
     }
 };
@@ -536,12 +573,12 @@ pub const TagData = struct
     name: []const u8,
     args: []VarData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         //self.name.deinit();
         for (self.args) |arg|
         {
-            arg.deinit();
+            arg.deinit(allocator);
         }
     }
 };
@@ -570,17 +607,42 @@ pub const FunctionData = struct
     args: []VarData,
     statement: CompoundStatementData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var compoundStatementString = try CompoundStatementToString(self.statement, allocator);
+
+        var str = string.init(allocator);
+        try str.concat(self.returnType);
+        try str.concat(" ");
+        try str.concat(self.name);
+        try str.concat("(");
+        var i: usize = 0;
+        while (i < self.args.len) : (i += 1)
+        {
+            const arg = &self.args[i];
+            var argsStr = try arg.ToString(allocator);
+            try str.concat_deinit(&argsStr);
+            if (i < self.args.len - 1)
+            {
+                try str.concat(", ");
+            }
+        }
+        try str.concat(") {\n");
+        try str.concat_deinit(&compoundStatementString);
+        try str.concat("}\n");
+        return str;
+    }
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         //self.name.deinit();
         //self.returnType.deinit();
-        for (self.args) |arg|
+        for (self.args) |*arg|
         {
-            arg.deinit();
+            arg.deinit(allocator);
         }
-        for (self.statement) |statement|
+        for (self.statement.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
         self.statement.deinit();
     }
@@ -716,12 +778,27 @@ pub const WhileData = struct
     condition: ExpressionData,
     statement: CompoundStatementData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
-        self.condition.deinit();
-        for (self.statement) |statement|
+        var str = string.init(allocator);
+
+        var conditionStr = try self.condition.ToString(allocator);
+        var statementStr = try CompoundStatementToString(self.statement, allocator);
+    
+        try str.concat("while (");
+        try str.concat_deinit(&conditionStr);
+        try str.concat(") {\n");
+        try str.concat_deinit(&statementStr);
+        try str.concat("\n}\n");
+
+        return str;
+    }
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
+    {
+        self.condition.deinit(allocator);
+        for (self.statement.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
         self.statement.deinit();
     }
@@ -734,24 +811,24 @@ pub const ForData = struct
     shouldStep: CompoundStatementData,
     statement: CompoundStatementData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
-        for (self.initializer) |statement|
+        for (self.initializer.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
-        self.condition.deinit();
-        for (self.statement) |statement|
+        self.condition.deinit(allocator);
+        for (self.statement.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
-        for (self.shouldStep) |statement|
+        for (self.shouldStep.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
         self.initializer.deinit();
         self.statement.deinit();
-        self.step.deinit();
+        self.shouldStep.deinit();
     }
 };
 pub const IfData = struct
@@ -759,12 +836,27 @@ pub const IfData = struct
     condition: ExpressionData,
     statement: CompoundStatementData,
 
-    pub fn deinit(self: *@This()) void
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
-        self.condition.deinit();
-        for (self.statement) |statement|
+        var str = string.init(allocator);
+
+        var conditionStr = try self.condition.ToString(allocator);
+        var statementStr = try CompoundStatementToString(self.statement, allocator);
+    
+        try str.concat("if (");
+        try str.concat_deinit(&conditionStr);
+        try str.concat(") {\n");
+        try str.concat_deinit(&statementStr);
+        try str.concat("\n}\n");
+
+        return str;
+    }
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
+    {
+        self.condition.deinit(allocator);
+        for (self.statement.items) |*statement|
         {
-            statement.deinit();
+            statement.deinit(allocator);
         }
         self.statement.deinit();
     }
@@ -791,6 +883,53 @@ pub const StatementData = union(StatementDataTag)
     Comment: []const u8,
     includeStatement: []const u8,
     //macroDefinition: MacroDefinitionData
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
+    {
+        switch (self.*)
+        {
+            .functionDeclaration => |*decl| decl.deinit(allocator),
+            .variableDeclaration => |*decl| decl.deinit(allocator),
+            .IfStatement => |*ifData| ifData.deinit(allocator),
+            .WhileStatement => |*whileData| whileData.deinit(allocator),
+            .ForStatement => |*forData| forData.deinit(allocator),
+            else =>
+            {
+                //return Errors.NotImplemented;
+            }
+        }
+    }
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
+    {
+        switch (self.*)
+        {
+            .functionDeclaration => |*decl| return decl.ToString(allocator),
+            .variableDeclaration => |*decl| return decl.ToString(allocator),
+            .IfStatement => |*ifDat| return ifDat.ToString(allocator),
+            .WhileStatement => |*whileDat| return whileDat.ToString(allocator),
+            .includeStatement => |*include|
+            {
+                _ = include;
+                return string.init_with_contents(allocator, self.includeStatement);
+            },
+            else =>
+            {
+                return Errors.NotImplemented;
+            }
+        }
+    }
 };
 
 pub const CompoundStatementData = std.ArrayList(StatementData);
+
+pub fn CompoundStatementToString(stmts: CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
+{
+    var str = string.init(allocator);
+    for (stmts.items) |*stmt|
+    {
+        var stmtStr = try stmt.ToString(allocator);
+        try str.concat_deinit(&stmtStr);
+        try str.concat("\n");
+    }
+    return str;
+}
