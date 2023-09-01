@@ -234,8 +234,22 @@ pub const Parser = struct {
                 {
                     if (!skipThisLine)
                     {
-                        var primary = try self.ParseExpression_Primary();
-                        var expr = try self.ParseExpression(primary, 0);
+                        var primary = self.ParseExpression_Primary()
+                        catch |err|
+                        {
+                            var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression on return statement");
+                            try self.errorStatements.append(errStr);
+                            ClearCompoundStatement(result, self.allocator);
+                            return err;
+                        };
+                        var expr = self.ParseExpression(primary, 0)
+                        catch |err|
+                        {
+                            var errStr = try self.WriteError("Syntax Error: Issue parsing expression on return statement");
+                            try self.errorStatements.append(errStr);
+                            ClearCompoundStatement(result, self.allocator);
+                            return err;
+                        };
 
                         try result.append(StatementData
                         {
@@ -273,7 +287,12 @@ pub const Parser = struct {
                                 ClearCompoundStatement(result, self.allocator);
                                 return Errors.SyntaxError;
                             }
-                            const structBody = try self.Parse();
+                            const structBody = self.Parse()
+                            catch |err|
+                            {
+                                ClearCompoundStatement(result, self.allocator);
+                                return err;
+                            };
                             const structData = StructData
                             {
                                 .name = structName,
@@ -351,16 +370,45 @@ pub const Parser = struct {
                             }
                             else
                             {
-                                _ = self.nextUntilValid();
-                                var inputParams = try self.ParseInputParams();
-                                try result.append(StatementData
+                                //just use parseidentifier here, if rando variable, throw it
+
+                                var expr: ExpressionData = try self.ParseExpression_Identifier(foundIdentifier.?);
+                                switch (expr)
                                 {
-                                    .functionInvoke = FunctionCallData
+                                    .FunctionCall => |funcCall|
                                     {
-                                        .name = foundIdentifier.?,
-                                        .inputParams = inputParams
+                                        try result.append(StatementData
+                                        {
+                                            .functionInvoke = FunctionCallData
+                                            {
+                                                .name = funcCall.name,
+                                                .inputParams = funcCall.inputParams,
+                                                .nextCall = funcCall.nextCall
+                                            }
+                                        }
+                                        );
+                                        //deinit original funcCall item
+                                    },
+                                    else =>
+                                    {
+                                        var err = try self.WriteError("Syntax Error: Random literal/variable name");
+                                        try self.errorStatements.append(err);
+                                        ClearCompoundStatement(result, self.allocator);
+                                        return Errors.SyntaxError;
                                     }
-                                });
+                                }
+                                expr.deinit(self.allocator);
+
+                                // _ = self.nextUntilValid();
+                                // var inputParams = try self.ParseInputParams();
+                                // try result.append(StatementData
+                                // {
+                                //     .functionInvoke = FunctionCallData
+                                //     {
+                                //         .name = foundIdentifier.?,
+                                //         .inputParams = inputParams
+                                //     }
+                                // });
                             }
 
                             foundIdentifier = null;
@@ -686,11 +734,30 @@ pub const Parser = struct {
     /// variable or with a function call
     pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionData
     {
-        var nextToken = self.peekNextUntilValid();
-        if (nextToken.id == .LParen)
+        var token = self.peekNextUntilValid();
+        if (token.id == .LParen)
         {
             var inputParams = try self.ParseInputParams();
 
+            var nextIdentifier: ?ExpressionData = null;
+
+            //function call changing/retrieval
+            //eg: glm::vec2(1, 2).add(2, 3).x
+            if (self.peekNextUntilValid().id == .Period)
+            {
+                _ = self.nextUntilValid();
+                var next = self.nextUntilValid();//peekNextUntilValid();
+                if (next.id != .Identifier)
+                {
+                    return Errors.SyntaxError;
+                }
+                else
+                {
+                    //dont need to care about namespace here!!!!
+                    var nextIdentifierName = self.SourceTokenSlice(next);
+                    nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
+                }
+            }
             var functionCall = self.allocator.create(FunctionCallData)
             catch
             {
@@ -698,6 +765,7 @@ pub const Parser = struct {
             };
             functionCall.name = identifierName;
             functionCall.inputParams = inputParams;
+            functionCall.nextCall = nextIdentifier;
             
             return ExpressionData
             {
@@ -916,7 +984,9 @@ pub fn TestExpressionParsing() !void
 
 test "file parsing"
 {
-    var alloc: std.mem.Allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var alloc: std.mem.Allocator = arena.allocator();
 
     var buffer: []const u8 = try io.ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc", alloc);//"#include<stdint.h>";
 
@@ -928,11 +998,16 @@ test "file parsing"
     std.debug.print("\n", .{});
 
     var result = parser.Parse()
-    catch |err|
+    catch
     {
+        for (parser.errorStatements.items) |errorStatement|
+        {
+            std.debug.print("{s}\n", .{errorStatement.str()});
+        }
+
         try parser.deinit();
         alloc.free(buffer);
-        return err;
+        return;
     };
 
     var str = try CompoundStatementToString(result, alloc);
@@ -1017,6 +1092,7 @@ pub const FunctionCallData = struct
 {
     name: []const u8,
     inputParams: []ExpressionData,
+    nextCall: ?ExpressionData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -1035,11 +1111,21 @@ pub const FunctionCallData = struct
             }
         }
         try str.concat(")");
+        if (self.nextCall != null)
+        {
+            try str.concat(".");
+            var nextCallStr = try self.nextCall.?.ToString(allocator);
+            try str.concat_deinit(&nextCallStr);
+        }
 
         return str;
     }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
+        if (self.nextCall != null)
+        {
+            self.nextCall.?.deinit(allocator);
+        }
         for (self.inputParams) |*param|
         {
             param.deinit(allocator);
