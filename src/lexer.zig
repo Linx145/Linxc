@@ -42,6 +42,7 @@ pub const TokenID = union(enum)
     PercentEqual,
     Arrow,
     Colon,
+    ColonColon,
     Semicolon,
     Slash,
     SlashEqual,
@@ -173,6 +174,7 @@ pub const TokenID = union(enum)
             .PercentEqual => "%=",
             .Arrow => "->",
             .Colon => ":",
+            .ColonColon => "::",
             .Semicolon => ";",
             .Slash => "/",
             .SlashEqual => "/=",
@@ -385,6 +387,7 @@ pub const Tokenizer = struct {
             HexEscape,
             UnicodeEscape,
             Identifier,
+            Colon,
             Equal,
             Bang,
             Pipe,
@@ -509,9 +512,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     ':' => {
-                        result.id = .Colon;
-                        self.index += 1;
-                        break;
+                        state = .Colon;
                     },
                     '%' => {
                         state = .Percent;
@@ -798,6 +799,17 @@ pub const Tokenizer = struct {
                             self.pp_directive = true;
                         break;
                     },
+                },
+                .Colon => switch (c) {
+                    ':' => {
+                        result.id = .ColonColon;
+                        self.index += 1;
+                        break;
+                    },
+                    else => {
+                        result.id = .Colon;
+                        break;
+                    }
                 },
                 .Equal => switch (c) {
                     '=' => {
@@ -1296,6 +1308,7 @@ pub const Tokenizer = struct {
                 .IntegerSuffixUL => result.id = .{ .IntegerLiteral = .lu },
 
                 .FloatSuffix => result.id = .{ .FloatLiteral = .none },
+                .Colon => result.id = .Colon,
                 .Equal => result.id = .Equal,
                 .Bang => result.id = .Bang,
                 .Minus => result.id = .Minus,

@@ -130,13 +130,6 @@ pub const Parser = struct {
                 },
                 .Keyword_include =>
                 {
-                    // if (braceCont > 0)
-                    // {
-                    //     var err: string = try self.WriteError("Syntax Error: include directive should not be contained within a {}! ");
-                    //     try self.errorStatements.append(err);
-
-                    //     return Errors.SyntaxError;
-                    // }
                     const token2: lexer.Token = self.tokenizer.next();
                     if (token2.id == .MacroString)
                     {
@@ -151,6 +144,7 @@ pub const Parser = struct {
                     {
                         var err: string = try self.WriteError("Syntax Error: Expected enclosed string after #include statement, but found none ");
                         try self.errorStatements.append(err);
+                        ClearCompoundStatement(result, self.allocator);
                         return Errors.SyntaxError;
                     }
                 },
@@ -223,12 +217,14 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
                             try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
                             return Errors.SyntaxError;
                         }
                         else if (typeNameStart != null)
                         {
                             var err = try self.WriteError("Syntax Error: const should be before type");
                             try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
                             return Errors.SyntaxError;
                         }
                         nextIsConst = true;
@@ -255,6 +251,7 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: cannot declare const struct");
                             try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
                             return Errors.SyntaxError;
                         }
                         nextIsStruct = true;
@@ -270,8 +267,10 @@ pub const Parser = struct {
                             var next = self.nextUntilValid();
                             if (next.id != .LBrace)
                             {
+                                std.debug.print("{s}, {s}\n", .{structName, self.SourceTokenSlice(next)});
                                 var err = try self.WriteError("Syntax Error: Expected { after struct name");
                                 try self.errorStatements.append(err);
+                                ClearCompoundStatement(result, self.allocator);
                                 return Errors.SyntaxError;
                             }
                             const structBody = try self.Parse();
@@ -284,6 +283,23 @@ pub const Parser = struct {
                             nextIsStruct = false;
                             typeNameStart = null;
                             typeNameEnd = 0;
+                        }
+                        else if (typeNameStart == null)
+                        {
+                            typeNameStart = token.start;
+                            if (self.peekNextUntilValid().id == .ColonColon)
+                            {
+                                while (true)
+                                {
+                                    var next = self.nextUntilValid();
+                                    if (next.id == .ColonColon or next.id == .Identifier)
+                                    {
+                                        typeNameEnd = next.end;
+                                    }
+                                    else break;
+                                }
+                            }
+                            else typeNameEnd = token.end;
                         }
                         else foundIdentifier = self.SourceTokenSlice(token);
                     }
@@ -301,6 +317,7 @@ pub const Parser = struct {
                                 {
                                     var err = try self.WriteError("Syntax Error: Cannot declare function as const");
                                     try self.errorStatements.append(err);
+                                    ClearCompoundStatement(result, self.allocator);
                                     return Errors.SyntaxError;
                                 }
 
@@ -448,6 +465,51 @@ pub const Parser = struct {
         };
         return ownedSlice;
     }
+    pub fn GetFullIdentifier(self: *Self, comptime untilValid: bool) ?usize
+    {
+        var typeNameEnd: ?usize = null;
+        if (untilValid)
+        {
+            if (self.peekNextUntilValid().id == .ColonColon)
+            {
+                while (true)
+                {
+                    var initial: usize = self.tokenizer.index;
+                    var next = self.nextUntilValid();
+                    if (next.id == .ColonColon or next.id == .Identifier)
+                    {
+                        typeNameEnd = next.end;
+                    }
+                    else
+                    {
+                        self.tokenizer.index = initial;
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            if (self.peekNext().id == .ColonColon)
+            {
+                while (true)
+                {
+                    var initial: usize = self.tokenizer.index;
+                    var next = self.tokenizer.next();
+                    if (next.id == .ColonColon or next.id == .Identifier)
+                    {
+                        typeNameEnd = next.end;
+                    }
+                    else
+                    {
+                        self.tokenizer.index = initial;
+                        break;
+                    }
+                }
+            }
+        }
+        return typeNameEnd;
+    }
     pub fn ParseArgs(self: *Self) ![]VarData
     {
         var vars = std.ArrayList(VarData).init(self.allocator);
@@ -497,7 +559,8 @@ pub const Parser = struct {
             {
                 if (variableType == null)
                 {
-                    variableType = self.SourceTokenSlice(token);
+                    var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
+                    variableType = self.SourceSlice(token.start, typeNameEnd);
                 }
                 else if (variableName == null)//variable name
                 {
@@ -682,7 +745,9 @@ pub const Parser = struct {
                 }
                 else if (nextToken.id == .Identifier)
                 {
-                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..nextToken.end]);
+                    _ = self.tokenizer.next();
+                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
                 {
@@ -727,12 +792,9 @@ pub const Parser = struct {
                 }
                 else if (nextToken.id == .Identifier)
                 {
-                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..nextToken.end]);
-                    // _ = self.tokenizer.next();
-                    // return ExpressionData
-                    // {
-                    //     .Variable = self.tokenizer.buffer[token.start..nextToken.end]
-                    // };
+                    _ = self.tokenizer.next();
+                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
                 {
@@ -750,7 +812,8 @@ pub const Parser = struct {
         }
         else if (token.id == .Identifier)
         {
-            return self.ParseExpression_Identifier(self.SourceTokenSlice(token));
+            var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+            return self.ParseExpression_Identifier(self.SourceSlice(token.start, typeNameEnd));
             // return ExpressionData
             // {
             //     .Variable = self.SourceTokenSlice(token)
@@ -1361,7 +1424,14 @@ pub const StatementData = union(StatementDataTag)
             .variableDeclaration => |*decl| return decl.ToString(allocator),
             .structDeclaration => |*decl| return decl.ToString(allocator),
             .functionInvoke => |*invoke| return invoke.ToString(allocator),
-            .returnStatement => |*stmt| return stmt.ToString(allocator),
+            .returnStatement => |*stmt| 
+            {
+                var stmtStr = try stmt.ToString(allocator);
+                var str = string.init(allocator);
+                try str.concat("returns ");
+                try str.concat_deinit(&stmtStr);
+                return str;
+            },
             .IfStatement => |*ifDat| return ifDat.ToString(allocator),
             .WhileStatement => |*whileDat| return whileDat.ToString(allocator),
             .includeStatement => |include|
@@ -1379,6 +1449,14 @@ pub const StatementData = union(StatementDataTag)
 
 pub const CompoundStatementData = std.ArrayList(StatementData);
 
+pub fn ClearCompoundStatement(compoundStatement: CompoundStatementData, allocator: std.mem.Allocator) void
+{
+    for (compoundStatement.items) |*stmt|
+    {
+        stmt.deinit(allocator);
+    }
+    compoundStatement.deinit();
+}
 pub fn CompoundStatementToString(stmts: CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
 {
     var str = string.init(allocator);

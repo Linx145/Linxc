@@ -7,14 +7,11 @@ int OtherFunction(int args1)
 
 struct ComponentA
 {
-    int a;
+    glm::vec2 vectorA;
     int b = 5 + 4;
 
-    void Function(int args1)
+    glm::vec2 Function()
     {
-        if (args1 == OtherFunction(args1))
-        {
-            Function(args1 + 1);
-        }
+        return vectorA + glm::vec2(1, 2);
     }
 };
