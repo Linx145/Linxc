@@ -20,6 +20,8 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     tokenizer: lexer.Tokenizer,
     errorStatements: std.ArrayList(string),
+    currentLine: usize,
+    charsParsed: usize,
 
     pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
     {
@@ -27,7 +29,9 @@ pub const Parser = struct {
         {
             .allocator = allocator,
             .tokenizer = tokenizer,
-            .errorStatements = std.ArrayList(string).init(allocator)
+            .errorStatements = std.ArrayList(string).init(allocator),
+            .currentLine = 0,
+            .charsParsed = 0
         };
     }
     pub fn deinit(self: *Self) !void
@@ -52,6 +56,18 @@ pub const Parser = struct {
         {
             return Errors.OutOfMemoryError;
         };
+        var line: []u8 = std.fmt.allocPrint(self.allocator, "at line {d}, column {d}\n", .{self.currentLine, self.tokenizer.index - self.charsParsed})
+        catch
+        {
+            return Errors.OutOfMemoryError;
+        };
+        err.concat(line)
+        catch
+        {
+            return Errors.OutOfMemoryError;
+        };
+
+        self.allocator.free(line);
         //var formatted: u8 = try std.fmt.allocPrint(self.allocator, "{d}", .{});
         //defer self.allocator.free(formatted);
         //try err.concat(formatted);
@@ -72,6 +88,11 @@ pub const Parser = struct {
         var next = self.tokenizer.next();
         while (next.id == .Nl or next.id == .LineComment or next.id == .MultiLineComment)
         {
+            if (next.id == .Nl)
+            {
+                self.currentLine += 1;
+                self.charsParsed = self.tokenizer.index;
+            }
             next = self.tokenizer.next();
         }
         return next;
@@ -118,7 +139,7 @@ pub const Parser = struct {
         return result;
     }
     
-    pub fn Parse(self: *Self, endOnSemicolon: bool) !CompoundStatementData
+    pub fn Parse(self: *Self, endOnSemicolon: bool, commaIsSemicolon: bool, endOnRParen: bool) !CompoundStatementData
     {
         var result = CompoundStatementData.init(self.allocator);
 
@@ -127,6 +148,7 @@ pub const Parser = struct {
         var skipThisLine: bool = false;
         var braceCont: i32 = 0;
         var foundIdentifier: ?[]const u8 = null;
+        var expectSemicolon: bool = false;
 
         var typeNameStart: ?usize = null;
         var typeNameEnd: usize = 0;
@@ -142,6 +164,24 @@ pub const Parser = struct {
             //there are too many ways that a statement may just be an expression,
             //which in itself is valid too. Thus, we just perform a check if the expression is statement. If so,
             //we simply return
+            if (expectSemicolon)
+            {
+                if (token.id != .Nl)
+                {
+                    if (token.id == .RParen and endOnRParen)
+                    {
+
+                    }
+                    else if (token.id != .Semicolon and (!commaIsSemicolon or token.id != .Comma))
+                    {
+                        var err: string = try self.WriteError("Syntax Error: Missing semicolon");
+                        try self.errorStatements.append(err);
+                        ClearCompoundStatement(result, self.allocator);
+                        return Errors.SyntaxError;
+                    }
+                    expectSemicolon = false;
+                }
+            }
 
             switch (token.id)
             {
@@ -151,6 +191,8 @@ pub const Parser = struct {
                 },
                 .Nl =>
                 {
+                    self.currentLine += 1;
+                    self.charsParsed = self.tokenizer.index;
                     skipThisLine = false;
                 },
                 .Hash =>
@@ -207,6 +249,16 @@ pub const Parser = struct {
                         {
                             typeNameStart = token.start;
                         }
+                        else
+                        {
+                            if (foundIdentifier != null)
+                            {
+                                var err: string = try self.WriteError("Syntax Error: Missing semicolon");
+                                try self.errorStatements.append(err);
+                                ClearCompoundStatement(result, self.allocator);
+                                return Errors.SyntaxError;
+                            }
+                        }
                         typeNameEnd = token.end;
                     }
                 },
@@ -219,17 +271,19 @@ pub const Parser = struct {
                         {
                             if (next.id == .Nl)
                             {
+                                self.currentLine += 1;
+                                self.charsParsed = self.tokenizer.index;
                                 next = self.nextUntilValid();
                             }
                             var primary = try self.ParseExpression_Primary();
                             var expression = try self.ParseExpression(primary, 0);
                         
-                            next = self.tokenizer.next();
+                            next = self.nextUntilValid();
                             while (next.id != .LBrace)
                             {
                                 next = self.nextUntilValid();
                             }
-                            var statement = try self.Parse(false);
+                            var statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
 
                             try result.append(StatementData
                             {
@@ -248,7 +302,7 @@ pub const Parser = struct {
                     {
                         if (self.peekNextUntilValid().id == .LBrace)
                         {
-                            var nextStatement = try self.Parse(false);
+                            var nextStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
                             try result.append(StatementData
                             {
                                 .ElseStatement = nextStatement
@@ -257,7 +311,7 @@ pub const Parser = struct {
                         else
                         {
                             //compound statement parse until semicolon
-                            var nextStatement = try self.Parse(true);
+                            var nextStatement = try self.Parse(true, commaIsSemicolon, endOnRParen);
                             try result.append(StatementData
                             {
                                 .ElseStatement = nextStatement
@@ -286,6 +340,99 @@ pub const Parser = struct {
                         nextIsConst = true;
                     }
                 },
+                .Keyword_for =>
+                {
+                    if (!skipThisLine)
+                    {
+                        if (nextIsConst)
+                        {
+                            var err = try self.WriteError("Syntax Error: For statement cannot be const");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        if (self.nextUntilValid().id != .LParen)
+                        {
+                            var err = try self.WriteError("Syntax Error: Expected ( after for statement");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        //parse initializer statement
+                        
+                        const initializerStatements = try self.Parse(true, true, endOnRParen);
+
+                        const conditionPrimary = try self.ParseExpression_Primary();
+                        const condition = try self.ParseExpression(conditionPrimary, 0);
+                        _ = self.tokenizer.next(); //skip the ;
+                        if (self.tokenizer.prev_tok_id != .Semicolon)
+                        {
+                            var err: string = try self.WriteError("Syntax Error: Expected semicolon at the end of the condition expression in a for loop");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        const onStep = try self.Parse(true, commaIsSemicolon, true);
+
+                        var bodyStatement: CompoundStatementData = undefined;
+                        if (self.nextUntilValid().id != .LBrace)
+                        {
+                            self.tokenizer.index = self.tokenizer.prevIndex;
+                            bodyStatement = try self.Parse(true, commaIsSemicolon, endOnRParen);
+                        }
+                        else
+                        {
+                            bodyStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
+                        }
+
+                        try result.append(StatementData
+                        {
+                            .ForStatement = ForData
+                            {
+                                .initializer = initializerStatements,
+                                .condition = condition,
+                                .shouldStep = onStep,
+                                .statement = bodyStatement
+                            }
+                        });
+                    }
+                },
+                .Keyword_while =>
+                {
+                    if (!skipThisLine)
+                    {
+                        if (nextIsConst)
+                        {
+                            var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        if (self.nextUntilValid().id != .LParen)
+                        {
+                            var err = try self.WriteError("Syntax Error: Expected ( after while statement");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        var primary = try self.ParseExpression_Primary();
+                        var expr = try self.ParseExpression(primary, 0);
+                        var next = self.nextUntilValid();
+                        while (next.id != .LBrace)
+                        {
+                            next = self.nextUntilValid();
+                        }
+                        var statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
+                        try result.append(StatementData
+                        {
+                            .WhileStatement = WhileData
+                            {
+                                .condition = expr,
+                                .statement = statement
+                            }
+                        });
+                    }
+                },
                 .Keyword_return =>
                 {
                     if (!skipThisLine)
@@ -311,6 +458,8 @@ pub const Parser = struct {
                         {
                             .returnStatement = expr
                         });
+
+                        expectSemicolon = true;
                     }
                 },
                 .Keyword_struct =>
@@ -337,13 +486,12 @@ pub const Parser = struct {
                             var next = self.nextUntilValid();
                             if (next.id != .LBrace)
                             {
-                                std.debug.print("{s}, {s}\n", .{structName, self.SourceTokenSlice(next)});
-                                var err = try self.WriteError("Syntax Error: Expected { after struct name");
+                                var err = try self.WriteError("Syntax Error: Linxc requires struct name to be right after the struct keyword");
                                 try self.errorStatements.append(err);
                                 ClearCompoundStatement(result, self.allocator);
                                 return Errors.SyntaxError;
                             }
-                            const structBody = self.Parse(false)
+                            const structBody = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen)
                             catch |err|
                             {
                                 ClearCompoundStatement(result, self.allocator);
@@ -358,6 +506,8 @@ pub const Parser = struct {
                             nextIsStruct = false;
                             typeNameStart = null;
                             typeNameEnd = 0;
+
+                            expectSemicolon = true;
                         }
                         else if (GetPrecedence(self.peekNextUntilFoundOperator().id) != -1)
                         {
@@ -368,16 +518,16 @@ pub const Parser = struct {
                             var primary = self.ParseExpression_Primary()
                             catch |err|
                             {
-                                //var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
-                                //try self.errorStatements.append(errStr);
+                                var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
+                                try self.errorStatements.append(errStr);
                                 ClearCompoundStatement(result, self.allocator);
                                 return err;
                             };
                             var expr = self.ParseExpression(primary, 0)
                             catch |err|
                             {
-                                //var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
-                                //try self.errorStatements.append(errStr);
+                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
+                                try self.errorStatements.append(errStr);
                                 ClearCompoundStatement(result, self.allocator);
                                 return err;
                             };
@@ -386,6 +536,7 @@ pub const Parser = struct {
                             {
                                 .otherExpression = expr
                             });
+                            expectSemicolon = true;
                         }
                         else if (typeNameStart == null)
                         {
@@ -413,7 +564,24 @@ pub const Parser = struct {
                                 typeNameEnd = 0;
                             }
                         }
-                        else foundIdentifier = self.SourceTokenSlice(token);
+                        else 
+                        {
+                            if (foundIdentifier != null)
+                            {
+                                var errStr = try self.WriteError("Syntax Error: Duplicate identifier");
+                                try self.errorStatements.append(errStr);
+                                ClearCompoundStatement(result, self.allocator);
+                                return Errors.SyntaxError;
+                            }
+                            foundIdentifier = self.SourceTokenSlice(token);
+                        }
+                    }
+                },
+                .RParen =>
+                {
+                    if (endOnRParen)
+                    {
+                        break;
                     }
                 },
                 .LParen =>
@@ -448,7 +616,7 @@ pub const Parser = struct {
                                         break;
                                     }
                                 }
-                                const body = try self.Parse(false);
+                                const body = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
 
                                 try result.append(StatementData
                                 {
@@ -492,6 +660,7 @@ pub const Parser = struct {
                                         return Errors.SyntaxError;
                                     }
                                 }
+                                expectSemicolon = true;
                             }
 
                             foundIdentifier = null;
@@ -514,16 +683,16 @@ pub const Parser = struct {
                             var primary = self.ParseExpression_Primary()
                             catch |err|
                             {
-                                //var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
-                                //try self.errorStatements.append(errStr);
+                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
+                                try self.errorStatements.append(errStr);
                                 ClearCompoundStatement(result, self.allocator);
                                 return err;
                             };
                             var expr = self.ParseExpression(primary, 0)
                             catch |err|
                             {
-                                //var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
-                                //try self.errorStatements.append(errStr);
+                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
+                                try self.errorStatements.append(errStr);
                                 ClearCompoundStatement(result, self.allocator);
                                 return err;
                             };
@@ -569,6 +738,27 @@ pub const Parser = struct {
                             typeNameStart = null;
                             typeNameEnd = 0;
                         }
+                        else if (nextIsStruct)
+                        {
+                            var errStr = try self.WriteError("Syntax Error: Expected identifier after struct declaration");
+                            try self.errorStatements.append(errStr);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        else if (nextIsConst)
+                        {
+                            var errStr = try self.WriteError("Syntax Error: Expected identifier and type after const declaration");
+                            try self.errorStatements.append(errStr);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                        else if (typeNameStart != null)
+                        {
+                            var errStr = try self.WriteError("Syntax Error: Expected identifier after variable/function type");
+                            try self.errorStatements.append(errStr);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
                         if (endOnSemicolon)
                         {
                             break;
@@ -582,26 +772,24 @@ pub const Parser = struct {
                         if (foundIdentifier != null)
                         {
                             //is variable
-                            if (foundIdentifier != null)
+                            var primary = try self.ParseExpression_Primary();
+                            const expression: ExpressionData = try self.ParseExpression(primary, 0);
+                            const varName = foundIdentifier.?;
+                            const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
+                            const varData: VarData = VarData
                             {
-                                //is variable
-                                var primary = try self.ParseExpression_Primary();
-                                const expression: ExpressionData = try self.ParseExpression(primary, 0);
-                                const varName = foundIdentifier.?;
-                                const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
-                                const varData: VarData = VarData
-                                {
-                                    .name = varName,
-                                    .isConst = nextIsConst,
-                                    .typeName = typeName,
-                                    .defaultValue = expression
-                                };
-                                try result.append(StatementData{.variableDeclaration = varData});
-                                nextIsConst = false;
-                                foundIdentifier = null;
-                                typeNameStart = null;
-                                typeNameEnd = 0;
-                            }
+                                .name = varName,
+                                .isConst = nextIsConst,
+                                .typeName = typeName,
+                                .defaultValue = expression
+                            };
+                            try result.append(StatementData{.variableDeclaration = varData});
+                            nextIsConst = false;
+                            foundIdentifier = null;
+                            typeNameStart = null;
+                            typeNameEnd = 0;
+
+                            expectSemicolon = true;
                         }
                     }
                 },
@@ -857,7 +1045,7 @@ pub const Parser = struct {
             {
                 return 3;
             },
-            .Plus, .Minus, .Ampersand, .Caret, .Tilde, .Pipe, .AngleBracketAngleBracketLeft, .AngleBracketAngleBracketRight =>
+            .Plus, .Minus, .Ampersand, .Caret, .Tilde, .Pipe, .AngleBracketLeft, .AngleBracketRight =>
             {
                 return 2;
             },
@@ -902,7 +1090,6 @@ pub const Parser = struct {
             }
             else
             {
-                std.debug.print("Parsing Expression in Input Params {s}\n", .{@tagName(token.id)});
                 self.tokenizer.index = self.tokenizer.prevIndex;
                 
                 var primary = try self.ParseExpression_Primary();
@@ -1137,7 +1324,6 @@ pub const Parser = struct {
         }
         else
         {
-            std.debug.print("{s}\n", .{self.tokenizer.buffer[token.start..token.end]});
             return Errors.SyntaxError;
         }
     }
@@ -1187,7 +1373,6 @@ pub const Parser = struct {
         {
             return Errors.NotImplemented;
         };
-        std.debug.print("Returning resulting expression: {s}\n", .{resultStr.str()});
         resultStr.deinit();
 
         return lhs;
@@ -1253,7 +1438,7 @@ test "file parsing"
     var parser: Parser = try Parser.init(alloc, tokenizer);
     std.debug.print("\n", .{});
 
-    var result = parser.Parse(false)
+    var result = parser.Parse(false, false, false)
     catch
     {
         for (parser.errorStatements.items) |errorStatement|
@@ -1487,7 +1672,6 @@ pub const ExpressionData = union(ExpressionDataTag)
             },
             ExpressionDataTag.Op => |op| 
             {
-                std.debug.print("Found op\n", .{});
                 str.deinit();
                 return op.ToString(allocator);
             },

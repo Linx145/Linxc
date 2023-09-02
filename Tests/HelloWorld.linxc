@@ -14,7 +14,10 @@ struct Vector2
         }
         else
         {
-            printf("sex");
+            for (int i = 0; i < 5; i += 1)
+            {
+                x += 1;
+            }
             return false;
         }
     }
