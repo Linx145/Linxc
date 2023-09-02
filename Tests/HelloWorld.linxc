@@ -1,21 +1,21 @@
 #include <stdint.h>
-
-int OtherFunction(int args1)
-{
-    return args1 == 2;
-}
+#include <stdio.h>
 
 struct Vector2
 {
     float x;
     float y;
 
-    float Dot(Vector2 other)
-    {
-        return x * other.x + y * other.y;
-    }
     bool Equals(Vector2 other)
     {
-        return x == other.x && y == other.y;
+        if (x == other.x && y == other.y)
+        {
+            return true;
+        }
+        else
+        {
+            printf("sex");
+            return false;
+        }
     }
 };

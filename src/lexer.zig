@@ -356,11 +356,13 @@ pub const Token = struct {
 pub const Tokenizer = struct {
     buffer: []const u8,
     index: usize = 0,
+    prevIndex: usize = 0,
     prev_tok_id: std.meta.Tag(TokenID) = .Invalid,
     pp_directive: bool = false,
 
     pub fn next(self: *@This()) Token 
     {
+        self.prevIndex = self.index;
         var result = Token
         {
             .id = .Eof,
