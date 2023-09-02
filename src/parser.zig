@@ -39,11 +39,19 @@ pub const Parser = struct {
         self.errorStatements.deinit();
     }
 
-    pub fn WriteError(self: *Self, message: []const u8) !string
+    pub fn WriteError(self: *Self, message: []const u8) Errors!string
     {
         var err: string = string.init(self.allocator);
-        try err.concat(message);
-        try err.concat("\n");
+        err.concat(message)
+        catch
+        {
+            return Errors.OutOfMemoryError;
+        };
+        err.concat("\n")
+        catch
+        {
+            return Errors.OutOfMemoryError;
+        };
         //var formatted: u8 = try std.fmt.allocPrint(self.allocator, "{d}", .{});
         //defer self.allocator.free(formatted);
         //try err.concat(formatted);
@@ -88,6 +96,21 @@ pub const Parser = struct {
 
         return result;
     }
+    pub fn peekNextUntilFoundOperator(self: *@This()) lexer.Token
+    {
+        const currentIndex = self.tokenizer.index;
+
+        //dont do any validation checking here
+        var result = self.nextUntilValid();
+        while (result.id == .Period)
+        {
+            _ = self.nextUntilValid();
+            result = self.nextUntilValid();
+        }
+        self.tokenizer.index = currentIndex;
+
+        return result;
+    }
     
     pub fn Parse(self: *Self) !CompoundStatementData
     {
@@ -108,7 +131,12 @@ pub const Parser = struct {
 
         while (true)
         {
+            var prevIndex = self.tokenizer.index;
             const token: lexer.Token = self.tokenizer.next();
+
+            //there are too many ways that a statement may just be an expression,
+            //which in itself is valid too. Thus, we just perform a check if the expression is statement. If so,
+            //we simply return
 
             switch (token.id)
             {
@@ -166,7 +194,7 @@ pub const Parser = struct {
                         }
                     }
                 },
-                .Keyword_void, .Keyword_int, .Keyword_uint, .Keyword_short, .Keyword_ushort, .Keyword_ulong =>
+                .Keyword_void, .Keyword_bool, .Keyword_float, .Keyword_int, .Keyword_uint, .Keyword_short, .Keyword_ushort, .Keyword_ulong =>
                 {
                     if (!skipThisLine)
                     {
@@ -303,14 +331,43 @@ pub const Parser = struct {
                             typeNameStart = null;
                             typeNameEnd = 0;
                         }
+                        else if (GetPrecedence(self.peekNextUntilFoundOperator().id) != -1)
+                        {
+                            //is some kind of expression
+                            //go back
+                            self.tokenizer.index = prevIndex;
+                            //parse expression as per normal
+                            var primary = self.ParseExpression_Primary()
+                            catch |err|
+                            {
+                                //var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
+                                //try self.errorStatements.append(errStr);
+                                ClearCompoundStatement(result, self.allocator);
+                                return err;
+                            };
+                            var expr = self.ParseExpression(primary, 0)
+                            catch |err|
+                            {
+                                //var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
+                                //try self.errorStatements.append(errStr);
+                                ClearCompoundStatement(result, self.allocator);
+                                return err;
+                            };
+
+                            try result.append(StatementData
+                            {
+                                .otherExpression = expr
+                            });
+                        }
                         else if (typeNameStart == null)
                         {
                             typeNameStart = token.start;
-                            if (self.peekNextUntilValid().id == .ColonColon)
+                            var next = self.peekNextUntilValid();
+                            if (next.id == .ColonColon)
                             {
                                 while (true)
                                 {
-                                    var next = self.nextUntilValid();
+                                    next = self.nextUntilValid();
                                     if (next.id == .ColonColon or next.id == .Identifier)
                                     {
                                         typeNameEnd = next.end;
@@ -417,6 +474,53 @@ pub const Parser = struct {
                         }
                     }
                 },
+                .Minus, .Asterisk, .Bang, .Tilde =>
+                {
+                    if (typeNameStart == null)
+                    {
+                        const peekForwardID = self.peekNext().id;
+                        if ((token.id == .Asterisk and peekForwardID == .Identifier) or (token.id != .Asterisk and (peekForwardID == .Identifier or peekForwardID == .IntegerLiteral or peekForwardID == .FloatLiteral)))
+                        {
+                            //is some kind of expression
+                            //go back
+                            self.tokenizer.index = prevIndex;
+                            //parse expression as per normal
+                            var primary = self.ParseExpression_Primary()
+                            catch |err|
+                            {
+                                //var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
+                                //try self.errorStatements.append(errStr);
+                                ClearCompoundStatement(result, self.allocator);
+                                return err;
+                            };
+                            var expr = self.ParseExpression(primary, 0)
+                            catch |err|
+                            {
+                                //var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
+                                //try self.errorStatements.append(errStr);
+                                ClearCompoundStatement(result, self.allocator);
+                                return err;
+                            };
+
+                            try result.append(StatementData
+                            {
+                                .otherExpression = expr
+                            });
+                        }
+                    }
+                    else
+                    {
+                        if (token.id == .Asterisk)
+                        {
+                            typeNameEnd = token.end;
+                        }
+                        else
+                        {
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                    }
+                },
                 .Semicolon =>
                 {
                     if (!skipThisLine)
@@ -492,6 +596,12 @@ pub const Parser = struct {
             }
             else if (token.id == .Eof)
             {
+                var err = try self.WriteError("Syntax Error: Reached end of file while expecting )");
+                self.errorStatements.append(err)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
                 return Errors.SyntaxError;
             }
             else
@@ -513,18 +623,19 @@ pub const Parser = struct {
         };
         return ownedSlice;
     }
-    pub fn GetFullIdentifier(self: *Self, comptime untilValid: bool) ?usize
+    pub fn GetFullIdentifier(self: *Self, comptime untilValid: bool, comptime countPeriod: bool) ?usize
     {
         var typeNameEnd: ?usize = null;
         if (untilValid)
         {
-            if (self.peekNextUntilValid().id == .ColonColon)
+            var next = self.peekNextUntilValid();
+            if (next.id == .ColonColon or (countPeriod and next.id == .Period))
             {
                 while (true)
                 {
                     var initial: usize = self.tokenizer.index;
-                    var next = self.nextUntilValid();
-                    if (next.id == .ColonColon or next.id == .Identifier)
+                    next = self.nextUntilValid();
+                    if (next.id == .ColonColon or (countPeriod and next.id == .Period) or next.id == .Identifier)
                     {
                         typeNameEnd = next.end;
                     }
@@ -538,13 +649,14 @@ pub const Parser = struct {
         }
         else
         {
-            if (self.peekNext().id == .ColonColon)
+            var next = self.peekNext();
+            if (next.id == .ColonColon or (countPeriod and next.id == .Period))
             {
                 while (true)
                 {
                     var initial: usize = self.tokenizer.index;
-                    var next = self.tokenizer.next();
-                    if (next.id == .ColonColon or next.id == .Identifier)
+                    next = self.tokenizer.next();
+                    if (next.id == .ColonColon or (countPeriod and next.id == .Period) or next.id == .Identifier)
                     {
                         typeNameEnd = next.end;
                     }
@@ -565,24 +677,39 @@ pub const Parser = struct {
         var nextIsConst = false;
         var variableType: ?[]const u8 = null;
         var variableName: ?[]const u8 = null;
+        var defaultValueExpr: ?ExpressionData = null;
+        var encounteredFirstDefaultValue: bool = false;
 
         while (true)
         {
             const token = self.nextUntilValid();
+            if (token.id == .Semicolon or token.id == .Period)
+            {
+                var err: string = try self.WriteError("Syntax Error: Unidentified/disallowed character token in arguments declaration");
+                try self.errorStatements.append(err);
+                return Errors.SyntaxError;
+            }
             if (token.id == .RParen)
             {
                 if (variableName != null and variableType != null)
                 {
+                    if (encounteredFirstDefaultValue and defaultValueExpr == null)
+                    {
+                        var err: string = try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
+                        try self.errorStatements.append(err);
+                        return Errors.SyntaxError;
+                    }
                     const variableData = VarData
                     {
                         .name = variableName.?,
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
-                        .defaultValue = null
+                        .defaultValue = defaultValueExpr
                     };
                     try vars.append(variableData);
                     variableName = null;
                     variableType = null;
+                    defaultValueExpr = null;
                     nextIsConst = false;
                 }
                 break;
@@ -607,7 +734,7 @@ pub const Parser = struct {
             {
                 if (variableType == null)
                 {
-                    var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
+                    var typeNameEnd: usize = self.GetFullIdentifier(true, false) orelse token.end;
                     variableType = self.SourceSlice(token.start, typeNameEnd);
                 }
                 else if (variableName == null)//variable name
@@ -616,25 +743,50 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Duplicate variable name/type");
+                    var err: string = try self.WriteError("Syntax Error: Duplicate variable type or name in arguments declaration");
                     try self.errorStatements.append(err);
                     return Errors.SyntaxError;
                 }
+            }
+            else if (token.id == .Equal)
+            {
+                if (variableType == null)
+                {
+                    var err: string = try self.WriteError("Syntax Error: Expected argument type declaration before using = sign to declare default value");
+                    try self.errorStatements.append(err);
+                    return Errors.SyntaxError;
+                }
+                if (variableName == null)
+                {
+                    var err: string = try self.WriteError("Syntax Error: Expected argument name declaration before using = sign to declare default value");
+                    try self.errorStatements.append(err);
+                    return Errors.SyntaxError;
+                }
+                var primary = try self.ParseExpression_Primary();
+                defaultValueExpr = try self.ParseExpression(primary, 0);
+                encounteredFirstDefaultValue = true;
             }
             else if (token.id == .Comma)
             {
                 if (variableName != null and variableType != null)
                 {
+                    if (encounteredFirstDefaultValue and defaultValueExpr == null)
+                    {
+                        var err: string = try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
+                        try self.errorStatements.append(err);
+                        return Errors.SyntaxError;
+                    }
                     const variableData = VarData
                     {
                         .name = variableName.?,
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
-                        .defaultValue = null
+                        .defaultValue = defaultValueExpr
                     };
                     try vars.append(variableData);
                     variableName = null;
                     variableType = null;
+                    defaultValueExpr = null;
                     nextIsConst = false;
                 }
                 else
@@ -679,7 +831,7 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Duplicate variable type");
+                    var err: string = try self.WriteError("Syntax Error: Duplicate variable type in arguments declaration");
                     try self.errorStatements.append(err);
                     return Errors.SyntaxError;
                 }
@@ -693,7 +845,7 @@ pub const Parser = struct {
     {
         switch (ID)
         {
-            .Minus, .Plus =>
+            .Minus, .Plus, .AmpersandAmpersand, .PipePipe =>
             {
                 return 1;
             },
@@ -707,6 +859,10 @@ pub const Parser = struct {
     {
         switch (ID)
         {
+            .PlusEqual, .MinusEqual, .AsteriskEqual, .PercentEqual, .SlashEqual =>
+            {
+                return 4;
+            },
             .Asterisk, .Slash, .Percent =>
             {
                 return 3;
@@ -749,7 +905,12 @@ pub const Parser = struct {
                 var next = self.nextUntilValid();//peekNextUntilValid();
                 if (next.id != .Identifier)
                 {
-                    return Errors.SyntaxError;
+                    var err = try self.WriteError("Syntax Error: Identifier expected after .");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
                 }
                 else
                 {
@@ -792,6 +953,12 @@ pub const Parser = struct {
 
             if (self.tokenizer.buffer[self.tokenizer.index] != ')')
             {
+                var err = try self.WriteError("Syntax Error: Expected )");
+                self.errorStatements.append(err)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
                 return Errors.SyntaxError;
             }
 
@@ -814,15 +981,30 @@ pub const Parser = struct {
                 else if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+                    var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
                     return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
                 {
+                    var err = try self.WriteError("Syntax Error: Attempting to place negative sign on unrecognised literal");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
                     return Errors.SyntaxError;
                 }
             }
-            else return Errors.SyntaxError;
+            else
+            {
+                var err = try self.WriteError("Syntax Error: Spacing is not allowed between the negative sign and whatever comes next");
+                self.errorStatements.append(err)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
+                return Errors.SyntaxError;
+            }
         }
         else if (token.id == .Asterisk)
         {
@@ -840,10 +1022,25 @@ pub const Parser = struct {
                 }
                 else
                 {
+                    var err = try self.WriteError("Syntax Error: Expected identifier after pointer dereference asterisk");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
                     return Errors.SyntaxError;
                 }
             }
-            else return Errors.SyntaxError;
+            else 
+            {
+                var err = try self.WriteError("Syntax Error: Spacing not allowed after pointer dereference asterisk!");
+                self.errorStatements.append(err)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
+                return Errors.SyntaxError;
+            }
         }
         else if (token.id == .Bang)
         {
@@ -861,7 +1058,7 @@ pub const Parser = struct {
                 else if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+                    var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
                     return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
@@ -880,7 +1077,7 @@ pub const Parser = struct {
         }
         else if (token.id == .Identifier)
         {
-            var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+            var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
             return self.ParseExpression_Identifier(self.SourceSlice(token.start, typeNameEnd));
             // return ExpressionData
             // {
@@ -1266,6 +1463,11 @@ pub const Operator = enum
     LeftShift, // <<
     RightShift, // >>
     BitwiseNot, // ~
+    PlusEqual,
+    MinusEqual,
+    AsteriskEqual,
+    SlashEqual,
+    PercentEqual
 };
 pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"Plus", Operator.Plus},
@@ -1288,6 +1490,11 @@ pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"AngleBracketAngleBracketLeft", Operator.LeftShift},
     .{"AngleBracketAngleBracketRight", Operator.RightShift},
     .{"Tilde", Operator.BitwiseNot},
+    .{"PlusEqual", Operator.PlusEqual},
+    .{"MinusEqual", Operator.MinusEqual},
+    .{"AsteriskEqual", Operator.AsteriskEqual},
+    .{"SlashEqual", Operator.SlashEqual},
+    .{"PercentEqual", Operator.PercentEqual}
 });
 pub const OperatorData = struct
 {
@@ -1463,6 +1670,7 @@ pub const StatementDataTag = enum
     structDeclaration,
     functionInvoke,
     returnStatement,
+    otherExpression,
     IfStatement,
     WhileStatement,
     ForStatement,
@@ -1477,6 +1685,7 @@ pub const StatementData = union(StatementDataTag)
     structDeclaration: StructData,
     functionInvoke: FunctionCallData,
     returnStatement: ExpressionData,
+    otherExpression: ExpressionData,
     IfStatement: IfData,
     WhileStatement: WhileData,
     ForStatement: ForData,
@@ -1493,6 +1702,7 @@ pub const StatementData = union(StatementDataTag)
             .structDeclaration => |*decl| decl.deinit(allocator),
             .functionInvoke => |*invoke| invoke.deinit(allocator),
             .returnStatement => |*stmt| stmt.deinit(allocator),
+            .otherExpression => |*stmt| stmt.deinit(allocator),
             .IfStatement => |*ifData| ifData.deinit(allocator),
             .WhileStatement => |*whileData| whileData.deinit(allocator),
             .ForStatement => |*forData| forData.deinit(allocator),
@@ -1518,6 +1728,7 @@ pub const StatementData = union(StatementDataTag)
                 try str.concat_deinit(&stmtStr);
                 return str;
             },
+            .otherExpression => |*stmt| return stmt.ToString(allocator),
             .IfStatement => |*ifDat| return ifDat.ToString(allocator),
             .WhileStatement => |*whileDat| return whileDat.ToString(allocator),
             .includeStatement => |include|

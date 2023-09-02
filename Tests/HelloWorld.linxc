@@ -5,13 +5,17 @@ int OtherFunction(int args1)
     return args1 == 2;
 }
 
-struct ComponentA
+struct Vector2
 {
-    glm::vec2 vectorA;
-    int b = 5 + 4;
+    float x;
+    float y;
 
-    glm::vec2 Function()
+    float Dot(Vector2 other)
     {
-        return vectorA + glm::vec2(1, 2).add(glm::vec2(3, 4).dot(2.5f, 5)).x * glm::vec2(1, 3.4f);
+        return x * other.x + y * other.y;
+    }
+    bool Equals(Vector2 other)
+    {
+        return x == other.x && y == other.y;
     }
 };
