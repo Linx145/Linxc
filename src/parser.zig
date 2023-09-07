@@ -634,8 +634,8 @@ pub const Parser = struct {
                                 //just use parseidentifier here, if rando variable, throw it
                                 //we need ParseExpression_Identifier to detect the beginning LParen so we move back 1 step
                                 self.tokenizer.index = self.tokenizer.prevIndex;
-                                var expr: ExpressionData = try self.ParseExpression_Identifier(foundIdentifier.?);
-                                switch (expr)
+                                var expr: ExpressionChain = try self.ParseExpression_Identifier(foundIdentifier.?);
+                                switch (expr.expression)
                                 {
                                     .FunctionCall => |funcCall|
                                     {
@@ -644,8 +644,7 @@ pub const Parser = struct {
                                             .functionInvoke = FunctionCallData
                                             {
                                                 .name = funcCall.name,
-                                                .inputParams = funcCall.inputParams,
-                                                .nextCall = funcCall.nextCall
+                                                .inputParams = funcCall.inputParams
                                             }
                                         }
                                         );
@@ -773,7 +772,7 @@ pub const Parser = struct {
                         {
                             //is variable
                             var primary = try self.ParseExpression_Primary();
-                            const expression: ExpressionData = try self.ParseExpression(primary, 0);
+                            const expression: ExpressionChain = try self.ParseExpression(primary, 0);
                             const varName = foundIdentifier.?;
                             const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
                             const varData: VarData = VarData
@@ -801,19 +800,20 @@ pub const Parser = struct {
         }
         return result;
     }
-    pub fn GetFullIdentifier(self: *Self, comptime untilValid: bool, comptime countPeriod: bool) ?usize
+    ///Gets the full identifier of a variable type by compiling :: namespaces
+    pub fn GetFullIdentifier(self: *Self, comptime untilValid: bool) ?usize
     {
         var typeNameEnd: ?usize = null;
         if (untilValid)
         {
             var next = self.peekNextUntilValid();
-            if (next.id == .ColonColon or (countPeriod and next.id == .Period))
+            if (next.id == .ColonColon)
             {
                 while (true)
                 {
                     var initial: usize = self.tokenizer.index;
                     next = self.nextUntilValid();
-                    if (next.id == .ColonColon or (countPeriod and next.id == .Period) or next.id == .Identifier)
+                    if (next.id == .ColonColon or next.id == .Identifier)
                     {
                         typeNameEnd = next.end;
                     }
@@ -828,13 +828,13 @@ pub const Parser = struct {
         else
         {
             var next = self.peekNext();
-            if (next.id == .ColonColon or (countPeriod and next.id == .Period))
+            if (next.id == .ColonColon)
             {
                 while (true)
                 {
                     var initial: usize = self.tokenizer.index;
                     next = self.tokenizer.next();
-                    if (next.id == .ColonColon or (countPeriod and next.id == .Period) or next.id == .Identifier)
+                    if (next.id == .ColonColon or next.id == .Identifier)
                     {
                         typeNameEnd = next.end;
                     }
@@ -855,7 +855,7 @@ pub const Parser = struct {
         var nextIsConst = false;
         var variableType: ?[]const u8 = null;
         var variableName: ?[]const u8 = null;
-        var defaultValueExpr: ?ExpressionData = null;
+        var defaultValueExpr: ?ExpressionChain = null;
         var encounteredFirstDefaultValue: bool = false;
 
         while (true)
@@ -910,9 +910,12 @@ pub const Parser = struct {
             }
             else if (token.id == .Identifier)
             {
+                //todo: handle accessor chaining properly, with array indexing with expressions,
+                //function chaining
                 if (variableType == null)
                 {
-                    var typeNameEnd: usize = self.GetFullIdentifier(true, false) orelse token.end;
+                    //detect variable type
+                    var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
                     variableType = self.SourceSlice(token.start, typeNameEnd);
                 }
                 else if (variableName == null)//variable name
@@ -1064,19 +1067,49 @@ pub const Parser = struct {
         }
     }
 
-    pub fn ParseInputParams(self: *Self) Errors![]ExpressionData
+    pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) Errors![]ExpressionChain
     {
-        var params = std.ArrayList(ExpressionData).init(self.allocator);
+        var params = std.ArrayList(ExpressionChain).init(self.allocator);
         var token = self.nextUntilValid();
         while (true)
         {
             if (token.id == .RParen)
             {
-                break;
+                if (!endOnRBracket)
+                {
+                    break;
+                }
+                else
+                {
+                    var err = try self.WriteError("Syntax Error: Expecting function arguments to be closed on a ), not ]");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
+                    return Errors.SyntaxError;
+                }
             }
-            else if (token.id == .Eof)
+            else if (token.id == .RBracket)
             {
-                var err = try self.WriteError("Syntax Error: Reached end of file while expecting )");
+                if (endOnRBracket)
+                {
+                    break;
+                }
+                else
+                {
+                    var err = try self.WriteError("Syntax Error: Expecting indexer to be closed on a ], not )");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
+                    return Errors.SyntaxError;
+                }
+            }
+            else if (token.id == .Eof or token.id == .Semicolon)
+            {
+                var err = try self.WriteError("Syntax Error: Reached end of line while expecting )");
                 self.errorStatements.append(err)
                 catch
                 {
@@ -1110,18 +1143,74 @@ pub const Parser = struct {
         };
         return ownedSlice;
     }
-    pub fn ParseExpression_FuncCall(self: *Self, identifierName: []const u8) Errors!ExpressionData
-    {
-        //_ = self.nextUntilValid();
-        var inputParams = try self.ParseInputParams();
 
-        var nextIdentifier: ?ExpressionData = null;
+    /// parses an identifier in expression, returning either a ExpressionData with
+    /// variable or with a function call
+    pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionChain
+    {
+        var result: ExpressionChain = undefined;
+        var token = self.peekNextUntilValid();
+        if (token.id == .LParen)
+        {
+            _ = self.nextUntilValid(); //advance beyond the (
+            var inputParams = try self.ParseInputParams(false);
+
+            var functionCall = self.allocator.create(FunctionCallData)
+            catch
+            {
+                return Errors.OutOfMemoryError;
+            };
+            functionCall.name = identifierName;
+            functionCall.inputParams = inputParams;
+
+            result = ExpressionChain
+            {
+                .expression = ExpressionData
+                {
+                    .FunctionCall = functionCall
+                }
+            };
+        }
+        else if (token.id == .LBracket) //array indexer
+        {
+            _ = self.nextUntilValid(); //advance beyond the [
+            var indexParams = try self.ParseInputParams(true);
+
+            var functionCall = self.allocator.create(FunctionCallData)
+            catch
+            {
+                return Errors.OutOfMemoryError;
+            };
+            functionCall.name = identifierName;
+            functionCall.inputParams = indexParams;
+
+            result = ExpressionChain
+            {
+                .expression = ExpressionData
+                {
+                    .IndexedAccessor = functionCall
+                }
+            };
+        }
+        else
+        {
+            result = ExpressionChain
+            {
+                .expression = ExpressionData
+                {
+                    .Variable = identifierName
+                }
+            };
+        }
+
+        var nextIdentifierPtr: ?*ExpressionChain = null;
 
         //function call changing/retrieval
         //eg: glm::vec2(1, 2).add(2, 3).x
         var peekNextID = self.peekNextUntilValid().id;
         if (peekNextID == .Period)
         {
+            _ = self.nextUntilValid();
             var next = self.nextUntilValid();//peekNextUntilValid();
             if (next.id != .Identifier)
             {
@@ -1134,45 +1223,23 @@ pub const Parser = struct {
             }
             else
             {
-                //dont need to care about namespace here!!!!
                 var nextIdentifierName = self.SourceTokenSlice(next);
-                nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
+                const nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
+
+                nextIdentifierPtr = self.allocator.create(ExpressionChain)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
+                nextIdentifierPtr.?.expression = nextIdentifier.expression;
+                nextIdentifierPtr.?.next = nextIdentifier.next;
             }
         }
-        var functionCall = self.allocator.create(FunctionCallData)
-        catch
-        {
-            return Errors.OutOfMemoryError;
-        };
-        functionCall.name = identifierName;
-        functionCall.inputParams = inputParams;
-        functionCall.nextCall = nextIdentifier;
-        
-        return ExpressionData
-        {
-            .FunctionCall = functionCall
-        };
-    }
 
-    /// parses an identifier in expression, returning either a ExpressionData with
-    /// variable or with a function call
-    pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionData
-    {
-        var token = self.peekNextUntilValid();
-        if (token.id == .LParen)
-        {
-            _ = self.nextUntilValid(); //advance beyond the (
-            return self.ParseExpression_FuncCall(identifierName);
-        }
-        else
-        {
-            return ExpressionData
-            {
-                .Variable = identifierName
-            };
-        }
+        result.next = nextIdentifierPtr;
+        return result;
     }
-    pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionData
+    pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionChain
     {
         const token = self.tokenizer.next();
         if (token.id == .LParen)
@@ -1204,15 +1271,18 @@ pub const Parser = struct {
                 if (nextToken.id == .IntegerLiteral or nextToken.id == .FloatLiteral)
                 {
                     _ = self.tokenizer.next();
-                    return ExpressionData
+                    return ExpressionChain
                     {
-                        .Literal = self.tokenizer.buffer[token.start..nextToken.end]
+                        .expression = ExpressionData
+                        {
+                            .Literal = self.tokenizer.buffer[token.start..nextToken.end]
+                        }
                     };
                 }
                 else if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
+                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
                     return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
@@ -1246,9 +1316,12 @@ pub const Parser = struct {
                 if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    return ExpressionData
+                    return ExpressionChain
                     {
-                        .Variable = self.tokenizer.buffer[token.start..nextToken.end]
+                        .expression = ExpressionData
+                        {
+                            .Variable = self.tokenizer.buffer[token.start..nextToken.end]
+                        }
                     };
                 }
                 else
@@ -1278,56 +1351,56 @@ pub const Parser = struct {
             if (self.tokenizer.buffer[token.end] != ' ')
             {
                 const nextToken = self.peekNext();
-                if (nextToken.id == .Keyword_true or nextToken.id == .Keyword_false)
+                if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    return ExpressionData
-                    {
-                        .Literal = self.tokenizer.buffer[token.start..nextToken.end]
-                    };
-                }
-                else if (nextToken.id == .Identifier)
-                {
-                    _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
+                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
                     return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
+                }
+                else if (nextToken.id == .Keyword_true or nextToken.id == .Keyword_false)
+                {
+                    var err = try self.WriteError("Syntax Error: !true and !false are not allowed for the sake of clarity");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
+                    return Errors.SyntaxError;
                 }
                 else
                 {
+                    var err = try self.WriteError("Syntax Error: Cannot put ! in front of non identifier!");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
                     return Errors.SyntaxError;
                 }
             }
             else return Errors.SyntaxError;
         }
-        else if (token.id == .IntegerLiteral or token.id == .StringLiteral or token.id == .FloatLiteral or token.id == .CharLiteral)
+        else if (token.id == .IntegerLiteral or token.id == .StringLiteral or token.id == .FloatLiteral or token.id == .CharLiteral or token.id == .Keyword_true or token.id == .Keyword_false)
         {
-            return ExpressionData
+            return ExpressionChain
             {
-                .Literal = self.SourceTokenSlice(token)
-            };
-        }
-        else if (token.id == .Keyword_true or token.id == .Keyword_false)
-        {
-            return ExpressionData
-            {
-                .Literal = self.SourceTokenSlice(token)
+                .expression = ExpressionData
+                {
+                    .Literal = self.SourceTokenSlice(token)
+                }
             };
         }
         else if (token.id == .Identifier)
         {
-            var typeNameEnd: usize = self.GetFullIdentifier(false, true) orelse token.end;
+            var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
             return self.ParseExpression_Identifier(self.SourceSlice(token.start, typeNameEnd));
-            // return ExpressionData
-            // {
-            //     .Variable = self.SourceTokenSlice(token)
-            // };
         }
         else
         {
             return Errors.SyntaxError;
         }
     }
-    pub fn ParseExpression(self: *Self, initial: ExpressionData, minPrecedence: i32) Errors!ExpressionData
+    pub fn ParseExpression(self: *Self, initial: ExpressionChain, minPrecedence: i32) Errors!ExpressionChain
     {
         var lhs = initial;
 
@@ -1362,7 +1435,7 @@ pub const Parser = struct {
             operator.rightExpression = rhs;
             operator.operator = TokenToOperator.get(@tagName(op.id)).?;
 
-            lhs = ExpressionData
+            lhs.expression = ExpressionData
             {
                 .Op = operator
             };
@@ -1475,7 +1548,7 @@ pub const VarData = struct
     name: []const u8,
     typeName: []const u8,
     isConst: bool,
-    defaultValue: ?ExpressionData,
+    defaultValue: ?ExpressionChain,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -1532,8 +1605,7 @@ pub const MacroDefinitionData = struct
 pub const FunctionCallData = struct
 {
     name: []const u8,
-    inputParams: []ExpressionData,
-    nextCall: ?ExpressionData,
+    inputParams: []ExpressionChain,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -1552,21 +1624,11 @@ pub const FunctionCallData = struct
             }
         }
         try str.concat(")");
-        if (self.nextCall != null)
-        {
-            try str.concat(".");
-            var nextCallStr = try self.nextCall.?.ToString(allocator);
-            try str.concat_deinit(&nextCallStr);
-        }
 
         return str;
     }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
-        if (self.nextCall != null)
-        {
-            self.nextCall.?.deinit(allocator);
-        }
         for (self.inputParams) |*param|
         {
             param.deinit(allocator);
@@ -1630,7 +1692,8 @@ pub const ExpressionDataTag = enum
     Literal,
     Variable,
     Op,
-    FunctionCall
+    FunctionCall,
+    IndexedAccessor
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
@@ -1638,6 +1701,7 @@ pub const ExpressionData = union(ExpressionDataTag)
     Variable: []const u8,
     Op: *OperatorData,
     FunctionCall: *FunctionCallData,
+    IndexedAccessor: *FunctionCallData,
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
@@ -1653,11 +1717,16 @@ pub const ExpressionData = union(ExpressionDataTag)
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
             },
+            ExpressionDataTag.IndexedAccessor => |*value|
+            {
+                value.*.deinit(alloc);
+                alloc.destroy(value.*);
+            },
             else => {}
         }
     }
 
-    pub fn ToString(self: @This(), allocator: std.mem.Allocator) !string
+    pub fn ToString(self: @This(), allocator: std.mem.Allocator) anyerror!string
     {
         var str = string.init(allocator);
         switch (self)
@@ -1679,9 +1748,43 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 str.deinit();
                 return call.ToString(allocator);
+            },
+            ExpressionDataTag.IndexedAccessor => |call|
+            {
+                str.deinit();
+                return call.ToString(allocator);
             }
         }
         return str;
+    }
+};
+pub const ExpressionChain = struct
+{
+    expression: ExpressionData,
+    next: ?*ExpressionChain = null,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
+    {
+        self.expression.deinit(allocator);
+        if (self.next != null)
+        {
+            self.next.?.deinit(allocator);
+            allocator.destroy(self.next.?);
+        }
+    }
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        var myExpression: string = try self.expression.ToString(allocator);
+        try result.concat_deinit(&myExpression);
+
+        if (self.next != null)
+        {
+            try result.concat(".");
+            var nextExpression: string = try self.next.?.ToString(allocator);
+            try result.concat_deinit(&nextExpression);
+        }
+        return result;
     }
 };
 
@@ -1742,9 +1845,9 @@ pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
 });
 pub const OperatorData = struct
 {
-    leftExpression: ExpressionData,
+    leftExpression: ExpressionChain,
     operator: Operator,
-    rightExpression: ExpressionData,
+    rightExpression: ExpressionChain,
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
@@ -1771,7 +1874,7 @@ pub const OperatorData = struct
 
 pub const WhileData = struct
 {
-    condition: ExpressionData,
+    condition: ExpressionChain,
     statement: CompoundStatementData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
@@ -1802,7 +1905,7 @@ pub const WhileData = struct
 pub const ForData = struct
 {
     initializer: CompoundStatementData,
-    condition: ExpressionData,
+    condition: ExpressionChain,
     shouldStep: CompoundStatementData,
     statement: CompoundStatementData,
 
@@ -1849,7 +1952,7 @@ pub const ForData = struct
 };
 pub const IfData = struct
 {
-    condition: ExpressionData,
+    condition: ExpressionChain,
     statement: CompoundStatementData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
@@ -1927,8 +2030,8 @@ pub const StatementData = union(StatementDataTag)
     variableDeclaration: VarData,
     structDeclaration: StructData,
     functionInvoke: FunctionCallData,
-    returnStatement: ExpressionData,
-    otherExpression: ExpressionData,
+    returnStatement: ExpressionChain,
+    otherExpression: ExpressionChain,
     IfStatement: IfData,
     ElseStatement: CompoundStatementData,
     WhileStatement: WhileData,

@@ -8,17 +8,6 @@ struct Vector2
 
     bool Equals(Vector2 other)
     {
-        if (x == other.x && y == other.y)
-        {
-            return true;
-        }
-        else
-        {
-            for (int i = 0; i < 5; i += 1)
-            {
-                x += 1;
-            }
-            return false;
-        }
+        return glm::vec2(0, 1).add(1, 2).equals(other[0].x);
     }
 };
