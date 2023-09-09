@@ -1,4 +1,3 @@
 #pragma once
-#define CONSTRUCTOR(T, ...) T(__VA_ARGS__)
-#define DESTRUCTOR(T) ~T()
-#define NAMESPACE(T)
+#define namespace(T)
+#define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__) 

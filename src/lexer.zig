@@ -101,6 +101,7 @@ pub const TokenID = union(enum)
     Keyword_void,
     Keyword_volatile,
     Keyword_while,
+    Keyword_delegate,
 
     // ISO C99
     Keyword_bool,
@@ -245,7 +246,8 @@ pub const TokenID = union(enum)
             .Keyword_pragma => "pragma",
             .Keyword_ulong => "ulong",
             .Keyword_ushort => "ushort",
-            .Keyword_uint => "uint"
+            .Keyword_uint => "uint",
+            .Keyword_delegate => "delegate"
         };
     }
 
@@ -286,6 +288,7 @@ pub const TokenID = union(enum)
         .{ "void", .Keyword_void },
         .{ "volatile", .Keyword_volatile },
         .{ "while", .Keyword_while },
+        .{ "delegate", .Keyword_delegate },
 
         // ISO C99
         .{ "bool", .Keyword_bool },

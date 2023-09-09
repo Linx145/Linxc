@@ -1,3 +1,26 @@
+//the parser is in charge of turning raw tokens received from the tokenizer(lexer) into an AST.
+const ASTnodes = @import("ASTnodes.zig");
+const VarData = ASTnodes.VarData;
+const TagData = ASTnodes.TagData;
+const MacroDefinitionData = ASTnodes.MacroDefinitionData;
+const FunctionCallData = ASTnodes.FunctionCallData;
+const FunctionData = ASTnodes.FunctionData;
+const ExpressionDataTag = ASTnodes.ExpressionDataTag;
+const ExpressionData = ASTnodes.ExpressionData;
+const ExpressionChain = ASTnodes.ExpressionChain;
+const Operator = ASTnodes.Operator;
+const TokenToOperator = ASTnodes.TokenToOperator;
+const OperatorData = ASTnodes.OperatorData;
+const WhileData = ASTnodes.WhileData;
+const ForData = ASTnodes.ForData;
+const IfData = ASTnodes.IfData;
+const StructData = ASTnodes.StructData;
+const StatementDataTag = ASTnodes.StatementDataTag;
+const StatementData = ASTnodes.StatementData;
+const CompoundStatementData = ASTnodes.CompoundStatementData;
+const ClearCompoundStatement = ASTnodes.ClearCompoundStatement;
+const CompoundStatementToString = ASTnodes.CompoundStatementToString;
+
 const std = @import("std");
 const string = @import("zig-string.zig").String;
 const lexer = @import("lexer.zig");
@@ -5,13 +28,7 @@ const linkedLists = @import("linked-list.zig");
 const objPool = @import("object-pool.zig");
 const ExprPool = objPool.ObjectPool(linkedLists.LinkedList(ExpressionData));
 const io = @import("io.zig");
-
-pub const Errors = error
-{
-    SyntaxError,
-    OutOfMemoryError,
-    NotImplemented
-};
+const Errors = @import("errors.zig").Errors;
 
 pub const Parser = struct {
     pub const LinkedList = linkedLists.LinkedList(ExpressionData);
@@ -22,6 +39,7 @@ pub const Parser = struct {
     errorStatements: std.ArrayList(string),
     currentLine: usize,
     charsParsed: usize,
+    postParseStatement: ?*const fn(statement: StatementData, parentStatement: ?StatementData) anyerror!void,
 
     pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
     {
@@ -31,7 +49,8 @@ pub const Parser = struct {
             .tokenizer = tokenizer,
             .errorStatements = std.ArrayList(string).init(allocator),
             .currentLine = 0,
-            .charsParsed = 0
+            .charsParsed = 0,
+            .postParseStatement = null
         };
     }
     pub fn deinit(self: *Self) !void
@@ -138,8 +157,17 @@ pub const Parser = struct {
 
         return result;
     }
+
+    pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, parentStatement: ?StatementData) !void
+    {
+        try result.append(statement);
+        if (self.postParseStatement != null)
+        {
+            try self.postParseStatement.?(statement, parentStatement);
+        }
+    }
     
-    pub fn Parse(self: *Self, endOnSemicolon: bool, commaIsSemicolon: bool, endOnRParen: bool) !CompoundStatementData
+    pub fn Parse(self: *Self, endOnSemicolon: bool, commaIsSemicolon: bool, endOnRParen: bool, parent: ?StatementData) !CompoundStatementData
     {
         var result = CompoundStatementData.init(self.allocator);
 
@@ -203,6 +231,33 @@ pub const Parser = struct {
                 {
                     continue;
                 },
+                .Keyword_delegate =>
+                {
+
+                    while (true)
+                    {
+                        var next = self.tokenizer.next();
+                        if (next.id == .Semicolon)
+                        {
+                            break;
+                        }
+                        if (next.id == .LParen) //todo: delegate declaration statement
+                        {
+
+                        }
+                        else if (next.id == .RParen)
+                        {
+
+                        }
+                        else if (next.id == .Nl or next.id == .Eof)
+                        {
+                            var err: string = try self.WriteError("Syntax Error: Expected ; after delegate() declaration");
+                            try self.errorStatements.append(err);
+                            ClearCompoundStatement(result, self.allocator);
+                            return Errors.SyntaxError;
+                        }
+                    }
+                },
                 .Keyword_include =>
                 {
                     const token2: lexer.Token = self.tokenizer.next();
@@ -213,7 +268,7 @@ pub const Parser = struct {
                         {
                             .includeStatement = str
                         };
-                        try result.append(statement);
+                        try self.AppendToCompoundStatement(&result, statement, parent);
                     }
                     else
                     {
@@ -283,16 +338,17 @@ pub const Parser = struct {
                             {
                                 next = self.nextUntilValid();
                             }
-                            var statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
+                            const invalidStatement = StatementData{.invalid = 0};
+                            const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, invalidStatement);
 
-                            try result.append(StatementData
+                            try self.AppendToCompoundStatement(&result, StatementData
                             {
                                 .IfStatement = IfData
                                 {
                                     .condition = expression,
                                     .statement = statement
                                 }
-                            });
+                            }, parent);
                         }
                     }
                 },
@@ -300,23 +356,17 @@ pub const Parser = struct {
                 {
                     if (!skipThisLine)
                     {
+                        var elseStatement: CompoundStatementData = undefined;
                         if (self.peekNextUntilValid().id == .LBrace)
                         {
-                            var nextStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
-                            try result.append(StatementData
-                            {
-                                .ElseStatement = nextStatement
-                            });
+                            elseStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
                         }
                         else
                         {
                             //compound statement parse until semicolon
-                            var nextStatement = try self.Parse(true, commaIsSemicolon, endOnRParen);
-                            try result.append(StatementData
-                            {
-                                .ElseStatement = nextStatement
-                            });
+                            elseStatement = try self.Parse(true, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
                         }
+                        try self.AppendToCompoundStatement(&result, StatementData{.ElseStatement=elseStatement}, parent);
                     }
                 },
                 .Keyword_const => 
@@ -360,7 +410,7 @@ pub const Parser = struct {
                         }
                         //parse initializer statement
                         
-                        const initializerStatements = try self.Parse(true, true, endOnRParen);
+                        const initializer = try self.Parse(true, true, endOnRParen, StatementData{.invalid = 0});
 
                         const conditionPrimary = try self.ParseExpression_Primary();
                         const condition = try self.ParseExpression(conditionPrimary, 0);
@@ -372,29 +422,29 @@ pub const Parser = struct {
                             ClearCompoundStatement(result, self.allocator);
                             return Errors.SyntaxError;
                         }
-                        const onStep = try self.Parse(true, commaIsSemicolon, true);
+                        const shouldStep = try self.Parse(true, commaIsSemicolon, true, StatementData{.invalid = 0});
+                        var statement: CompoundStatementData = undefined;
 
-                        var bodyStatement: CompoundStatementData = undefined;
                         if (self.nextUntilValid().id != .LBrace)
                         {
                             self.tokenizer.index = self.tokenizer.prevIndex;
-                            bodyStatement = try self.Parse(true, commaIsSemicolon, endOnRParen);
+                            statement = try self.Parse(true, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
                         }
                         else
                         {
-                            bodyStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
+                            statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
                         }
 
-                        try result.append(StatementData
+                        try self.AppendToCompoundStatement(&result, StatementData
                         {
                             .ForStatement = ForData
                             {
-                                .initializer = initializerStatements,
+                                .initializer = initializer,
                                 .condition = condition,
-                                .shouldStep = onStep,
-                                .statement = bodyStatement
+                                .shouldStep = shouldStep,
+                                .statement = statement
                             }
-                        });
+                        }, StatementData{.invalid = 0});
                     }
                 },
                 .Keyword_while =>
@@ -416,21 +466,21 @@ pub const Parser = struct {
                             return Errors.SyntaxError;
                         }
                         var primary = try self.ParseExpression_Primary();
-                        var expr = try self.ParseExpression(primary, 0);
+                        const condition = try self.ParseExpression(primary, 0);
                         var next = self.nextUntilValid();
                         while (next.id != .LBrace)
                         {
                             next = self.nextUntilValid();
                         }
-                        var statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
-                        try result.append(StatementData
+                        const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                        try self.AppendToCompoundStatement(&result, StatementData
                         {
                             .WhileStatement = WhileData
                             {
-                                .condition = expr,
+                                .condition = condition,
                                 .statement = statement
                             }
-                        });
+                        }, parent);
                     }
                 },
                 .Keyword_return =>
@@ -454,10 +504,10 @@ pub const Parser = struct {
                             return err;
                         };
 
-                        try result.append(StatementData
+                        try self.AppendToCompoundStatement(&result, StatementData
                         {
                             .returnStatement = expr
-                        });
+                        }, parent);
 
                         expectSemicolon = true;
                     }
@@ -491,18 +541,21 @@ pub const Parser = struct {
                                 ClearCompoundStatement(result, self.allocator);
                                 return Errors.SyntaxError;
                             }
-                            const structBody = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen)
+                            const body = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0})
                             catch |err|
                             {
                                 ClearCompoundStatement(result, self.allocator);
                                 return err;
                             };
-                            const structData = StructData
+
+                            try self.AppendToCompoundStatement(&result, StatementData
                             {
-                                .name = structName,
-                                .body = structBody
-                            };
-                            try result.append(StatementData{.structDeclaration = structData});
+                                .structDeclaration = StructData
+                                {
+                                    .name = structName,
+                                    .body = body
+                                }
+                            }, parent);
                             nextIsStruct = false;
                             typeNameStart = null;
                             typeNameEnd = 0;
@@ -532,10 +585,10 @@ pub const Parser = struct {
                                 return err;
                             };
 
-                            try result.append(StatementData
+                            try self.AppendToCompoundStatement(&result, StatementData
                             {
                                 .otherExpression = expr
-                            });
+                            }, parent);
                             expectSemicolon = true;
                         }
                         else if (typeNameStart == null)
@@ -555,14 +608,6 @@ pub const Parser = struct {
                                 }
                             }
                             else typeNameEnd = token.end;
-
-                            //handle standalone function invocation
-                            if (next.id == .LParen)
-                            {
-                                foundIdentifier = self.SourceSlice(typeNameStart.?, typeNameEnd);
-                                typeNameStart = null;
-                                typeNameEnd = 0;
-                            }
                         }
                         else 
                         {
@@ -588,7 +633,22 @@ pub const Parser = struct {
                 {
                     if (!skipThisLine)
                     {
-                        //function
+                        if (foundIdentifier == null and typeNameStart != null)
+                        {
+                            foundIdentifier = self.SourceSlice(typeNameStart.?, typeNameEnd);
+                            typeNameStart = null;
+                            typeNameEnd = 0;
+                        
+                            var next = self.peekNextUntilValid();
+                            if (next.id == .Asterisk)
+                            {
+                                var err = try self.WriteError("Syntax Error: found C style function pointer, use delegate() macro from Linxc.h to typedef function pointer types and then use them instead");
+                                try self.errorStatements.append(err);
+                                ClearCompoundStatement(result, self.allocator);
+                                return Errors.SyntaxError;
+                            }
+                        }
+                        //declare function
                         if (foundIdentifier != null)
                         {
                             if (typeNameStart != null)
@@ -616,18 +676,18 @@ pub const Parser = struct {
                                         break;
                                     }
                                 }
-                                const body = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen);
+                                const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
 
-                                try result.append(StatementData
+                                try self.AppendToCompoundStatement(&result, StatementData
                                 {
                                     .functionDeclaration = FunctionData
                                     {
                                         .name = functionName,
                                         .returnType = functionReturnType,
                                         .args = args,
-                                        .statement = body
+                                        .statement = statement
                                     }
-                                });
+                                }, parent);
                             }
                             else
                             {
@@ -639,15 +699,14 @@ pub const Parser = struct {
                                 {
                                     .FunctionCall => |funcCall|
                                     {
-                                        try result.append(StatementData
+                                        try self.AppendToCompoundStatement(&result, StatementData
                                         {
                                             .functionInvoke = FunctionCallData
                                             {
                                                 .name = funcCall.name,
                                                 .inputParams = funcCall.inputParams
                                             }
-                                        }
-                                        );
+                                        }, parent);
                                         //deinit original funcCall item
                                     },
                                     else =>
@@ -696,10 +755,10 @@ pub const Parser = struct {
                                 return err;
                             };
 
-                            try result.append(StatementData
+                            try self.AppendToCompoundStatement(&result, StatementData
                             {
                                 .otherExpression = expr
-                            });
+                            }, parent);
                         }
                     }
                     else
@@ -731,7 +790,7 @@ pub const Parser = struct {
                                 .typeName = typeName,
                                 .defaultValue = null
                             };
-                            try result.append(StatementData{.variableDeclaration = varData});
+                            try self.AppendToCompoundStatement(&result, StatementData{.variableDeclaration = varData}, parent);
                             nextIsConst = false;
                             foundIdentifier = null;
                             typeNameStart = null;
@@ -782,7 +841,7 @@ pub const Parser = struct {
                                 .typeName = typeName,
                                 .defaultValue = expression
                             };
-                            try result.append(StatementData{.variableDeclaration = varData});
+                            try self.AppendToCompoundStatement(&result, StatementData{.variableDeclaration = varData}, parent);
                             nextIsConst = false;
                             foundIdentifier = null;
                             typeNameStart = null;
@@ -1109,7 +1168,7 @@ pub const Parser = struct {
             }
             else if (token.id == .Eof or token.id == .Semicolon)
             {
-                var err = try self.WriteError("Syntax Error: Reached end of line while expecting )");
+                var err = try self.WriteError("Syntax Error: Reached end of line while expecting closing character");
                 self.errorStatements.append(err)
                 catch
                 {
@@ -1511,7 +1570,7 @@ test "file parsing"
     var parser: Parser = try Parser.init(alloc, tokenizer);
     std.debug.print("\n", .{});
 
-    var result = parser.Parse(false, false, false)
+    var result = parser.Parse(false, false, false, null)
     catch
     {
         for (parser.errorStatements.items) |errorStatement|
@@ -1537,591 +1596,4 @@ test "file parsing"
     try parser.deinit();
 
     alloc.free(buffer);
-}
-
-// (isConst? const : ) typeName name
-//right after varData, can be
-//comma(if in function args)
-//; (if in compound statement)
-pub const VarData = struct
-{
-    name: []const u8,
-    typeName: []const u8,
-    isConst: bool,
-    defaultValue: ?ExpressionChain,
-
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-        if (self.isConst)
-        {
-            try str.concat("const ");
-        }
-        try str.concat(self.typeName);
-        try str.concat(" ");
-        try str.concat(self.name);
-        if (self.defaultValue != null)
-        {
-            try str.concat(" = ");
-            var defaultValueStr = try self.defaultValue.?.ToString(allocator);
-            
-            try str.concat_deinit(&defaultValueStr);
-        }
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        //self.name.deinit();
-        //self.typeName.deinit();
-        if (self.defaultValue != null)
-        {
-            self.defaultValue.?.deinit(allocator);
-        }
-    }
-};
-
-// NAME(args)
-pub const TagData = struct 
-{
-    name: []const u8,
-    args: []VarData,
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        //self.name.deinit();
-        for (self.args) |arg|
-        {
-            arg.deinit(allocator);
-        }
-    }
-};
-pub const MacroDefinitionData = struct
-{
-    name: []const u8,
-    args: [][]const u8,
-    expandsTo: []const u8
-};
-
-pub const FunctionCallData = struct
-{
-    name: []const u8,
-    inputParams: []ExpressionChain,
-
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-
-        try str.concat(self.name);
-        try str.concat("(");
-        var i: usize = 0;
-        while (i < self.inputParams.len) : (i += 1)
-        {
-            var exprStr = try self.inputParams[i].ToString(allocator);
-            try str.concat_deinit(&exprStr);
-            if (i < self.inputParams.len - 1)
-            {
-                try str.concat(", ");
-            }
-        }
-        try str.concat(")");
-
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        for (self.inputParams) |*param|
-        {
-            param.deinit(allocator);
-        }
-        allocator.free(self.inputParams);
-    }
-};
-
-// returnType name(args) { statement }
-pub const FunctionData = struct
-{
-    name: []const u8,
-    returnType: []const u8,
-    args: []VarData,
-    statement: CompoundStatementData,
-
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
-    {
-        var compoundStatementString = try CompoundStatementToString(self.statement, allocator);
-
-        var str = string.init(allocator);
-        try str.concat(self.returnType);
-        try str.concat(" ");
-        try str.concat(self.name);
-        try str.concat("(");
-        var i: usize = 0;
-        while (i < self.args.len) : (i += 1)
-        {
-            const arg = &self.args[i];
-            var argsStr = try arg.ToString(allocator);
-            try str.concat_deinit(&argsStr);
-            if (i < self.args.len - 1)
-            {
-                try str.concat(", ");
-            }
-        }
-        try str.concat(") {\n");
-        try str.concat_deinit(&compoundStatementString);
-        try str.concat("}");
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        //self.name.deinit();
-        //self.returnType.deinit();
-        for (self.args) |*arg|
-        {
-            arg.deinit(allocator);
-        }
-        allocator.free(self.args);
-        for (self.statement.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        self.statement.deinit();
-    }
-};
-
-pub const ExpressionDataTag = enum
-{
-    Literal,
-    Variable,
-    Op,
-    FunctionCall,
-    IndexedAccessor
-};
-pub const ExpressionData = union(ExpressionDataTag)
-{
-    Literal: []const u8,
-    Variable: []const u8,
-    Op: *OperatorData,
-    FunctionCall: *FunctionCallData,
-    IndexedAccessor: *FunctionCallData,
-
-    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
-    {
-        switch (self.*)
-        {
-            ExpressionDataTag.Op => |*value|
-            {
-                value.*.deinit(alloc);
-                alloc.destroy(value.*);
-            },
-            ExpressionDataTag.FunctionCall => |*value|
-            {
-                value.*.deinit(alloc);
-                alloc.destroy(value.*);
-            },
-            ExpressionDataTag.IndexedAccessor => |*value|
-            {
-                value.*.deinit(alloc);
-                alloc.destroy(value.*);
-            },
-            else => {}
-        }
-    }
-
-    pub fn ToString(self: @This(), allocator: std.mem.Allocator) anyerror!string
-    {
-        var str = string.init(allocator);
-        switch (self)
-        {
-            ExpressionDataTag.Literal => |literal| 
-            {
-                try str.concat(literal);
-            },
-            ExpressionDataTag.Variable => |variable|
-            {
-                try str.concat(variable);
-            },
-            ExpressionDataTag.Op => |op| 
-            {
-                str.deinit();
-                return op.ToString(allocator);
-            },
-            ExpressionDataTag.FunctionCall => |call| 
-            {
-                str.deinit();
-                return call.ToString(allocator);
-            },
-            ExpressionDataTag.IndexedAccessor => |call|
-            {
-                str.deinit();
-                return call.ToString(allocator);
-            }
-        }
-        return str;
-    }
-};
-pub const ExpressionChain = struct
-{
-    expression: ExpressionData,
-    next: ?*ExpressionChain = null,
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        self.expression.deinit(allocator);
-        if (self.next != null)
-        {
-            self.next.?.deinit(allocator);
-            allocator.destroy(self.next.?);
-        }
-    }
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
-    {
-        var result: string = string.init(allocator);
-        var myExpression: string = try self.expression.ToString(allocator);
-        try result.concat_deinit(&myExpression);
-
-        if (self.next != null)
-        {
-            try result.concat(".");
-            var nextExpression: string = try self.next.?.ToString(allocator);
-            try result.concat_deinit(&nextExpression);
-        }
-        return result;
-    }
-};
-
-pub const Operator = enum
-{
-    Plus, //+
-    Minus, //-
-    Divide, // /
-    Multiply, //*
-    Not, // !
-    Equals, //==
-    NotEquals, // !=
-    LessThan, //<
-    LessThanEquals, //<=
-    MoreThan, //>
-    MoreThanEquals, //>=
-    And, //&&
-    Or, // ||
-    Modulo, //%
-    BitwiseAnd, //&
-    BitwiseOr, // |
-    BitwiseXOr, // ^
-    LeftShift, // <<
-    RightShift, // >>
-    BitwiseNot, // ~
-    PlusEqual,
-    MinusEqual,
-    AsteriskEqual,
-    SlashEqual,
-    PercentEqual
-};
-pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
-    .{"Plus", Operator.Plus},
-    .{"Minus", Operator.Minus},
-    .{"Slash", Operator.Divide},
-    .{"Asterisk", Operator.Multiply},
-    .{"Bang", Operator.Not},
-    .{"EqualEqual", Operator.Equals},
-    .{"BangEqual", Operator.NotEquals},
-    .{"AngleBracketLeft", Operator.LessThan},
-    .{"AngleBracketLeftEqual", Operator.LessThanEquals},
-    .{"AngleBracketRight", Operator.MoreThan},
-    .{"AngleBracketRightEqual", Operator.MoreThanEquals},
-    .{"AmpersandAmpersand", Operator.And},
-    .{"PipePipe", Operator.Or},
-    .{"Percent", Operator.Modulo},
-    .{"Ampersand", Operator.BitwiseAnd},
-    .{"Pipe", Operator.BitwiseOr},
-    .{"Caret", Operator.BitwiseXOr},
-    .{"AngleBracketAngleBracketLeft", Operator.LeftShift},
-    .{"AngleBracketAngleBracketRight", Operator.RightShift},
-    .{"Tilde", Operator.BitwiseNot},
-    .{"PlusEqual", Operator.PlusEqual},
-    .{"MinusEqual", Operator.MinusEqual},
-    .{"AsteriskEqual", Operator.AsteriskEqual},
-    .{"SlashEqual", Operator.SlashEqual},
-    .{"PercentEqual", Operator.PercentEqual}
-});
-pub const OperatorData = struct
-{
-    leftExpression: ExpressionChain,
-    operator: Operator,
-    rightExpression: ExpressionChain,
-
-    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
-    {
-        self.leftExpression.deinit(alloc);
-        self.rightExpression.deinit(alloc);
-    }
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var leftString = try self.leftExpression.ToString(allocator);
-        var rightString = try self.rightExpression.ToString(allocator);
-
-        var str: string = string.init(allocator);
-        try str.concat("{");
-        try str.concat_deinit(&leftString);
-        try str.concat(" ");
-        try str.concat(@tagName(self.operator));
-        try str.concat(" ");
-        try str.concat_deinit(&rightString);
-        try str.concat("}");
-
-        return str;
-    }
-};
-
-pub const WhileData = struct
-{
-    condition: ExpressionChain,
-    statement: CompoundStatementData,
-
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-
-        var conditionStr = try self.condition.ToString(allocator);
-        var statementStr = try CompoundStatementToString(self.statement, allocator);
-    
-        try str.concat("while (");
-        try str.concat_deinit(&conditionStr);
-        try str.concat(") {\n");
-        try str.concat_deinit(&statementStr);
-        try str.concat("}\n");
-
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        self.condition.deinit(allocator);
-        for (self.statement.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        self.statement.deinit();
-    }
-};
-pub const ForData = struct
-{
-    initializer: CompoundStatementData,
-    condition: ExpressionChain,
-    shouldStep: CompoundStatementData,
-    statement: CompoundStatementData,
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        for (self.initializer.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        self.condition.deinit(allocator);
-        for (self.statement.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        for (self.shouldStep.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        self.initializer.deinit();
-        self.statement.deinit();
-        self.shouldStep.deinit();
-    }
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-
-        var initializer = try CompoundStatementToString(self.initializer, allocator);
-        var condition = try self.condition.ToString(allocator);
-        var shouldStep = try CompoundStatementToString(self.shouldStep, allocator);
-        var statement = try CompoundStatementToString(self.statement, allocator);
-
-        try str.concat("for (");
-        try str.concat_deinit(&initializer);
-        try str.concat("; ");
-        try str.concat_deinit(&condition);
-        try str.concat("; ");
-        try str.concat_deinit(&shouldStep);
-        try str.concat(") {\n");
-        try str.concat_deinit(&statement);
-        try str.concat("}\n");
-
-        return str;
-    }
-};
-pub const IfData = struct
-{
-    condition: ExpressionChain,
-    statement: CompoundStatementData,
-
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-
-        var conditionStr = try self.condition.ToString(allocator);
-        var statementStr = try CompoundStatementToString(self.statement, allocator);
-    
-        try str.concat("if (");
-        try str.concat_deinit(&conditionStr);
-        try str.concat(") {\n");
-        try str.concat_deinit(&statementStr);
-        try str.concat("}");
-
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        self.condition.deinit(allocator);
-        for (self.statement.items) |*statement|
-        {
-            statement.deinit(allocator);
-        }
-        self.statement.deinit();
-    }
-};
-pub const StructData = struct
-{
-    name: []const u8,
-    body: CompoundStatementData
-,
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        var str = string.init(allocator);
-        try str.concat("struct ");
-        try str.concat(self.name);
-        try str.concat(" { \n");
-
-        var bodyStr = try CompoundStatementToString(self.body, allocator);
-        try str.concat_deinit(&bodyStr);
-
-        try str.concat("}\n");
-        return str;
-    }
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        for (self.body.items) |*item|
-        {
-            item.deinit(allocator);
-        }
-        self.body.deinit();
-    }
-};
-
-pub const StatementDataTag = enum
-{
-    functionDeclaration,
-    variableDeclaration,
-    structDeclaration,
-    functionInvoke,
-    returnStatement,
-    otherExpression,
-    IfStatement,
-    ElseStatement,
-    WhileStatement,
-    ForStatement,
-    Comment,
-    includeStatement,
-    //macroDefinition
-};
-pub const StatementData = union(StatementDataTag)
-{
-    functionDeclaration: FunctionData,
-    variableDeclaration: VarData,
-    structDeclaration: StructData,
-    functionInvoke: FunctionCallData,
-    returnStatement: ExpressionChain,
-    otherExpression: ExpressionChain,
-    IfStatement: IfData,
-    ElseStatement: CompoundStatementData,
-    WhileStatement: WhileData,
-    ForStatement: ForData,
-    Comment: []const u8,
-    includeStatement: []const u8,
-    //macroDefinition: MacroDefinitionData
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        switch (self.*)
-        {
-            .functionDeclaration => |*decl| decl.deinit(allocator),
-            .variableDeclaration => |*decl| decl.deinit(allocator),
-            .structDeclaration => |*decl| decl.deinit(allocator),
-            .functionInvoke => |*invoke| invoke.deinit(allocator),
-            .returnStatement => |*stmt| stmt.deinit(allocator),
-            .otherExpression => |*stmt| stmt.deinit(allocator),
-            .IfStatement => |*ifData| ifData.deinit(allocator),
-            .ElseStatement => |*elseData|
-            {
-                ClearCompoundStatement(elseData.*, allocator);
-            },
-            .WhileStatement => |*whileData| whileData.deinit(allocator),
-            .ForStatement => |*forData| forData.deinit(allocator),
-            else =>
-            {
-                //return Errors.NotImplemented;
-            }
-        }
-    }
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
-    {
-        switch (self.*)
-        {
-            .functionDeclaration => |*decl| return decl.ToString(allocator),
-            .variableDeclaration => |*decl| return decl.ToString(allocator),
-            .structDeclaration => |*decl| return decl.ToString(allocator),
-            .functionInvoke => |*invoke| return invoke.ToString(allocator),
-            .returnStatement => |*stmt| 
-            {
-                var stmtStr = try stmt.ToString(allocator);
-                var str = string.init(allocator);
-                try str.concat("returns ");
-                try str.concat_deinit(&stmtStr);
-                return str;
-            },
-            .otherExpression => |*stmt| return stmt.ToString(allocator),
-            .IfStatement => |*ifDat| return ifDat.ToString(allocator),
-            .ElseStatement => |*elseDat|
-            {
-                var stmtStr = try CompoundStatementToString(elseDat.*, allocator);
-                var str = string.init(allocator);
-                try str.concat("else {\n");
-                try str.concat_deinit(&stmtStr);
-                try str.concat("}");
-                return str;
-            },
-            .WhileStatement => |*whileDat| return whileDat.ToString(allocator),
-            .includeStatement => |include|
-            {
-                return string.init_with_contents(allocator, include);
-            },
-            .ForStatement => |*forDat| return forDat.ToString(allocator),
-            else =>
-            {
-                return Errors.NotImplemented;
-            }
-        }
-    }
-};
-
-pub const CompoundStatementData = std.ArrayList(StatementData);
-
-pub fn ClearCompoundStatement(compoundStatement: CompoundStatementData, allocator: std.mem.Allocator) void
-{
-    for (compoundStatement.items) |*stmt|
-    {
-        stmt.deinit(allocator);
-    }
-    compoundStatement.deinit();
-}
-pub fn CompoundStatementToString(stmts: CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
-{
-    var str = string.init(allocator);
-    for (stmts.items) |*stmt|
-    {
-        var stmtStr = try stmt.ToString(allocator);
-        try str.concat_deinit(&stmtStr);
-        try str.concat("\n");
-    }
-    return str;
 }

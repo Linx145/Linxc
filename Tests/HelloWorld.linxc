@@ -1,13 +1,26 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <Linxc.h>
+
+delegate(exampleDelegateType, Vector2, float, float);
 
 struct Vector2
 {
     float x;
     float y;
 
+    exampleDelegateType exampleDelegate;
+
     bool Equals(Vector2 other)
     {
-        return glm::vec2(0, 1).add(1, 2).equals(other[0].x);
+        return x == other.x && y == other.y;
+    }
+    float Dot(Vector2 other)
+    {
+        return x * other.x + y * other.y;
+    }
+    Vector2 CallDelegate(float x, float y)
+    {
+        return exampleDelegate(x, y);
     }
 };
