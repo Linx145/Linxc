@@ -509,7 +509,7 @@ pub const StatementData = union(StatementDataTag)
             .IfStatement => |*ifData| ifData.deinit(allocator),
             .ElseStatement => |*elseData|
             {
-                ClearCompoundStatement(elseData.*, allocator);
+                ClearCompoundStatement(elseData.*);
             },
             .WhileStatement => |*whileData| whileData.deinit(allocator),
             .ForStatement => |*forData| forData.deinit(allocator),
@@ -562,11 +562,11 @@ pub const StatementData = union(StatementDataTag)
     }
 };
 pub const CompoundStatementData = std.ArrayList(StatementData);
-pub fn ClearCompoundStatement(compoundStatement: CompoundStatementData, allocator: std.mem.Allocator) void
+pub fn ClearCompoundStatement(compoundStatement: CompoundStatementData) void
 {
     for (compoundStatement.items) |*stmt|
     {
-        stmt.deinit(allocator);
+        stmt.deinit(compoundStatement.allocator);
     }
     compoundStatement.deinit();
 }

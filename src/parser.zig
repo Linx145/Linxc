@@ -204,7 +204,7 @@ pub const Parser = struct {
                     {
                         var err: string = try self.WriteError("Syntax Error: Missing semicolon");
                         try self.errorStatements.append(err);
-                        ClearCompoundStatement(result, self.allocator);
+                        ClearCompoundStatement(result);
                         return Errors.SyntaxError;
                     }
                     expectSemicolon = false;
@@ -253,7 +253,7 @@ pub const Parser = struct {
                         {
                             var err: string = try self.WriteError("Syntax Error: Expected ; after delegate() declaration");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                     }
@@ -274,7 +274,7 @@ pub const Parser = struct {
                     {
                         var err: string = try self.WriteError("Syntax Error: Expected enclosed string after #include statement, but found none ");
                         try self.errorStatements.append(err);
-                        ClearCompoundStatement(result, self.allocator);
+                        ClearCompoundStatement(result);
                         return Errors.SyntaxError;
                     }
                 },
@@ -310,7 +310,7 @@ pub const Parser = struct {
                             {
                                 var err: string = try self.WriteError("Syntax Error: Missing semicolon");
                                 try self.errorStatements.append(err);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return Errors.SyntaxError;
                             }
                         }
@@ -376,14 +376,14 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         else if (typeNameStart != null)
                         {
                             var err = try self.WriteError("Syntax Error: const should be before type");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         nextIsConst = true;
@@ -397,14 +397,14 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: For statement cannot be const");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         if (self.nextUntilValid().id != .LParen)
                         {
                             var err = try self.WriteError("Syntax Error: Expected ( after for statement");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         //parse initializer statement
@@ -418,7 +418,7 @@ pub const Parser = struct {
                         {
                             var err: string = try self.WriteError("Syntax Error: Expected semicolon at the end of the condition expression in a for loop");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         const shouldStep = try self.Parse(true, commaIsSemicolon, true, null);
@@ -454,14 +454,14 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         if (self.nextUntilValid().id != .LParen)
                         {
                             var err = try self.WriteError("Syntax Error: Expected ( after while statement");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         var primary = try self.ParseExpression_Primary();
@@ -491,7 +491,7 @@ pub const Parser = struct {
                         {
                             var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression on return statement");
                             try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return err;
                         };
                         var expr = self.ParseExpression(primary, 0)
@@ -499,7 +499,7 @@ pub const Parser = struct {
                         {
                             var errStr = try self.WriteError("Syntax Error: Issue parsing expression on return statement");
                             try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return err;
                         };
 
@@ -519,7 +519,7 @@ pub const Parser = struct {
                         {
                             var err = try self.WriteError("Syntax Error: cannot declare const struct");
                             try self.errorStatements.append(err);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         nextIsStruct = true;
@@ -537,13 +537,13 @@ pub const Parser = struct {
                             {
                                 var err = try self.WriteError("Syntax Error: Linxc requires struct name to be right after the struct keyword");
                                 try self.errorStatements.append(err);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return Errors.SyntaxError;
                             }
                             const body = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, structName)
                             catch |err|
                             {
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return err;
                             };
 
@@ -572,7 +572,7 @@ pub const Parser = struct {
                             {
                                 var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
                                 try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return err;
                             };
                             var expr = self.ParseExpression(primary, 0)
@@ -580,7 +580,7 @@ pub const Parser = struct {
                             {
                                 var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
                                 try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return err;
                             };
 
@@ -614,7 +614,7 @@ pub const Parser = struct {
                             {
                                 var errStr = try self.WriteError("Syntax Error: Duplicate identifier");
                                 try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return Errors.SyntaxError;
                             }
                             foundIdentifier = self.SourceTokenSlice(token);
@@ -643,7 +643,7 @@ pub const Parser = struct {
                             {
                                 var err = try self.WriteError("Syntax Error: found C style function pointer, use delegate() macro from Linxc.h to typedef function pointer types and then use them instead");
                                 try self.errorStatements.append(err);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return Errors.SyntaxError;
                             }
                         }
@@ -656,7 +656,7 @@ pub const Parser = struct {
                                 {
                                     var err = try self.WriteError("Syntax Error: Cannot declare function as const");
                                     try self.errorStatements.append(err);
-                                    ClearCompoundStatement(result, self.allocator);
+                                    ClearCompoundStatement(result);
                                     return Errors.SyntaxError;
                                 }
 
@@ -713,7 +713,7 @@ pub const Parser = struct {
                                         expr.deinit(self.allocator);
                                         var err = try self.WriteError("Syntax Error: Random literal/variable name");
                                         try self.errorStatements.append(err);
-                                        ClearCompoundStatement(result, self.allocator);
+                                        ClearCompoundStatement(result);
                                         return Errors.SyntaxError;
                                     }
                                 }
@@ -742,7 +742,7 @@ pub const Parser = struct {
                             {
                                 var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
                                 try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return err;
                             };
                             var expr = self.ParseExpression(primary, 0)
@@ -750,7 +750,7 @@ pub const Parser = struct {
                             {
                                 var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
                                 try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result, self.allocator);
+                                ClearCompoundStatement(result);
                                 return err;
                             };
 
@@ -768,7 +768,7 @@ pub const Parser = struct {
                         }
                         else
                         {
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                     }
@@ -799,21 +799,21 @@ pub const Parser = struct {
                         {
                             var errStr = try self.WriteError("Syntax Error: Expected identifier after struct declaration");
                             try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         else if (nextIsConst)
                         {
                             var errStr = try self.WriteError("Syntax Error: Expected identifier and type after const declaration");
                             try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         else if (typeNameStart != null)
                         {
                             var errStr = try self.WriteError("Syntax Error: Expected identifier after variable/function type");
                             try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result, self.allocator);
+                            ClearCompoundStatement(result);
                             return Errors.SyntaxError;
                         }
                         if (endOnSemicolon)

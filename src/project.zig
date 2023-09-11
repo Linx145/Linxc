@@ -1,7 +1,10 @@
 const std = @import("std");
 const string = @import("zig-string.zig").String;
-const data = @import("reflect-data.zig");
-const translator = @import("translator.zig");
+const transpiler = @import("transpiler.zig");
+const reflector = @import("reflector.zig");
+const ast = @import("ASTnodes.zig");
+const lexer = @import("lexer.zig");
+const Parser = @import("parser.zig").Parser;
 const io = @import("io.zig");
 
 const StringList = std.ArrayList(string);
@@ -9,7 +12,6 @@ const StringList = std.ArrayList(string);
 pub const project = struct {
     const Self = @This();
     linxcFiles: StringList,
-    compiledFiles: std.ArrayList(data.FileData),
     allocator: std.mem.Allocator,
     outputPath: ?[]const u8,
     rootPath: []const u8,
@@ -25,7 +27,6 @@ pub const project = struct {
         return Self
         {
             .outputPath = null,
-            .compiledFiles = std.ArrayList(data.FileData).init(allocator),
             .rootPath = rootPath,
             .allocator = allocator,
             .linxcFiles = StringList.init(allocator)
@@ -38,13 +39,7 @@ pub const project = struct {
         {
             self.linxcFiles.items[i].deinit();
         }
-        i = 0;
-        while (i < self.compiledFiles.items.len) : (i += 1)
-        {
-            self.compiledFiles.items[i].deinit();
-        }
         self.linxcFiles.deinit();
-        self.compiledFiles.deinit();
     }
 
     pub fn GetFilesToParse(self: *Self) !void
@@ -68,48 +63,90 @@ pub const project = struct {
         dir.close();
     }
 
-    // pub fn Compile(self: *Self, outputPath: []const u8) !void
-    // {
-    //     //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
-    //     //let outputPath be "C:\Users\Linus\source\repos\Linxc\linxc-out"
-    //     var i: usize = 0;
-    //     while (i < self.linxcFiles.items.len) : (i += 1)
-    //     {
-    //         //"C:\Users\Linus\source\repos\Linxc\Tests\Test.linxc"
-    //         var originalFilePath: *string = &self.linxcFiles.items[i];
+    pub fn Compile(self: *Self, outputPath: []const u8) !void
+    {
+        reflector.globalDatabase = try reflector.ReflectionDatabase.init(self.allocator);
+        var parser: Parser = try Parser.init(self.allocator, lexer.Tokenizer
+        {
+            .buffer = ""
+        });
+        parser.postParseStatement = reflector.PostParseStatement;
+        //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
+        //let outputPath be "C:\Users\Linus\source\repos\Linxc\linxc-out"
+        var i: usize = 0;
+        while (i < self.linxcFiles.items.len) : (i += 1)
+        {
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            var alloc = arena.allocator();
+            //"C:\Users\Linus\source\repos\Linxc\Tests\Test.linxc"
+            var originalFilePath: *string = &self.linxcFiles.items[i];
 
-    //         //"Test.linxc"
-    //         var relativePath = try std.fs.path.relative(self.allocator, self.rootPath, originalFilePath.buffer.?[0..originalFilePath.size]);
-    //         defer self.allocator.free(relativePath);
+            //"Test.linxc"
+            var relativePath = try std.fs.path.relative(alloc, self.rootPath, originalFilePath.str());
+            defer alloc.free(relativePath);
 
-    //         //C:\Users\Linus\source\repos\Linxc\linxc-out
-    //         var newFilePath = try string.init_with_contents(self.allocator, outputPath);
-    //         defer newFilePath.deinit();
+            //C:\Users\Linus\source\repos\Linxc\linxc-out
+            var newFilePath = try string.init_with_contents(alloc, outputPath);
+            defer newFilePath.deinit();
             
-    //         //ensure new file path directory exists
-    //         std.fs.makeDirAbsolute(newFilePath.buffer.?[0..newFilePath.size]) catch
-    //         {
+            //ensure new file path directory exists
+            std.fs.makeDirAbsolute(newFilePath.str()) catch
+            {
                 
-    //         };
+            };
 
-    //         //C:\Users\Linus\source\repos\Linxc\linxc-out\
-    //         try newFilePath.concat("/");
-    //         //C:\Users\Linus\source\repos\Linxc\linxc-out\Test
-    //         //no extension so we can generate .cpp and .h files properly
-    //         try newFilePath.concat(std.fs.path.stem(relativePath));
-            
-    //         var fileContents: []const u8 = try io.ReadFile(originalFilePath.str(), self.allocator);
-    //         defer self.allocator.free(fileContents);
-            
-    //         var fileData = try translator.TranslateFile(self.allocator, fileContents);
-        
-    //         try fileData.OutputTo(self.allocator, newFilePath, outputPath);
+            //C:\Users\Linus\source\repos\Linxc\linxc-out\
+            try newFilePath.concat("/");
+            //C:\Users\Linus\source\repos\Linxc\linxc-out\Test
+            //no extension so we can generate .cpp and .h files properly
+            try newFilePath.concat(io.WithoutExtension(relativePath));
 
-    //         try self.compiledFiles.append(fileData);
-    //         //fileData.deinit();
-    //     }
-    //     self.outputPath = outputPath;
-    // }
+            var cppFilePath = try string.init_with_contents(alloc, newFilePath.str());
+            try cppFilePath.concat(".cpp");
+            defer cppFilePath.deinit();
+
+            var hFilePath = try string.init_with_contents(alloc, newFilePath.str());
+            try hFilePath.concat(".h");
+            defer hFilePath.deinit();
+
+            var headerName = string.init(alloc);
+            try headerName.concat(io.WithoutExtension(relativePath));
+            try headerName.concat(".h");
+            defer headerName.deinit();
+
+            var fileContents: []const u8 = try io.ReadFile(originalFilePath.str(), alloc);
+            defer alloc.free(fileContents);
+            parser.tokenizer = lexer.Tokenizer
+            {
+                .buffer = fileContents
+            };
+
+            var result = try parser.Parse(false, false, false, "");
+
+
+
+            var cppFile: std.fs.File = try std.fs.createFileAbsolute(cppFilePath.str(), .{.truncate = true});
+            var cppWriter = cppFile.writer();
+            _ = try cppWriter.write("#include <");
+            _ = try cppWriter.write(headerName.str());
+            _ = try cppWriter.write(">\n");
+            try transpiler.TranspileStatementCpp(cppWriter, result, true, "");
+            cppFile.close();
+
+
+
+            var hFile: std.fs.File = try std.fs.createFileAbsolute(hFilePath.str(), .{.truncate = true});
+            var hWriter = hFile.writer();
+            _ = try hWriter.write("#pragma once\n");
+            try transpiler.TranspileStatementH(hWriter, result);
+            hFile.close();
+
+
+            ast.ClearCompoundStatement(result);
+        }
+        reflector.globalDatabase.?.deinit();
+    }
     // pub fn Reflect(self: *Self, outputFile: []const u8) !void
     // {
     //     var i: usize = 0;

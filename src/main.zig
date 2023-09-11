@@ -1,10 +1,6 @@
 const std = @import("std");
-const sysdata = @import("reflect-systems.zig");
-const structdata = @import("reflect-data.zig");
-const translator = @import("translator.zig");
 const string = @import("zig-string.zig").String;
 const project = @import("project.zig").project;
-const parser = @import("parser.zig");
 
 pub const Errors = error
 {
@@ -22,36 +18,28 @@ pub fn PathIsDir(path: []const u8) bool
 }
 
 pub fn main() !void {
-    try parser.TestExpressionParsing();
+    const args = try std.process.argsAlloc(std.heap.c_allocator);
+    defer std.process.argsFree(std.heap.c_allocator, args);
 
-    // const args = try std.process.argsAlloc(std.heap.c_allocator);
-    // defer std.process.argsFree(std.heap.c_allocator, args);
+    if (args.len != 3)// and args.len != 2)
+    {
+        return Errors.InsufficientArguments;
+    }
 
-    // if (args.len != 3)// and args.len != 2)
-    // {
-    //     return Errors.InsufficientArguments;
-    // }
+    var sourcePath: []const u8 = args[1];
 
-    // var sourcePath: []const u8 = args[1];
+    var destDirPath: string = try string.init_with_contents(std.heap.c_allocator, args[2]);
+    defer destDirPath.deinit();
 
-    // var destDirPath: string = try string.init_with_contents(std.heap.c_allocator, args[2]);
-    // defer destDirPath.deinit();
+    if (PathIsDir(sourcePath)) //parsed folder
+    {
+        var proj: project = project.init(std.heap.c_allocator, sourcePath);
+        try proj.GetFilesToParse();
+        try proj.Compile(destDirPath.str());
 
-    // if (PathIsDir(sourcePath)) //parsed folder
-    // {
-    //     var proj: project = project.init(std.heap.c_allocator, sourcePath);
-
-    //     try proj.GetFilesToParse();
-    //     try proj.Compile(destDirPath.str());
-
-    //     var destReflPath: string = try destDirPath.clone();
-    //     defer destReflPath.deinit();
-    //     try destReflPath.concat("/Reflected.gen.cpp");
-    //     try proj.Reflect(destReflPath.str());
-
-    //     proj.deinit();
-    // }
-    // else
-    // {
-    // }
+        proj.deinit();
+    }
+    else
+    {
+    }
 }

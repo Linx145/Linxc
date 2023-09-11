@@ -14,13 +14,23 @@ pub const ReflectionDatabase = struct
     nameToType: std.StringHashMap(usize),
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) ReflectionDatabase
+    pub fn init(allocator: std.mem.Allocator) !ReflectionDatabase
     {
         var result: ReflectionDatabase = ReflectionDatabase {
             .allocator = allocator,
             .nameToType = std.StringHashMap(usize).init(allocator),
             .types = std.ArrayList(LinxcType).init(allocator)
         };
+        try result.AddPrimitiveType("int");
+        try result.AddPrimitiveType("float");
+        try result.AddPrimitiveType("bool");
+        try result.AddPrimitiveType("uint");
+        try result.AddPrimitiveType("long");
+        try result.AddPrimitiveType("ulong");
+        try result.AddPrimitiveType("short");
+        try result.AddPrimitiveType("ushort");
+        try result.AddPrimitiveType("char");
+        try result.AddPrimitiveType("double");
         return result;
     }
     pub fn deinit(self: *@This()) void
@@ -44,6 +54,17 @@ pub const ReflectionDatabase = struct
             return Errors.TypeNotFoundError;
         }
     }
+    pub inline fn AddPrimitiveType(self: *@This(), name: []const u8) anyerror!void
+    {
+        const nameStr = try string.init_with_contents(self.allocator, name);
+        try self.AddType(LinxcType
+        {
+            .name = nameStr,
+            .functions = std.ArrayList(LinxcFunc).init(self.allocator),
+            .variables = std.ArrayList(LinxcVariable).init(self.allocator),
+            .isPrimitiveType = true
+        });
+    }
     pub inline fn GetTypeSafe(self: *@This(), name: []const u8) anyerror!*LinxcType
     {
         if (!self.nameToType.contains(name))
@@ -53,7 +74,8 @@ pub const ReflectionDatabase = struct
             {
                 .name = nameStr,
                 .functions = std.ArrayList(LinxcFunc).init(self.allocator),
-                .variables = std.ArrayList(LinxcVariable).init(self.allocator)
+                .variables = std.ArrayList(LinxcVariable).init(self.allocator),
+                .isPrimitiveType = false
             });
         }
         return self.GetType(name);
@@ -74,7 +96,7 @@ pub const ReflectionDatabase = struct
     }
 };
 
-var globalDatabase: ?ReflectionDatabase = null;
+pub var globalDatabase: ?ReflectionDatabase = null;
 
 pub fn GetVariable(varTypeName: []const u8, variableName: []const u8) anyerror!LinxcVariable
 {
@@ -249,6 +271,7 @@ pub const LinxcType = struct
     name: string,
     functions: std.ArrayList(LinxcFunc),
     variables: std.ArrayList(LinxcVariable),
+    isPrimitiveType: bool,
 
     pub fn ToString(self: *@This()) !string
     {
@@ -304,7 +327,7 @@ test "reflector"
     {
         .buffer = buffer
     };
-    globalDatabase = ReflectionDatabase.init(alloc);
+    globalDatabase = try ReflectionDatabase.init(alloc);
     var parser: Parser = try Parser.init(alloc, tokenizer);
     parser.postParseStatement = PostParseStatement;
     std.debug.print("\n", .{});
@@ -324,20 +347,22 @@ test "reflector"
         return;
     };
 
-    for (globalDatabase.?.types.items) |*linxcType|
-    {
-        var str = try linxcType.ToString();
-        std.debug.print("{s}\n", .{str.str()});
-        str.deinit();
-    }
+    // for (globalDatabase.?.types.items) |*linxcType|
+    // {
+    //     if (!linxcType.isPrimitiveType)
+    //     {
+    //         var str = try linxcType.ToString();
+    //         std.debug.print("{s}\n", .{str.str()});
+    //         str.deinit();
+    //     }
+    // }
+    var resultStr = try ASTnodes.CompoundStatementToString(result, alloc);
+    std.debug.print("{s}\n", .{resultStr.str()});
+    resultStr.deinit();
 
     globalDatabase.?.deinit();
 
-    for (result.items) |*stmt|
-    {
-        stmt.deinit(alloc);
-    }
-    result.deinit();
+    ASTnodes.ClearCompoundStatement(result);
 
     parser.deinit();
 

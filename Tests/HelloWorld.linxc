@@ -2,14 +2,10 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-delegate(exampleDelegateType, Vector2, float, float);
-
 struct Vector2
 {
     float x;
-    float *y;
-
-    exampleDelegateType exampleDelegate;
+    float y;
 
     bool Equals(Vector2 other)
     {
@@ -17,10 +13,6 @@ struct Vector2
     }
     float Dot(Vector2 other)
     {
-        return x * other.x + *y * *other.y;
-    }
-    Vector2 CallDelegate(float x, float y)
-    {
-        return exampleDelegate(x, y);
+        return x * other.x + y * other.y;
     }
 };
