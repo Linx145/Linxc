@@ -433,6 +433,20 @@ pub const String = struct {
         }
     };
 
+    pub fn remove_whitespace_ending(chars: []const u8) []const u8
+    {
+        var i = chars.len - 1;
+        while (i >= 0)
+        {
+            if (chars[i] != ' ')
+            {
+                break;
+            }
+            i -= 1;
+        }
+        return chars[0..(i + 1)];
+    }
+
     /// Returns whether or not a character is whitelisted
     fn inWhitelist(char: u8, whitelist: []const u8) bool {
         var i: usize = 0;

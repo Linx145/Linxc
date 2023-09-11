@@ -460,7 +460,6 @@ pub const StructData = struct
 };
 pub const StatementDataTag = enum
 {
-    invalid,
     functionDeclaration,
     variableDeclaration,
     constructorDeclaration,
@@ -479,7 +478,6 @@ pub const StatementDataTag = enum
 };
 pub const StatementData = union(StatementDataTag)
 {
-    invalid: u8,
     functionDeclaration: FunctionData,
     variableDeclaration: VarData,
     constructorDeclaration: FunctionData,

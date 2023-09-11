@@ -14,7 +14,7 @@ pub const ReflectionDatabase = struct
     nameToType: std.StringHashMap(usize),
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) !ReflectionDatabase
+    pub fn init(allocator: std.mem.Allocator) ReflectionDatabase
     {
         var result: ReflectionDatabase = ReflectionDatabase {
             .allocator = allocator,
@@ -23,18 +23,44 @@ pub const ReflectionDatabase = struct
         };
         return result;
     }
-    pub fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
+    pub fn deinit(self: *@This()) void
+    {
+        for (self.types.items) |*linxcType|
+        {
+            linxcType.deinit();
+        }
+        self.types.deinit();
+        self.nameToType.deinit();
+    }
+    pub inline fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
     {
         const index = self.nameToType.get(name);
         if (index != null)
         {
             return &self.types.items[index.?];
         }
-        else return Errors.TypeNotFoundError;
+        else
+        {
+            return Errors.TypeNotFoundError;
+        }
     }
-    pub fn AddType(self: *@This(), newType: LinxcType) anyerror!void
+    pub inline fn GetTypeSafe(self: *@This(), name: []const u8) anyerror!*LinxcType
     {
-        try self.nameToType.put(newType.name, self.types.items.len);
+        if (!self.nameToType.contains(name))
+        {
+            const nameStr = try string.init_with_contents(self.allocator, name);
+            try self.AddType(LinxcType
+            {
+                .name = nameStr,
+                .functions = std.ArrayList(LinxcFunc).init(self.allocator),
+                .variables = std.ArrayList(LinxcVariable).init(self.allocator)
+            });
+        }
+        return self.GetType(name);
+    }
+    pub inline fn AddType(self: *@This(), newType: LinxcType) anyerror!void
+    {
+        try self.nameToType.put(newType.name.str(), self.types.items.len);
         try self.types.append(newType);
     }
     pub inline fn RemoveType(self: *@This(), name: []const u8) anyerror!void
@@ -46,49 +72,128 @@ pub const ReflectionDatabase = struct
         self.types.swapRemove(index);
         self.nameToType.remove(name);
     }
-    pub fn PostParseStatement(self: *@This(), statement: StatementData, searchable: bool) anyerror!void
+};
+
+var globalDatabase: ?ReflectionDatabase = null;
+
+pub fn GetVariable(varTypeName: []const u8, variableName: []const u8) anyerror!LinxcVariable
+{
+    var variableTypeName: []const u8 = varTypeName;
+    var isPointer: bool = false;
+    if (variableTypeName[variableTypeName.len - 1] == '*')
     {
-        //is accessible by a reflection system
-        if (searchable)
+        isPointer = true;
+        variableTypeName = variableTypeName[0..variableTypeName.len - 1];
+    }
+    variableTypeName = string.remove_whitespace_ending(variableTypeName);
+    var variableType: *LinxcType = try globalDatabase.?.GetTypeSafe(variableTypeName);
+
+    var variableNameStr = try string.init_with_contents(globalDatabase.?.allocator, variableName);
+
+    return LinxcVariable
+    {
+        .name = variableNameStr,
+        .variableType = variableType,
+        .isPointer = isPointer
+    };
+}
+pub fn PostParseStatement(statement: StatementData, parent: ?[]const u8) anyerror!void
+{
+    var self = &globalDatabase.?;
+    //is accessible by a reflection system
+    switch (statement)
+    {
+        //this is always called before the addition of the parent struct if any
+        .variableDeclaration => |varDecl|
         {
-            switch (statement)
+            if (parent != null)
             {
-                .structDeclaration => |structDecl|
+                if (parent.?.len > 0)
                 {
-                    const name: string = string.init_with_contents(self.allocator, structDecl.name);
-                    const structure = LinxcStruct
-                    {
-                        .functions = std.ArrayList(LinxcFunc).init(self.allocator),
-                        .variables = std.ArrayList(LinxcVariable).init(self.allocator)
-                    };
-                    const newType: LinxcType = LinxcType
-                    {
-                        .name = name,
-                        .data = LinxcTypeData
-                        {
-                            .structure = structure
-                        }
-                    };
-                    try self.AddType(newType);
-                },
-                .variableDeclaration =>
-                {
+                    var variable = try GetVariable(varDecl.typeName, varDecl.name);
 
-                },
-                else =>
-                {
+                    const name = parent.?;
 
+                    var typePtr: *LinxcType = try self.GetTypeSafe(name);
+                    
+                    try typePtr.variables.append(variable);
                 }
             }
+            else //is global variable
+            {
+
+            }
+        },
+        .functionDeclaration => |funcDecl|
+        {
+            if (parent != null)
+            {
+                if (parent.?.len > 0)
+                {
+                    var functionTypeName = funcDecl.name;
+                    functionTypeName = string.remove_whitespace_ending(functionTypeName);
+
+                    const returnType = try self.GetTypeSafe(funcDecl.returnType);
+                    const funcName = try string.init_with_contents(self.allocator, funcDecl.name);
+                    var argsList = std.ArrayList(LinxcVariable).init(self.allocator);
+
+                    for (funcDecl.args) |arg|
+                    {
+                        var argVariable = try GetVariable(arg.typeName, arg.name);
+                        try argsList.append(argVariable);
+                    }
+
+                    var slice: ?[]LinxcVariable = null;
+                    if (argsList.items.len > 0)
+                    {
+                        slice = try argsList.toOwnedSlice();
+                    }
+
+                    var func = LinxcFunc
+                    {
+                        .name = funcName,
+                        .returnType = returnType,
+                        .args = slice
+                    };
+                
+                    const name = parent.?;
+
+                    var typePtr: *LinxcType = try self.GetTypeSafe(name);
+                    
+                    try typePtr.functions.append(func);
+                }
+            }
+            else //is global function
+            {
+            }
+        },
+        else =>
+        {
+
         }
     }
-};
+}
 
 pub const LinxcVariable = struct
 {
     name: string,
     variableType: *LinxcType,
+    isPointer: bool,
 
+    pub fn ToString(self: *@This()) anyerror!string
+    {
+        var result = string.init(self.name.allocator);
+        
+        if (self.isPointer)
+        {
+            try result.concat("*");
+        }
+        try result.concat(self.variableType.name.str());
+        try result.concat(" ");
+        try result.concat(self.name.str());
+
+        return result;
+    }
     pub fn deinit(self: *@This()) void
     {
         self.name.deinit();
@@ -97,14 +202,40 @@ pub const LinxcVariable = struct
 };
 pub const LinxcFunc = struct
 {
+    name: string,
     returnType: *LinxcType,
     args: ?[]LinxcVariable,
-
-    pub fn deinit(self: *@This()) void
+    
+    pub fn ToString(self: *@This()) anyerror!string
     {
+        var result = string.init(self.name.allocator);
+
+        try result.concat(self.returnType.name.str());
+        try result.concat(" ");
+        try result.concat(self.name.str());
+        try result.concat("(");
         if (self.args != null)
         {
-            for (self.args.?) |variable|
+            var i: usize = 0;
+            while (i < self.args.?.len) : (i += 1)
+            {
+                var arg: *LinxcVariable = &self.args.?[i];
+                try result.concat(arg.variableType.name.str());
+                if (i < self.args.?.len - 1)
+                {
+                    try result.concat(", ");
+                }
+            }
+        }
+        try result.concat(")");
+        return result;
+    }
+    pub fn deinit(self: *@This()) void
+    {
+        self.name.deinit();
+        if (self.args != null)
+        {
+            for (self.args.?) |*variable|
             {
                 variable.deinit();
             }
@@ -112,62 +243,103 @@ pub const LinxcFunc = struct
         //dont deinit type - that is the job of ReflectionDatabase's deinit
     }
 };
-pub const LinxcStruct = struct
-{
-    //must be arraylists as they are filled up afterwards as the parser reflects statements
-    //that are within the struct
-    functions: std.ArrayList(LinxcFunc),
-    variables: std.ArrayList(LinxcVariable),
 
-    pub fn deinit(self: *@This()) void
-    {
-        if (self.functions != null)
-        {
-            for (self.functions.?.items) |function|
-            {
-                function.deinit();
-            }
-            self.functions.?.deinit();
-        }
-        if (self.variables != null)
-        {
-            for (self.variables.?.items) |variable|
-            {
-                variable.deinit();
-            }
-            self.variables.?.deinit();
-        }
-    }
-};
-
-pub const LinxcTypeDataTag = enum
-{
-    function,
-    structure
-};
-pub const LinxcTypeData = union(LinxcTypeDataTag)
-{
-    function: LinxcFunc,
-    structure: LinxcStruct
-};
 pub const LinxcType = struct
 {
     name: string,
-    data: LinxcTypeData,
+    functions: std.ArrayList(LinxcFunc),
+    variables: std.ArrayList(LinxcVariable),
 
+    pub fn ToString(self: *@This()) !string
+    {
+        var result = string.init(self.name.allocator);
+        try result.concat("Type ");
+        try result.concat(self.name.str());
+        try result.concat(": \n");
+        for (self.variables.items) |*variable|
+        {
+            try result.concat("   ");
+            var varString = try variable.ToString();
+            try result.concat_deinit(&varString);
+            try result.concat("\n");
+        }
+        for (self.functions.items) |*func|
+        {
+            try result.concat("   ");
+            var funcString = try func.ToString();
+            try result.concat_deinit(&funcString);
+            try result.concat("\n");
+        }
+        return result;
+    }
     pub fn deinit(self: *@This()) void
     {
         self.name.deinit();
-        switch (self.data)
+        for (self.functions.items) |*function|
         {
-            .function => |*func|
-            {
-                func.deinit();
-            },
-            .structure => |*structure|
-            {
-                structure.deinit();
-            }
+            function.deinit();
         }
+        self.functions.deinit();
+        for (self.variables.items) |*variable|
+        {
+            variable.deinit();
+        }
+        self.variables.deinit();
     }
 };
+
+test "reflector"
+{
+    const io = @import("io.zig");
+    const lexer = @import("lexer.zig");
+    const Parser = @import("parser.zig").Parser;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var alloc: std.mem.Allocator = arena.allocator();
+
+    var buffer: []const u8 = try io.ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc", alloc);//"#include<stdint.h>";
+
+    var tokenizer: lexer.Tokenizer = lexer.Tokenizer
+    {
+        .buffer = buffer
+    };
+    globalDatabase = ReflectionDatabase.init(alloc);
+    var parser: Parser = try Parser.init(alloc, tokenizer);
+    parser.postParseStatement = PostParseStatement;
+    std.debug.print("\n", .{});
+
+    var result = parser.Parse(false, false, false, "")
+    catch
+    {
+        std.debug.print("ERROR:", .{});
+        for (parser.errorStatements.items) |errorStatement|
+        {
+            std.debug.print("{s}\n", .{errorStatement.str()});
+        }
+
+        parser.deinit();
+        globalDatabase.?.deinit();
+        alloc.free(buffer);
+        return;
+    };
+
+    for (globalDatabase.?.types.items) |*linxcType|
+    {
+        var str = try linxcType.ToString();
+        std.debug.print("{s}\n", .{str.str()});
+        str.deinit();
+    }
+
+    globalDatabase.?.deinit();
+
+    for (result.items) |*stmt|
+    {
+        stmt.deinit(alloc);
+    }
+    result.deinit();
+
+    parser.deinit();
+
+    alloc.free(buffer);
+}

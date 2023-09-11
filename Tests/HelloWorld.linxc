@@ -7,7 +7,7 @@ delegate(exampleDelegateType, Vector2, float, float);
 struct Vector2
 {
     float x;
-    float y;
+    float *y;
 
     exampleDelegateType exampleDelegate;
 
@@ -17,7 +17,7 @@ struct Vector2
     }
     float Dot(Vector2 other)
     {
-        return x * other.x + y * other.y;
+        return x * other.x + *y * *other.y;
     }
     Vector2 CallDelegate(float x, float y)
     {

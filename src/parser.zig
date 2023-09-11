@@ -39,7 +39,7 @@ pub const Parser = struct {
     errorStatements: std.ArrayList(string),
     currentLine: usize,
     charsParsed: usize,
-    postParseStatement: ?*const fn(statement: StatementData, parentStatement: ?StatementData) anyerror!void,
+    postParseStatement: ?*const fn(statement: StatementData, parentStatement: ?[]const u8) anyerror!void,
 
     pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
     {
@@ -53,7 +53,7 @@ pub const Parser = struct {
             .postParseStatement = null
         };
     }
-    pub fn deinit(self: *Self) !void
+    pub fn deinit(self: *Self) void
     {
         for (self.errorStatements.items) |*errorStatement|
         {
@@ -158,16 +158,16 @@ pub const Parser = struct {
         return result;
     }
 
-    pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, parentStatement: ?StatementData) !void
+    pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, parentStatementName: ?[]const u8) !void
     {
         try result.append(statement);
         if (self.postParseStatement != null)
         {
-            try self.postParseStatement.?(statement, parentStatement);
+            try self.postParseStatement.?(statement, parentStatementName);
         }
     }
     
-    pub fn Parse(self: *Self, endOnSemicolon: bool, commaIsSemicolon: bool, endOnRParen: bool, parent: ?StatementData) !CompoundStatementData
+    pub fn Parse(self: *Self, endOnSemicolon: bool, commaIsSemicolon: bool, endOnRParen: bool, parent: ?[]const u8) !CompoundStatementData
     {
         var result = CompoundStatementData.init(self.allocator);
 
@@ -338,8 +338,7 @@ pub const Parser = struct {
                             {
                                 next = self.nextUntilValid();
                             }
-                            const invalidStatement = StatementData{.invalid = 0};
-                            const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, invalidStatement);
+                            const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
 
                             try self.AppendToCompoundStatement(&result, StatementData
                             {
@@ -359,12 +358,12 @@ pub const Parser = struct {
                         var elseStatement: CompoundStatementData = undefined;
                         if (self.peekNextUntilValid().id == .LBrace)
                         {
-                            elseStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                            elseStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
                         }
                         else
                         {
                             //compound statement parse until semicolon
-                            elseStatement = try self.Parse(true, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                            elseStatement = try self.Parse(true, commaIsSemicolon, endOnRParen, null);
                         }
                         try self.AppendToCompoundStatement(&result, StatementData{.ElseStatement=elseStatement}, parent);
                     }
@@ -410,7 +409,7 @@ pub const Parser = struct {
                         }
                         //parse initializer statement
                         
-                        const initializer = try self.Parse(true, true, endOnRParen, StatementData{.invalid = 0});
+                        const initializer = try self.Parse(true, true, endOnRParen, null);
 
                         const conditionPrimary = try self.ParseExpression_Primary();
                         const condition = try self.ParseExpression(conditionPrimary, 0);
@@ -422,17 +421,17 @@ pub const Parser = struct {
                             ClearCompoundStatement(result, self.allocator);
                             return Errors.SyntaxError;
                         }
-                        const shouldStep = try self.Parse(true, commaIsSemicolon, true, StatementData{.invalid = 0});
+                        const shouldStep = try self.Parse(true, commaIsSemicolon, true, null);
                         var statement: CompoundStatementData = undefined;
 
                         if (self.nextUntilValid().id != .LBrace)
                         {
                             self.tokenizer.index = self.tokenizer.prevIndex;
-                            statement = try self.Parse(true, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                            statement = try self.Parse(true, commaIsSemicolon, endOnRParen, null);
                         }
                         else
                         {
-                            statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                            statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
                         }
 
                         try self.AppendToCompoundStatement(&result, StatementData
@@ -444,7 +443,7 @@ pub const Parser = struct {
                                 .shouldStep = shouldStep,
                                 .statement = statement
                             }
-                        }, StatementData{.invalid = 0});
+                        }, parent);
                     }
                 },
                 .Keyword_while =>
@@ -472,7 +471,7 @@ pub const Parser = struct {
                         {
                             next = self.nextUntilValid();
                         }
-                        const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                        const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
                         try self.AppendToCompoundStatement(&result, StatementData
                         {
                             .WhileStatement = WhileData
@@ -541,7 +540,7 @@ pub const Parser = struct {
                                 ClearCompoundStatement(result, self.allocator);
                                 return Errors.SyntaxError;
                             }
-                            const body = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0})
+                            const body = self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, structName)
                             catch |err|
                             {
                                 ClearCompoundStatement(result, self.allocator);
@@ -676,7 +675,7 @@ pub const Parser = struct {
                                         break;
                                     }
                                 }
-                                const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, StatementData{.invalid = 0});
+                                const statement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
 
                                 try self.AppendToCompoundStatement(&result, StatementData
                                 {
@@ -969,8 +968,6 @@ pub const Parser = struct {
             }
             else if (token.id == .Identifier)
             {
-                //todo: handle accessor chaining properly, with array indexing with expressions,
-                //function chaining
                 if (variableType == null)
                 {
                     //detect variable type
@@ -1375,13 +1372,8 @@ pub const Parser = struct {
                 if (nextToken.id == .Identifier)
                 {
                     _ = self.tokenizer.next();
-                    return ExpressionChain
-                    {
-                        .expression = ExpressionData
-                        {
-                            .Variable = self.tokenizer.buffer[token.start..nextToken.end]
-                        }
-                    };
+                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
                 }
                 else
                 {
@@ -1510,90 +1502,3 @@ pub const Parser = struct {
         return lhs;
     }
 };
-
-pub fn TestExpressionParsing() !void
-{
-    const buffer: []const u8 = "a || (!c && b) || !true;";//"a*((b-*c)/d);";
-    //var arenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-    //defer arenaAllocator.deinit();
-    var alloc = std.testing.allocator;//alloc = arenaAllocator.allocator();
-
-    var tokenizer: lexer.Tokenizer = lexer.Tokenizer
-    {
-        .buffer = buffer
-    };
-    var parser: Parser = try Parser.init(alloc, tokenizer);
-    std.debug.print("\n", .{});
-
-    // var timer = try std.time.Timer.start();
-    
-    // var i: usize = 0;
-    // while (i < 1000000) : (i += 1)
-    // {
-    parser.tokenizer.index = 0;
-    var primary = try parser.ParseExpression_Primary();
-    var expr = parser.ParseExpression(primary, 0) catch |err|
-    {
-        for (parser.errorStatements.items) |errorStatement|
-        {
-            std.debug.print("Caught error:\n   {s}\n", .{errorStatement.str()});
-        }
-        try parser.deinit();
-        return err;
-    };
-    var str = try expr.ToString(alloc);
-    defer str.deinit();
-    std.debug.print("{s}\n", .{str.str()});
-
-    expr.deinit(alloc);
-    
-    try parser.deinit();
-}
-
-// test "expression parsing"
-// {
-//     try TestExpressionParsing();
-// }
-
-test "file parsing"
-{
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var alloc: std.mem.Allocator = arena.allocator();
-
-    var buffer: []const u8 = try io.ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc", alloc);//"#include<stdint.h>";
-
-    var tokenizer: lexer.Tokenizer = lexer.Tokenizer
-    {
-        .buffer = buffer
-    };
-    var parser: Parser = try Parser.init(alloc, tokenizer);
-    std.debug.print("\n", .{});
-
-    var result = parser.Parse(false, false, false, null)
-    catch
-    {
-        for (parser.errorStatements.items) |errorStatement|
-        {
-            std.debug.print("{s}\n", .{errorStatement.str()});
-        }
-
-        try parser.deinit();
-        alloc.free(buffer);
-        return;
-    };
-
-    var str = try CompoundStatementToString(result, alloc);
-    std.debug.print("{s}\n", .{str.str()});
-    str.deinit();
-
-    for (result.items) |*stmt|
-    {
-        stmt.deinit(alloc);
-    }
-    result.deinit();
-
-    try parser.deinit();
-
-    alloc.free(buffer);
-}
