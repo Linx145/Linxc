@@ -24,15 +24,55 @@ const CompoundStatementToString = ASTnodes.CompoundStatementToString;
 const std = @import("std");
 const string = @import("zig-string.zig").String;
 const lexer = @import("lexer.zig");
-const linkedLists = @import("linked-list.zig");
-const objPool = @import("object-pool.zig");
-const ExprPool = objPool.ObjectPool(linkedLists.LinkedList(ExpressionData));
 const io = @import("io.zig");
 const Errors = @import("errors.zig").Errors;
 
+pub inline fn GetAssociation(ID: lexer.TokenID) i8
+{
+    switch (ID)
+    {
+        .Minus, .Plus, .Slash, .Percent, .AmpersandAmpersand, .PipePipe, .EqualEqual, .BangEqual, .AngleBracketLeft, .AngleBracketLeftEqual, .AngleBracketRight, .AngleBracketRightEqual =>
+        {
+            return 1;
+        },
+        else =>
+        {
+            return -1;
+        }
+    }
+}
+pub inline fn GetPrecedence(ID: lexer.TokenID) i32
+{
+    switch (ID)
+    {
+        .PlusEqual, .MinusEqual, .AsteriskEqual, .PercentEqual, .SlashEqual =>
+        {
+            return 4;
+        },
+        .Asterisk, .Slash, .Percent =>
+        {
+            return 3;
+        },
+        .Plus, .Minus, .Ampersand, .Caret, .Tilde, .Pipe, .AngleBracketLeft, .AngleBracketRight =>
+        {
+            return 2;
+        },
+        .AmpersandAmpersand =>
+        {
+            return 1;
+        },
+        .PipePipe, .BangEqual, .EqualEqual, .Equal =>
+        {
+            return 0;
+        },
+        else =>
+        {
+            return -1;
+        }
+    }
+}
+
 pub const Parser = struct {
-    pub const LinkedList = linkedLists.LinkedList(ExpressionData);
-    pub const NodePointerList = std.ArrayList(*linkedLists.LinkedList(ExpressionData).Node);
     const Self = @This();
     allocator: std.mem.Allocator,
     tokenizer: lexer.Tokenizer,
@@ -584,6 +624,10 @@ pub const Parser = struct {
                                 return err;
                             };
 
+                            var exprString = try expr.ToString(self.allocator);
+                            std.debug.print("Expression: {s}\n", .{exprString.str()});
+                            exprString.deinit();
+
                             try self.AppendToCompoundStatement(&result, StatementData
                             {
                                 .otherExpression = expr
@@ -1078,51 +1122,6 @@ pub const Parser = struct {
         return vars.toOwnedSlice();
     }
 
-    pub inline fn GetAssociation(ID: lexer.TokenID) i8
-    {
-        switch (ID)
-        {
-            .Minus, .Plus, .AmpersandAmpersand, .PipePipe =>
-            {
-                return 1;
-            },
-            else =>
-            {
-                return -1;
-            }
-        }
-    }
-    pub inline fn GetPrecedence(ID: lexer.TokenID) i32
-    {
-        switch (ID)
-        {
-            .PlusEqual, .MinusEqual, .AsteriskEqual, .PercentEqual, .SlashEqual =>
-            {
-                return 4;
-            },
-            .Asterisk, .Slash, .Percent =>
-            {
-                return 3;
-            },
-            .Plus, .Minus, .Ampersand, .Caret, .Tilde, .Pipe, .AngleBracketLeft, .AngleBracketRight =>
-            {
-                return 2;
-            },
-            .AmpersandAmpersand =>
-            {
-                return 1;
-            },
-            .PipePipe, .BangEqual, .EqualEqual =>
-            {
-                return 0;
-            },
-            else =>
-            {
-                return -1;
-            }
-        }
-    }
-
     pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) Errors![]ExpressionChain
     {
         var params = std.ArrayList(ExpressionChain).init(self.allocator);
@@ -1455,6 +1454,14 @@ pub const Parser = struct {
     {
         var lhs = initial;
 
+        var resultStr = lhs.ToString(self.allocator)
+        catch
+        {
+            return Errors.NotImplemented;
+        };
+        std.debug.print("LHS: {s}\n", .{resultStr.str()});
+        resultStr.deinit();
+
         while (true)
         {
             var op = self.peekNext();
@@ -1471,11 +1478,16 @@ pub const Parser = struct {
                 var next = self.peekNext();
                 var nextPrecedence = GetPrecedence(next.id);
                 var nextAssociation = GetAssociation(next.id);
-                if (next.id == .Eof or op.id == .Semicolon or op.id == .Comma or nextPrecedence == -1 or nextPrecedence == precedence or nextAssociation == 1)
+                if (next.id == .Eof or op.id == .Semicolon or op.id == .Comma or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))
                 {
                     break;
                 }
-                rhs = try self.ParseExpression(rhs, nextPrecedence);
+                var nextFuncPrecedence = precedence;
+                if (nextPrecedence > precedence)
+                {
+                    nextFuncPrecedence += 1;
+                }
+                rhs = try self.ParseExpression(rhs, nextFuncPrecedence);
             }
             var operator = self.allocator.create(OperatorData) catch
             {
@@ -1491,13 +1503,6 @@ pub const Parser = struct {
                 .Op = operator
             };
         }
-
-        var resultStr = lhs.ToString(self.allocator)
-        catch
-        {
-            return Errors.NotImplemented;
-        };
-        resultStr.deinit();
 
         return lhs;
     }

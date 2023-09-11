@@ -1,18 +1,10 @@
 #include <stdint.h>
 #include <stdio.h>
-#include <Linxc.h>
+#include <Vector2.linxc>
 
-struct Vector2
+int main()
 {
-    float x;
-    float y;
-
-    bool Equals(Vector2 other)
-    {
-        return x == other.x && y == other.y;
-    }
-    float Dot(Vector2 other)
-    {
-        return x * other.x + y * other.y;
-    }
-};
+    Vector2 vector2;
+    vector2.x = 1;
+    return 0;
+}

@@ -2,6 +2,7 @@
 //parser AST and transpile it to c++ and h files.
 const std = @import("std");
 const ast = @import("ASTnodes.zig");
+const io = @import("io.zig");
 
 pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData) anyerror!void
 {
@@ -13,7 +14,11 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
         {
             .includeStatement => |includeStatement|
             {
-                try writer.print("#include {s}\n", .{includeStatement});
+                var withoutAngledBrackets = includeStatement[1..includeStatement.len - 1];
+                var withoutExtension = io.WithoutExtension(withoutAngledBrackets); //in case we have a file with a linxc extension
+                _ = try writer.write("#include <");
+                _ = try writer.write(withoutExtension);
+                _ = try writer.write(".h>\n");
             },
             .structDeclaration => |structDeclaration|
             {
@@ -168,7 +173,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionChai
     }
     if (expr.next != null)
     {
-        if (expr.next.?.expression != .IndexedAccessor)
+        if (expr.next.?.expression != .IndexedAccessor and expr.next.?.expression != .Op)
         {
             _ = try writer.write(".");
         }

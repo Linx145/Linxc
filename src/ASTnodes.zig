@@ -266,7 +266,8 @@ pub const Operator = enum
     MinusEqual,
     AsteriskEqual,
     SlashEqual,
-    PercentEqual
+    PercentEqual,
+    Equal
 };
 pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"Plus", Operator.Plus},
@@ -293,7 +294,8 @@ pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"MinusEqual", Operator.MinusEqual},
     .{"AsteriskEqual", Operator.AsteriskEqual},
     .{"SlashEqual", Operator.SlashEqual},
-    .{"PercentEqual", Operator.PercentEqual}
+    .{"PercentEqual", Operator.PercentEqual},
+    .{"Equal", Operator.Equal}
 });
 pub const OperatorData = struct
 {
@@ -312,13 +314,13 @@ pub const OperatorData = struct
         var rightString = try self.rightExpression.ToString(allocator);
 
         var str: string = string.init(allocator);
-        try str.concat("{");
+        try str.concat("(");
         try str.concat_deinit(&leftString);
         try str.concat(" ");
         try str.concat(@tagName(self.operator));
         try str.concat(" ");
         try str.concat_deinit(&rightString);
-        try str.concat("}");
+        try str.concat(")");
 
         return str;
     }

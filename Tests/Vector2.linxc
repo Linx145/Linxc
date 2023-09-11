@@ -1,0 +1,18 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <Linxc.h>
+
+struct Vector2
+{
+    float x;
+    float y;
+
+    bool Equals(Vector2 other)
+    {
+        return x == other.x && y == other.y;
+    }
+    float Dot(Vector2 other)
+    {
+        return x * other.x + y * other.y;
+    }
+};

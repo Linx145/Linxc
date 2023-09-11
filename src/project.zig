@@ -122,8 +122,16 @@ pub const project = struct {
                 .buffer = fileContents
             };
 
-            var result = try parser.Parse(false, false, false, "");
-
+            var result = parser.Parse(false, false, false, "")
+            catch
+            {
+                std.debug.print("ERROR:", .{});
+                for (parser.errorStatements.items) |errorStatement|
+                {
+                    std.debug.print("{s}\n", .{errorStatement.str()});
+                }
+                break;
+            };
 
 
             var cppFile: std.fs.File = try std.fs.createFileAbsolute(cppFilePath.str(), .{.truncate = true});
@@ -145,6 +153,7 @@ pub const project = struct {
 
             ast.ClearCompoundStatement(result);
         }
+        parser.deinit();
         reflector.globalDatabase.?.deinit();
     }
     // pub fn Reflect(self: *Self, outputFile: []const u8) !void
