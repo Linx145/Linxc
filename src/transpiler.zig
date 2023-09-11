@@ -92,9 +92,9 @@ pub inline fn AppendEndOfLine(writer: std.fs.File.Writer, semicolon: bool) !void
     }
     else _ = try writer.write(",\n");
 }
-pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionChain) anyerror!void
+pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData) anyerror!void
 {
-    switch (expr.expression)
+    switch (expr.*)
     {
         .Literal => |literal|
         {
@@ -103,6 +103,19 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionChai
         .Variable => |variable|
         {
             _ = try writer.write(variable);
+        },
+        .ModifiedVariable => |variable|
+        {
+            switch (variable.Op)
+            {
+                .Not => _ = try writer.write("!"),
+                .Multiply => _ = try writer.write("*"),
+                .BitwiseNot => _ = try writer.write("~"),
+                .Minus => _ = try writer.write("-"),
+                .ToPointer => _ = try writer.write("&"),
+                else => {}
+            }
+            try TranspileExpression(writer, &variable.expression);
         },
         .FunctionCall => |FunctionCall|
         {
@@ -135,9 +148,15 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionChai
         },
         .Op => |Op|
         {
-            _ = try writer.write("(");
+            if (Op.priority)
+            {
+                _ = try writer.write("(");
+            }
             try TranspileExpression(writer, &Op.leftExpression);
-            _ = try writer.write(" ");
+            if (Op.operator != .Arrow and Op.operator != .Period)
+            {
+                _ = try writer.write(" ");
+            }
             switch (Op.operator)
             {
                 .Plus => _ = try writer.write("+"),
@@ -164,20 +183,22 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionChai
                 .MinusEqual => _ = try writer.write("-="),
                 .AsteriskEqual => _ = try writer.write("*="),
                 .SlashEqual => _ = try writer.write("/="),
-                .PercentEqual => _ = try writer.write("%=")
+                .PercentEqual => _ = try writer.write("%="),
+                .Arrow => _ = try writer.write("->"),
+                .Equal => _ = try writer.write("="),
+                .Period => _ = try writer.write("."),
+                .ToPointer => _ = try writer.write("&")
             }
-            _ = try writer.write(" ");
+            if (Op.operator != .Arrow and Op.operator != .Period)
+            {
+                _ = try writer.write(" ");
+            }
             try TranspileExpression(writer, &Op.rightExpression);
-            _ = try writer.write(")");
+            if (Op.priority)
+            {
+                _ = try writer.write(")");
+            }
         }
-    }
-    if (expr.next != null)
-    {
-        if (expr.next.?.expression != .IndexedAccessor and expr.next.?.expression != .Op)
-        {
-            _ = try writer.write(".");
-        }
-        try TranspileExpression(writer, expr.next.?);
     }
 }
 //parent is not null if we are in reflectable compound statement
@@ -216,7 +237,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             {
                 _ = try writer.write(functionDeclaration.returnType);
                 _ = try writer.write(" ");
-                if (parent != null)
+                if (parent != null and parent.?.len > 0)
                 {
                     _ = try writer.write(parent.?);
                     _ = try writer.write("::");
@@ -247,11 +268,12 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             .functionInvoke => |*functionInvoke|
             {
                 _ = try writer.write(functionInvoke.name);
+                _ = try writer.write("(");
                 var j: usize = 0;
                 while (j < functionInvoke.inputParams.len) : (j += 1)
                 {
                     try TranspileExpression(writer, &functionInvoke.inputParams[j]);
-                    if (j <= functionInvoke.inputParams.len - 1)
+                    if (j < functionInvoke.inputParams.len - 1)
                     {
                         _ = try writer.write(", ");
                     }

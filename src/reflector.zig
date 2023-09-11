@@ -321,7 +321,7 @@ test "reflector"
     defer arena.deinit();
     var alloc: std.mem.Allocator = arena.allocator();
 
-    var buffer: []const u8 = try io.ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc", alloc);//"#include<stdint.h>";
+    var buffer: []const u8 = try io.ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/Vector2.linxc", alloc);//"#include<stdint.h>";
 
     var tokenizer: lexer.Tokenizer = lexer.Tokenizer
     {

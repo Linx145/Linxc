@@ -6,5 +6,7 @@ int main()
 {
     Vector2 vector2;
     vector2.x = 1;
+    vector2.y = 2;
+    printf("%f", vector2.x);
     return 0;
 }

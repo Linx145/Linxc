@@ -7,7 +7,6 @@ const FunctionCallData = ASTnodes.FunctionCallData;
 const FunctionData = ASTnodes.FunctionData;
 const ExpressionDataTag = ASTnodes.ExpressionDataTag;
 const ExpressionData = ASTnodes.ExpressionData;
-const ExpressionChain = ASTnodes.ExpressionChain;
 const Operator = ASTnodes.Operator;
 const TokenToOperator = ASTnodes.TokenToOperator;
 const OperatorData = ASTnodes.OperatorData;
@@ -31,13 +30,13 @@ pub inline fn GetAssociation(ID: lexer.TokenID) i8
 {
     switch (ID)
     {
-        .Minus, .Plus, .Slash, .Percent, .AmpersandAmpersand, .PipePipe, .EqualEqual, .BangEqual, .AngleBracketLeft, .AngleBracketLeftEqual, .AngleBracketRight, .AngleBracketRightEqual =>
+        .Arrow, .Minus, .Plus, .Slash, .Percent, .AmpersandAmpersand, .PipePipe, .EqualEqual, .BangEqual, .AngleBracketLeft, .AngleBracketLeftEqual, .AngleBracketRight, .AngleBracketRightEqual, .Period =>
         {
-            return 1;
+            return 1; //left to right
         },
         else =>
         {
-            return -1;
+            return -1; //right to left
         }
     }
 }
@@ -45,10 +44,14 @@ pub inline fn GetPrecedence(ID: lexer.TokenID) i32
 {
     switch (ID)
     {
-        .PlusEqual, .MinusEqual, .AsteriskEqual, .PercentEqual, .SlashEqual =>
+        .Period, .Arrow =>
         {
-            return 4;
+            return 5;
         },
+        //Reserved for pointer dereference (*), NOT(!), bitwise not(~) and pointer reference (&) =>
+        // {
+        //     return 4;
+        // },
         .Asterisk, .Slash, .Percent =>
         {
             return 3;
@@ -57,11 +60,11 @@ pub inline fn GetPrecedence(ID: lexer.TokenID) i32
         {
             return 2;
         },
-        .AmpersandAmpersand =>
+        .PipePipe, .BangEqual, .EqualEqual, .AmpersandAmpersand =>
         {
             return 1;
         },
-        .PipePipe, .BangEqual, .EqualEqual, .Equal =>
+        .Equal, .PlusEqual, .MinusEqual, .AsteriskEqual, .PercentEqual, .SlashEqual =>
         {
             return 0;
         },
@@ -625,7 +628,6 @@ pub const Parser = struct {
                             };
 
                             var exprString = try expr.ToString(self.allocator);
-                            std.debug.print("Expression: {s}\n", .{exprString.str()});
                             exprString.deinit();
 
                             try self.AppendToCompoundStatement(&result, StatementData
@@ -737,8 +739,8 @@ pub const Parser = struct {
                                 //just use parseidentifier here, if rando variable, throw it
                                 //we need ParseExpression_Identifier to detect the beginning LParen so we move back 1 step
                                 self.tokenizer.index = self.tokenizer.prevIndex;
-                                var expr: ExpressionChain = try self.ParseExpression_Identifier(foundIdentifier.?);
-                                switch (expr.expression)
+                                var expr: ExpressionData = try self.ParseExpression_Identifier(foundIdentifier.?);
+                                switch (expr)
                                 {
                                     .FunctionCall => |funcCall|
                                     {
@@ -874,7 +876,7 @@ pub const Parser = struct {
                         {
                             //is variable
                             var primary = try self.ParseExpression_Primary();
-                            const expression: ExpressionChain = try self.ParseExpression(primary, 0);
+                            const expression: ExpressionData = try self.ParseExpression(primary, 0);
                             const varName = foundIdentifier.?;
                             const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
                             const varData: VarData = VarData
@@ -957,7 +959,7 @@ pub const Parser = struct {
         var nextIsConst = false;
         var variableType: ?[]const u8 = null;
         var variableName: ?[]const u8 = null;
-        var defaultValueExpr: ?ExpressionChain = null;
+        var defaultValueExpr: ?ExpressionData = null;
         var encounteredFirstDefaultValue: bool = false;
 
         while (true)
@@ -1122,9 +1124,9 @@ pub const Parser = struct {
         return vars.toOwnedSlice();
     }
 
-    pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) Errors![]ExpressionChain
+    pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) Errors![]ExpressionData
     {
-        var params = std.ArrayList(ExpressionChain).init(self.allocator);
+        var params = std.ArrayList(ExpressionData).init(self.allocator);
         var token = self.nextUntilValid();
         while (true)
         {
@@ -1201,9 +1203,8 @@ pub const Parser = struct {
 
     /// parses an identifier in expression, returning either a ExpressionData with
     /// variable or with a function call
-    pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionChain
+    pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionData
     {
-        var result: ExpressionChain = undefined;
         var token = self.peekNextUntilValid();
         if (token.id == .LParen)
         {
@@ -1218,12 +1219,9 @@ pub const Parser = struct {
             functionCall.name = identifierName;
             functionCall.inputParams = inputParams;
 
-            result = ExpressionChain
+            return ExpressionData
             {
-                .expression = ExpressionData
-                {
-                    .FunctionCall = functionCall
-                }
+                .FunctionCall = functionCall
             };
         }
         else if (token.id == .LBracket) //array indexer
@@ -1239,62 +1237,53 @@ pub const Parser = struct {
             functionCall.name = identifierName;
             functionCall.inputParams = indexParams;
 
-            result = ExpressionChain
+            return ExpressionData
             {
-                .expression = ExpressionData
-                {
-                    .IndexedAccessor = functionCall
-                }
+                .IndexedAccessor = functionCall
             };
         }
         else
         {
-            result = ExpressionChain
+            return ExpressionData
             {
-                .expression = ExpressionData
-                {
-                    .Variable = identifierName
-                }
+                .Variable = identifierName
             };
         }
 
-        var nextIdentifierPtr: ?*ExpressionChain = null;
+        // var nextIdentifierPtr: ?*ExpressionChain = null;
 
-        //function call changing/retrieval
-        //eg: glm::vec2(1, 2).add(2, 3).x
-        var peekNextID = self.peekNextUntilValid().id;
-        if (peekNextID == .Period)
-        {
-            _ = self.nextUntilValid();
-            var next = self.nextUntilValid();//peekNextUntilValid();
-            if (next.id != .Identifier)
-            {
-                var err = try self.WriteError("Syntax Error: Identifier expected after period");
-                self.errorStatements.append(err)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
-            }
-            else
-            {
-                var nextIdentifierName = self.SourceTokenSlice(next);
-                const nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
+        // var peekNextID = self.peekNextUntilValid().id;
+        // if (peekNextID == .Period)
+        // {
+        //     _ = self.nextUntilValid();
+        //     var next = self.nextUntilValid();//peekNextUntilValid();
+        //     if (next.id != .Identifier)
+        //     {
+        //         var err = try self.WriteError("Syntax Error: Identifier expected after period");
+        //         self.errorStatements.append(err)
+        //         catch
+        //         {
+        //             return Errors.OutOfMemoryError;
+        //         };
+        //     }
+        //     else
+        //     {
+        //         var nextIdentifierName = self.SourceTokenSlice(next);
+        //         const nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
 
-                nextIdentifierPtr = self.allocator.create(ExpressionChain)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
-                nextIdentifierPtr.?.expression = nextIdentifier.expression;
-                nextIdentifierPtr.?.next = nextIdentifier.next;
-            }
-        }
+        //         nextIdentifierPtr = self.allocator.create(ExpressionChain)
+        //         catch
+        //         {
+        //             return Errors.OutOfMemoryError;
+        //         };
+        //         nextIdentifierPtr.?.expression = nextIdentifier.expression;
+        //         nextIdentifierPtr.?.next = nextIdentifier.next;
+        //     }
+        // }
 
-        result.next = nextIdentifierPtr;
-        return result;
+        // result.next = nextIdentifierPtr;
     }
-    pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionChain
+    pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionData
     {
         const token = self.tokenizer.next();
         if (token.id == .LParen)
@@ -1314,130 +1303,38 @@ pub const Parser = struct {
                 };
                 return Errors.SyntaxError;
             }
+            if (result == .Op)
+            {
+                result.Op.priority = true;
+            }
 
             _ = self.tokenizer.next();
             return result;
         }
-        else if (token.id == .Minus)
+        else if (token.id == .Asterisk or token.id == .Minus or token.id == .Bang or token.id == .Ampersand or token.id == .Tilde)
         {
-            if (self.tokenizer.buffer[token.end] != ' ')
+            var op = ASTnodes.TokenToOperator.get(@tagName(token.id)).?;
+            var nextPrimary = try self.ParseExpression_Primary();
+            var result = try self.ParseExpression(nextPrimary, 4);
+
+            var modifiedVarDataPtr: *ASTnodes.ModifiedVariableData = self.allocator.create(ASTnodes.ModifiedVariableData)
+            catch
             {
-                const nextToken = self.peekNext();
-                if (nextToken.id == .IntegerLiteral or nextToken.id == .FloatLiteral)
-                {
-                    _ = self.tokenizer.next();
-                    return ExpressionChain
-                    {
-                        .expression = ExpressionData
-                        {
-                            .Literal = self.tokenizer.buffer[token.start..nextToken.end]
-                        }
-                    };
-                }
-                else if (nextToken.id == .Identifier)
-                {
-                    _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
-                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
-                }
-                else
-                {
-                    var err = try self.WriteError("Syntax Error: Attempting to place negative sign on unrecognised literal");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
-                    return Errors.SyntaxError;
-                }
-            }
-            else
+                return Errors.OutOfMemoryError;
+            };
+            modifiedVarDataPtr.expression = result;
+            modifiedVarDataPtr.Op = op;
+
+            return ExpressionData
             {
-                var err = try self.WriteError("Syntax Error: Spacing is not allowed between the negative sign and whatever comes next");
-                self.errorStatements.append(err)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
-                return Errors.SyntaxError;
-            }
-        }
-        else if (token.id == .Asterisk)
-        {
-            if (self.tokenizer.buffer[token.end] != ' ')
-            {
-                const nextToken = self.peekNext();
-                //if (nextToken.id == .IntegerLiteral or nextToken.id == .StringLiteral or nextToken.id == .FloatLiteral or nextToken.id == .CharLiteral)
-                if (nextToken.id == .Identifier)
-                {
-                    _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
-                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
-                }
-                else
-                {
-                    var err = try self.WriteError("Syntax Error: Expected identifier after pointer dereference asterisk");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
-                    return Errors.SyntaxError;
-                }
-            }
-            else 
-            {
-                var err = try self.WriteError("Syntax Error: Spacing not allowed after pointer dereference asterisk!");
-                self.errorStatements.append(err)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
-                return Errors.SyntaxError;
-            }
-        }
-        else if (token.id == .Bang)
-        {
-            if (self.tokenizer.buffer[token.end] != ' ')
-            {
-                const nextToken = self.peekNext();
-                if (nextToken.id == .Identifier)
-                {
-                    _ = self.tokenizer.next();
-                    var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
-                    return self.ParseExpression_Identifier(self.tokenizer.buffer[token.start..typeNameEnd]);
-                }
-                else if (nextToken.id == .Keyword_true or nextToken.id == .Keyword_false)
-                {
-                    var err = try self.WriteError("Syntax Error: !true and !false are not allowed for the sake of clarity");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
-                    return Errors.SyntaxError;
-                }
-                else
-                {
-                    var err = try self.WriteError("Syntax Error: Cannot put ! in front of non identifier!");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
-                    return Errors.SyntaxError;
-                }
-            }
-            else return Errors.SyntaxError;
+                .ModifiedVariable = modifiedVarDataPtr
+            };
         }
         else if (token.id == .IntegerLiteral or token.id == .StringLiteral or token.id == .FloatLiteral or token.id == .CharLiteral or token.id == .Keyword_true or token.id == .Keyword_false)
         {
-            return ExpressionChain
+            return ExpressionData
             {
-                .expression = ExpressionData
-                {
-                    .Literal = self.SourceTokenSlice(token)
-                }
+                .Literal = self.SourceTokenSlice(token)
             };
         }
         else if (token.id == .Identifier)
@@ -1450,7 +1347,7 @@ pub const Parser = struct {
             return Errors.SyntaxError;
         }
     }
-    pub fn ParseExpression(self: *Self, initial: ExpressionChain, minPrecedence: i32) Errors!ExpressionChain
+    pub fn ParseExpression(self: *Self, initial: ExpressionData, minPrecedence: i32) Errors!ExpressionData
     {
         var lhs = initial;
 
@@ -1459,7 +1356,6 @@ pub const Parser = struct {
         {
             return Errors.NotImplemented;
         };
-        std.debug.print("LHS: {s}\n", .{resultStr.str()});
         resultStr.deinit();
 
         while (true)
@@ -1497,8 +1393,9 @@ pub const Parser = struct {
             operator.leftExpression = lhs;
             operator.rightExpression = rhs;
             operator.operator = TokenToOperator.get(@tagName(op.id)).?;
+            operator.priority = false;
 
-            lhs.expression = ExpressionData
+            lhs = ExpressionData
             {
                 .Op = operator
             };

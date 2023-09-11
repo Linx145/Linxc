@@ -7,7 +7,7 @@ pub const VarData = struct
     name: []const u8,
     typeName: []const u8,
     isConst: bool,
-    defaultValue: ?ExpressionChain,
+    defaultValue: ?ExpressionData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -61,7 +61,7 @@ pub const MacroDefinitionData = struct
 pub const FunctionCallData = struct
 {
     name: []const u8,
-    inputParams: []ExpressionChain,
+    inputParams: []ExpressionData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -140,10 +140,38 @@ pub const FunctionData = struct
         self.statement.deinit();
     }
 };
+pub const ModifiedVariableData = struct
+{
+    expression: ExpressionData,
+    Op: Operator,
+
+    pub inline fn deinit(self: *@This(), allocator: std.mem.Allocator) void
+    {
+        self.expression.deinit(allocator);
+    }
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        if (self.Op == .Multiply)
+        {
+            try result.concat("*");
+        }
+        else if (self.Op == .Not)
+        {
+            try result.concat("!");
+        }
+
+        var exprStr = try self.expression.ToString(allocator);
+        try result.concat_deinit(&exprStr);
+
+        return result;
+    }
+};
 pub const ExpressionDataTag = enum
 {
     Literal,
     Variable,
+    ModifiedVariable,
     Op,
     FunctionCall,
     IndexedAccessor
@@ -152,6 +180,7 @@ pub const ExpressionData = union(ExpressionDataTag)
 {
     Literal: []const u8,
     Variable: []const u8,
+    ModifiedVariable: *ModifiedVariableData,
     Op: *OperatorData,
     FunctionCall: *FunctionCallData,
     IndexedAccessor: *FunctionCallData,
@@ -160,6 +189,11 @@ pub const ExpressionData = union(ExpressionDataTag)
     {
         switch (self.*)
         {
+            ExpressionDataTag.ModifiedVariable => |*value|
+            {
+                value.*.deinit(alloc);
+                alloc.destroy(value.*);
+            },
             ExpressionDataTag.Op => |*value|
             {
                 value.*.deinit(alloc);
@@ -192,6 +226,11 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 try str.concat(variable);
             },
+            ExpressionDataTag.ModifiedVariable => |variable|
+            {
+                str.deinit();
+                return variable.ToString(allocator);
+            },
             ExpressionDataTag.Op => |op| 
             {
                 str.deinit();
@@ -211,35 +250,6 @@ pub const ExpressionData = union(ExpressionDataTag)
         return str;
     }
 };
-pub const ExpressionChain = struct
-{
-    expression: ExpressionData,
-    next: ?*ExpressionChain = null,
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
-    {
-        self.expression.deinit(allocator);
-        if (self.next != null)
-        {
-            self.next.?.deinit(allocator);
-            allocator.destroy(self.next.?);
-        }
-    }
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
-    {
-        var result: string = string.init(allocator);
-        var myExpression: string = try self.expression.ToString(allocator);
-        try result.concat_deinit(&myExpression);
-
-        if (self.next != null)
-        {
-            try result.concat(".");
-            var nextExpression: string = try self.next.?.ToString(allocator);
-            try result.concat_deinit(&nextExpression);
-        }
-        return result;
-    }
-};
 pub const Operator = enum
 {
     Plus, //+
@@ -254,6 +264,7 @@ pub const Operator = enum
     MoreThan, //>
     MoreThanEquals, //>=
     And, //&&
+    ToPointer, //&
     Or, // ||
     Modulo, //%
     BitwiseAnd, //&
@@ -267,7 +278,9 @@ pub const Operator = enum
     AsteriskEqual,
     SlashEqual,
     PercentEqual,
-    Equal
+    Equal,
+    Period,
+    Arrow
 };
 pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"Plus", Operator.Plus},
@@ -295,13 +308,17 @@ pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"AsteriskEqual", Operator.AsteriskEqual},
     .{"SlashEqual", Operator.SlashEqual},
     .{"PercentEqual", Operator.PercentEqual},
-    .{"Equal", Operator.Equal}
+    .{"Equal", Operator.Equal},
+    .{"Period", Operator.Period},
+    .{"Arrow", Operator.Arrow},
+    .{"Ampersand", Operator.ToPointer}
 });
 pub const OperatorData = struct
 {
-    leftExpression: ExpressionChain,
+    leftExpression: ExpressionData,
     operator: Operator,
-    rightExpression: ExpressionChain,
+    rightExpression: ExpressionData,
+    priority: bool,
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
@@ -314,20 +331,26 @@ pub const OperatorData = struct
         var rightString = try self.rightExpression.ToString(allocator);
 
         var str: string = string.init(allocator);
-        try str.concat("(");
+        if (self.priority)
+        {
+            try str.concat("(");
+        }
         try str.concat_deinit(&leftString);
         try str.concat(" ");
         try str.concat(@tagName(self.operator));
         try str.concat(" ");
         try str.concat_deinit(&rightString);
-        try str.concat(")");
+        if (self.priority)
+        {
+            try str.concat(")");
+        }
 
         return str;
     }
 };
 pub const WhileData = struct
 {
-    condition: ExpressionChain,
+    condition: ExpressionData,
     statement: CompoundStatementData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
@@ -358,7 +381,7 @@ pub const WhileData = struct
 pub const ForData = struct
 {
     initializer: CompoundStatementData,
-    condition: ExpressionChain,
+    condition: ExpressionData,
     shouldStep: CompoundStatementData,
     statement: CompoundStatementData,
 
@@ -405,7 +428,7 @@ pub const ForData = struct
 };
 pub const IfData = struct
 {
-    condition: ExpressionChain,
+    condition: ExpressionData,
     statement: CompoundStatementData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
@@ -486,8 +509,8 @@ pub const StatementData = union(StatementDataTag)
     destructorDeclaration: FunctionData,
     structDeclaration: StructData,
     functionInvoke: FunctionCallData,
-    returnStatement: ExpressionChain,
-    otherExpression: ExpressionChain,
+    returnStatement: ExpressionData,
+    otherExpression: ExpressionData,
     IfStatement: IfData,
     ElseStatement: CompoundStatementData,
     WhileStatement: WhileData,
