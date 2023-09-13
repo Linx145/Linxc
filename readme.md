@@ -11,19 +11,20 @@ You can specify an output file path + name (without the extension) as the second
 ## Features
 Currently Supported:
 * Basic linxc transpilation to .cpp and .h
-* namespaces
-* structs: methods, fields and constructors
+* structs: methods, fields
 * functions
-* tags (attributes)
 
 Planned:
+* Constructors
 * Static reflection
-* Automatic copy constructor generation
+* Automatic deep copy function generation
 * Some kind of file caching and batch building
-* Allocators
+* Allocators (Arena allocator)
 * Templates
 * Modify the transpiler to add your own keywords
 * Modify the transpiler to interpret tags
 
-Will not be supported:
-* inheritance (Might have some form of method/field copy pasting)
+Maybe:
+* Destructors
+* Inheritance of some sorts (Traits?)
+* Translate C# to Linxc w/ GC allocator, then to C/C++

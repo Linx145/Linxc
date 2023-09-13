@@ -1,5 +1,3 @@
-#include <stdint.h>
-#include <stdio.h>
 #include <Linxc.h>
 
 struct Vector2

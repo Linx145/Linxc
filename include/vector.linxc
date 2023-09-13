@@ -1,0 +1,9 @@
+#include <Linxc.h>
+#include <stdint.h>
+
+template <typename T>
+struct vector
+{
+    T *ptr;
+    usize capacity;
+};

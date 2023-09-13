@@ -94,6 +94,28 @@ pub const ReflectionDatabase = struct
         self.types.swapRemove(index);
         self.nameToType.remove(name);
     }
+    pub fn OutputTo(self: *@This(), writer: std.fs.File.Writer) anyerror!void
+    {
+        _ = try writer.write("#pragma once\n");
+        _ = try writer.write("\n");
+        _ = try writer.write("namespace Reflection {\n");
+        _ = try writer.write("   Database InitReflection() {\n");
+
+        _ = try writer.write("      Type *type;");
+        var i: usize = 0;
+        while (i < self.types.items.len) : (i += 1)
+        {
+            var linxcType: *LinxcType = &self.types.items[i];
+
+            if (!linxcType.isPrimitiveType)
+            {
+                _ = try writer.write("      type = (Type*)malloc(sizeof(Type));");
+                _ = try writer.write("      ty");
+            }
+        }
+        _ = try writer.write("   }\n");
+        _ = try writer.write("}");
+    }
 };
 
 pub var globalDatabase: ?ReflectionDatabase = null;

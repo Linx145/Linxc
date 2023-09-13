@@ -8,7 +8,7 @@
 
 namespace Reflection
 {
-    void initReflection();
+    Database InitDatabase();
 
     struct Type
     {
