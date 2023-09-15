@@ -82,6 +82,7 @@ pub const Parser = struct {
     errorStatements: std.ArrayList(string),
     currentLine: usize,
     charsParsed: usize,
+    currentFile: ?[]const u8,
     postParseStatement: ?*const fn(statement: StatementData, parentStatement: ?[]const u8) anyerror!void,
 
     pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
@@ -93,7 +94,8 @@ pub const Parser = struct {
             .errorStatements = std.ArrayList(string).init(allocator),
             .currentLine = 0,
             .charsParsed = 0,
-            .postParseStatement = null
+            .postParseStatement = null,
+            .currentFile = null
         };
     }
     pub fn deinit(self: *Self) void
@@ -118,7 +120,7 @@ pub const Parser = struct {
         {
             return Errors.OutOfMemoryError;
         };
-        var line: []u8 = std.fmt.allocPrint(self.allocator, "at line {d}, column {d}\n", .{self.currentLine, self.tokenizer.index - self.charsParsed})
+        var line: []u8 = std.fmt.allocPrint(self.allocator, "at file {s}, line {d}, column {d}\n", .{self.currentFile orelse "Null", self.currentLine + 1, self.tokenizer.index - self.charsParsed})
         catch
         {
             return Errors.OutOfMemoryError;
@@ -178,23 +180,6 @@ pub const Parser = struct {
 
         const result = self.nextUntilValid();
 
-        self.tokenizer.index = currentIndex;
-        self.tokenizer.prevIndex = prevIndex;
-
-        return result;
-    }
-    pub fn peekNextUntilFoundOperator(self: *@This()) lexer.Token
-    {
-        const prevIndex = self.tokenizer.prevIndex;
-        const currentIndex = self.tokenizer.index;
-
-        //dont do any validation checking here
-        var result = self.nextUntilValid();
-        while (result.id == .Period)
-        {
-            _ = self.nextUntilValid();
-            result = self.nextUntilValid();
-        }
         self.tokenizer.index = currentIndex;
         self.tokenizer.prevIndex = prevIndex;
 
@@ -339,7 +324,7 @@ pub const Parser = struct {
                         }
                     }
                 },
-                .Keyword_void, .Keyword_bool, .Keyword_float, .Keyword_int, .Keyword_uint, .Keyword_short, .Keyword_ushort, .Keyword_ulong =>
+                .Keyword_void, .Keyword_bool, .Keyword_float, .Keyword_int, .Keyword_i16, .Keyword_u16, .Keyword_i32, .Keyword_u32, .Keyword_u64, .Keyword_i64 =>
                 {
                     if (!skipThisLine)
                     {
@@ -572,10 +557,10 @@ pub const Parser = struct {
                 {
                     if (!skipThisLine)
                     {
+                        var next = self.peekNextUntilValid();
                         if (nextIsStruct)
                         {
                             const structName = self.SourceTokenSlice(token);
-                            var next = self.nextUntilValid();
                             if (next.id != .LBrace)
                             {
                                 var err = try self.WriteError("Syntax Error: Linxc requires struct name to be right after the struct keyword");
@@ -604,7 +589,7 @@ pub const Parser = struct {
 
                             expectSemicolon = true;
                         }
-                        else if (GetPrecedence(self.peekNextUntilFoundOperator().id) != -1)
+                        else if (typeNameStart == null and (GetPrecedence(next.id) != -1 or next.id == .LParen))
                         {
                             //is some kind of expression
                             //go back
@@ -627,9 +612,6 @@ pub const Parser = struct {
                                 return err;
                             };
 
-                            var exprString = try expr.ToString(self.allocator);
-                            exprString.deinit();
-
                             try self.AppendToCompoundStatement(&result, StatementData
                             {
                                 .otherExpression = expr
@@ -639,7 +621,6 @@ pub const Parser = struct {
                         else if (typeNameStart == null)
                         {
                             typeNameStart = token.start;
-                            var next = self.peekNextUntilValid();
                             if (next.id == .ColonColon)
                             {
                                 while (true)
@@ -736,34 +717,7 @@ pub const Parser = struct {
                             }
                             else
                             {
-                                //just use parseidentifier here, if rando variable, throw it
-                                //we need ParseExpression_Identifier to detect the beginning LParen so we move back 1 step
-                                self.tokenizer.index = self.tokenizer.prevIndex;
-                                var expr: ExpressionData = try self.ParseExpression_Identifier(foundIdentifier.?);
-                                switch (expr)
-                                {
-                                    .FunctionCall => |funcCall|
-                                    {
-                                        try self.AppendToCompoundStatement(&result, StatementData
-                                        {
-                                            .functionInvoke = FunctionCallData
-                                            {
-                                                .name = funcCall.name,
-                                                .inputParams = funcCall.inputParams
-                                            }
-                                        }, parent);
-                                        //deinit original funcCall item
-                                    },
-                                    else =>
-                                    {
-                                        expr.deinit(self.allocator);
-                                        var err = try self.WriteError("Syntax Error: Random literal/variable name");
-                                        try self.errorStatements.append(err);
-                                        ClearCompoundStatement(result);
-                                        return Errors.SyntaxError;
-                                    }
-                                }
-                                expectSemicolon = true;
+
                             }
 
                             foundIdentifier = null;
@@ -772,52 +726,12 @@ pub const Parser = struct {
                         }
                     }
                 },
-                .Minus, .Asterisk, .Bang, .Tilde =>
+                .Bang, .Asterisk, .Plus, .Minus => 
                 {
-                    if (typeNameStart == null)
-                    {
-                        const peekForwardID = self.peekNext().id;
-                        if ((token.id == .Asterisk and peekForwardID == .Identifier) or (token.id != .Asterisk and (peekForwardID == .Identifier or peekForwardID == .IntegerLiteral or peekForwardID == .FloatLiteral)))
-                        {
-                            //is some kind of expression
-                            //go back
-                            self.tokenizer.index = self.tokenizer.prevIndex;
-                            //parse expression as per normal
-                            var primary = self.ParseExpression_Primary()
-                            catch |err|
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-                            var expr = self.ParseExpression(primary, 0)
-                            catch |err|
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-
-                            try self.AppendToCompoundStatement(&result, StatementData
-                            {
-                                .otherExpression = expr
-                            }, parent);
-                        }
-                    }
-                    else
-                    {
-                        if (token.id == .Asterisk)
-                        {
-                            typeNameEnd = token.end;
-                        }
-                        else
-                        {
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                    }
+                    var errStr = try self.WriteError("Syntax Error: Expression must be a modifiable value");
+                    try self.errorStatements.append(errStr);
+                    ClearCompoundStatement(result);
+                    return Errors.SyntaxError;
                 },
                 .Semicolon =>
                 {
@@ -898,7 +812,7 @@ pub const Parser = struct {
                 },
                 else =>
                 {
-                    
+
                 }
             }
         }
@@ -1249,39 +1163,6 @@ pub const Parser = struct {
                 .Variable = identifierName
             };
         }
-
-        // var nextIdentifierPtr: ?*ExpressionChain = null;
-
-        // var peekNextID = self.peekNextUntilValid().id;
-        // if (peekNextID == .Period)
-        // {
-        //     _ = self.nextUntilValid();
-        //     var next = self.nextUntilValid();//peekNextUntilValid();
-        //     if (next.id != .Identifier)
-        //     {
-        //         var err = try self.WriteError("Syntax Error: Identifier expected after period");
-        //         self.errorStatements.append(err)
-        //         catch
-        //         {
-        //             return Errors.OutOfMemoryError;
-        //         };
-        //     }
-        //     else
-        //     {
-        //         var nextIdentifierName = self.SourceTokenSlice(next);
-        //         const nextIdentifier = try self.ParseExpression_Identifier(nextIdentifierName);
-
-        //         nextIdentifierPtr = self.allocator.create(ExpressionChain)
-        //         catch
-        //         {
-        //             return Errors.OutOfMemoryError;
-        //         };
-        //         nextIdentifierPtr.?.expression = nextIdentifier.expression;
-        //         nextIdentifierPtr.?.next = nextIdentifier.next;
-        //     }
-        // }
-
-        // result.next = nextIdentifierPtr;
     }
     pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionData
     {
@@ -1340,6 +1221,7 @@ pub const Parser = struct {
         else if (token.id == .Identifier)
         {
             var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
+            //std.debug.print("Parsing identifier {s}\n", .{self.SourceSlice(token.start, typeNameEnd)});
             return self.ParseExpression_Identifier(self.SourceSlice(token.start, typeNameEnd));
         }
         else
@@ -1358,11 +1240,13 @@ pub const Parser = struct {
         };
         resultStr.deinit();
 
+        var cont: i32 = 0;
+
         while (true)
         {
             var op = self.peekNext();
             var precedence = GetPrecedence(op.id);
-            if (op.id == .Eof or op.id == .Semicolon or op.id == .Comma or precedence == -1 or precedence < minPrecedence)
+            if (op.id == .Eof or op.id == .Semicolon or precedence == -1 or precedence < minPrecedence)
             {
                 break;
             }
@@ -1374,7 +1258,7 @@ pub const Parser = struct {
                 var next = self.peekNext();
                 var nextPrecedence = GetPrecedence(next.id);
                 var nextAssociation = GetAssociation(next.id);
-                if (next.id == .Eof or op.id == .Semicolon or op.id == .Comma or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))
+                if (next.id == .Eof or op.id == .Semicolon or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))
                 {
                     break;
                 }
@@ -1399,6 +1283,11 @@ pub const Parser = struct {
             {
                 .Op = operator
             };
+            cont += 1;
+            if (cont > 100)
+            {
+                return Errors.SyntaxError;
+            }
         }
 
         return lhs;

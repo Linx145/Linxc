@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <Linxc.h>
 
 struct Vector2
@@ -12,5 +13,17 @@ struct Vector2
     float Dot(Vector2 other)
     {
         return x * other.x + y * other.y;
+    }
+    void Print()
+    {
+        printf("%d, %d\n", x, y);
+    }
+};
+
+struct trait_ToString
+{
+    void Print()
+    {
+
     }
 };

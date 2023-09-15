@@ -1,9 +1,66 @@
 #include <Linxc.h>
-#include <stdint.h>
+#include <stdlib.h>
 
 template <typename T>
 struct vector
 {
     T *ptr;
     usize capacity;
+    usize count;
+
+    vector()
+    {
+        ptr = NULL;
+        capacity = 0;
+    }
+
+    void EnsureArrayCapacity(usize minCapacity)
+    {
+        if (capacity < minCapacity)
+        {
+            i32 newCapacity = capacity;
+            if (newCapacity == 0)
+            {
+                newCapacity = 4;
+            }
+            while (newCapacity < minCapacity)
+            {
+                newCapacity *= 2;
+            }
+            T *newPtr = malloc(sizeof(T) * newCapacity);
+            for (usize i = 0; i < capacity; i += 1)
+            {
+                newPtr[i] = ptr[i];
+            }
+            free(ptr);
+            ptr = newPtr;
+            capacity = newCapacity;
+        }
+    }
+    void Add(T item)
+    {
+        if (count >= capacity)
+        {
+            usize minCapacity = count;
+            if (capacity + 1 > count)
+            {
+                minCapacity = capacity + 1;
+            }
+            EnsureArrayCapacity(minCapacity);
+        }
+        ptr[count] = item;
+        count += 1;
+    }
+    void Clear()
+    {
+        for (usize i = 0; i < capacity; i += 1)
+        {
+            ptr[i].destroy();
+        }
+        count = 0;
+    }
+    void RemoveAt_Swap(usize index)
+    {
+        ptr[index] = ptr[count - 1];
+    }
 };

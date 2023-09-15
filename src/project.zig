@@ -121,7 +121,9 @@ pub const project = struct {
             {
                 .buffer = fileContents
             };
-
+            parser.currentFile = self.linxcFiles.items[i].str();
+            parser.currentLine = 0;
+            parser.charsParsed = 0;
             var result = parser.Parse(false, false, false, "")
             catch
             {
