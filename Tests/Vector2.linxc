@@ -16,7 +16,7 @@ struct Vector2
     }
     void Print()
     {
-        printf("%d, %d\n", x, y);
+        printf("%d, %d\n", (i32)x, (i32)y);
     }
 };
 

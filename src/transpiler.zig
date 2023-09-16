@@ -153,7 +153,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
                 _ = try writer.write("(");
             }
             try TranspileExpression(writer, &Op.leftExpression);
-            if (Op.operator != .Arrow and Op.operator != .Period)
+            if (Op.operator != .Arrow and Op.operator != .Period and Op.operator != .TypeCast)
             {
                 _ = try writer.write(" ");
             }
@@ -187,9 +187,13 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
                 .Arrow => _ = try writer.write("->"),
                 .Equal => _ = try writer.write("="),
                 .Period => _ = try writer.write("."),
-                .ToPointer => _ = try writer.write("&")
+                .ToPointer => _ = try writer.write("&"),
+                else =>
+                {
+                    
+                }
             }
-            if (Op.operator != .Arrow and Op.operator != .Period)
+            if (Op.operator != .Arrow and Op.operator != .Period and Op.operator != .TypeCast)
             {
                 _ = try writer.write(" ");
             }
@@ -198,6 +202,16 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
             {
                 _ = try writer.write(")");
             }
+        },
+        .TypeCast => |TypeCast|
+        {
+            try writer.print("({s}", .{TypeCast.typeName});
+            var i: i32 = 0;
+            while (i < TypeCast.pointerCount) : (i += 1)
+            {
+                _ = try writer.write("*");    
+            }
+            _ = try writer.write(")");
         }
     }
 }

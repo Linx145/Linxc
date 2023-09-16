@@ -1116,9 +1116,12 @@ pub const Parser = struct {
     }
 
     /// parses an identifier in expression, returning either a ExpressionData with
-    /// variable or with a function call
-    pub fn ParseExpression_Identifier(self: *Self, identifierName: []const u8) Errors!ExpressionData
+    /// variable, a function call, or a typecast
+    pub fn ParseExpression_Identifier(self: *Self, currentToken: lexer.Token) Errors!ExpressionData
     {
+        var typeNameEnd: usize = self.GetFullIdentifier(false) orelse currentToken.end;
+        var identifierName = self.SourceSlice(currentToken.start, typeNameEnd);
+
         var token = self.peekNextUntilValid();
         if (token.id == .LParen)
         {
@@ -1186,10 +1189,35 @@ pub const Parser = struct {
             }
             if (result == .Op)
             {
+                //advance beyond the )
+                _ = self.tokenizer.next();
                 result.Op.priority = true;
             }
+            else if (result == .TypeCast)
+            {
+                //TODO: check if cast type exists, if not, throw error
+                
+                var cast = result;
+                _ = self.tokenizer.next();
+                nextPrimary = try self.ParseExpression_Primary();
+                result = try self.ParseExpression(nextPrimary, 0);
 
-            _ = self.tokenizer.next();
+                var castOperator: *OperatorData = self.allocator.create(OperatorData)
+                catch
+                {
+                    return Errors.OutOfMemoryError;
+                };
+                castOperator.operator = .TypeCast;
+                castOperator.leftExpression = cast;
+                castOperator.rightExpression = result;
+                castOperator.priority = false;
+
+                result = ExpressionData
+                {
+                    .Op = castOperator
+                };
+            }
+
             return result;
         }
         else if (token.id == .Asterisk or token.id == .Minus or token.id == .Bang or token.id == .Ampersand or token.id == .Tilde)
@@ -1220,9 +1248,38 @@ pub const Parser = struct {
         }
         else if (token.id == .Identifier)
         {
-            var typeNameEnd: usize = self.GetFullIdentifier(false) orelse token.end;
             //std.debug.print("Parsing identifier {s}\n", .{self.SourceSlice(token.start, typeNameEnd)});
-            return self.ParseExpression_Identifier(self.SourceSlice(token.start, typeNameEnd));
+            return self.ParseExpression_Identifier(token);
+        }
+        else if (
+            token.id == .Keyword_char or
+            token.id == .Keyword_i8 or
+            token.id == .Keyword_i16 or
+            token.id == .Keyword_i32 or
+            token.id == .Keyword_i64 or
+            token.id == .Keyword_u8 or
+            token.id == .Keyword_u16 or
+            token.id == .Keyword_u32 or
+            token.id == .Keyword_u64 or
+            token.id == .Keyword_float or
+            token.id == .Keyword_double or
+            token.id == .Keyword_bool
+            )
+        {
+            var pointerCount: i32 = 0;
+            while(self.peekNextUntilValid().id == .Asterisk)
+            {
+                _ = self.nextUntilValid();
+                pointerCount += 1;
+            }
+            return ExpressionData
+            {
+                .TypeCast = ASTnodes.TypeCastData
+                {
+                    .typeName = self.SourceTokenSlice(token),
+                    .pointerCount = pointerCount
+                }
+            };
         }
         else
         {
@@ -1233,15 +1290,6 @@ pub const Parser = struct {
     {
         var lhs = initial;
 
-        var resultStr = lhs.ToString(self.allocator)
-        catch
-        {
-            return Errors.NotImplemented;
-        };
-        resultStr.deinit();
-
-        var cont: i32 = 0;
-
         while (true)
         {
             var op = self.peekNext();
@@ -1251,6 +1299,37 @@ pub const Parser = struct {
                 break;
             }
             _ = self.tokenizer.next();
+
+            const peekNextID = self.peekNext().id;
+            if (op.id == .Asterisk and peekNextID == .RParen or peekNextID == .Asterisk)
+            {
+                if (lhs == .TypeCast)
+                {
+                    lhs.TypeCast.pointerCount += 1;
+                }
+                else if (lhs == .Variable)
+                {
+                    lhs = ExpressionData
+                    {
+                        .TypeCast = ASTnodes.TypeCastData
+                        {
+                            .typeName = lhs.Variable,
+                            .pointerCount = 1
+                        }
+                    };
+                }
+                else
+                {
+                    var err = try self.WriteError("Syntax Error: Attempting to convert non-type name into a pointer");
+                    self.errorStatements.append(err)
+                    catch
+                    {
+                        return Errors.OutOfMemoryError;
+                    };
+                    return Errors.SyntaxError;
+                }
+                continue;
+            }
             var rhs = try self.ParseExpression_Primary();
 
             while (true)
@@ -1258,7 +1337,7 @@ pub const Parser = struct {
                 var next = self.peekNext();
                 var nextPrecedence = GetPrecedence(next.id);
                 var nextAssociation = GetAssociation(next.id);
-                if (next.id == .Eof or op.id == .Semicolon or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))
+                if (next.id == .Eof or op.id == .Semicolon or nextPrecedence == -1 or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))
                 {
                     break;
                 }
@@ -1283,11 +1362,6 @@ pub const Parser = struct {
             {
                 .Op = operator
             };
-            cont += 1;
-            if (cont > 100)
-            {
-                return Errors.SyntaxError;
-            }
         }
 
         return lhs;

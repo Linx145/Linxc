@@ -167,6 +167,24 @@ pub const ModifiedVariableData = struct
         return result;
     }
 };
+pub const TypeCastData = struct
+{
+    typeName: []const u8,
+    pointerCount: i32,
+
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        var i: i32 = 0;
+        while (i < self.pointerCount) : (i += 1)
+        {
+            try result.concat("*");
+        }
+        try result.concat(self.typeName);
+
+        return result;
+    }
+};
 pub const ExpressionDataTag = enum
 {
     Literal,
@@ -174,7 +192,8 @@ pub const ExpressionDataTag = enum
     ModifiedVariable,
     Op,
     FunctionCall,
-    IndexedAccessor
+    IndexedAccessor,
+    TypeCast
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
@@ -184,27 +203,28 @@ pub const ExpressionData = union(ExpressionDataTag)
     Op: *OperatorData,
     FunctionCall: *FunctionCallData,
     IndexedAccessor: *FunctionCallData,
+    TypeCast: TypeCastData,
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
         switch (self.*)
         {
-            ExpressionDataTag.ModifiedVariable => |*value|
+            .ModifiedVariable => |*value|
             {
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
             },
-            ExpressionDataTag.Op => |*value|
+            .Op => |*value|
             {
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
             },
-            ExpressionDataTag.FunctionCall => |*value|
+            .FunctionCall => |*value|
             {
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
             },
-            ExpressionDataTag.IndexedAccessor => |*value|
+            .IndexedAccessor => |*value|
             {
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
@@ -215,39 +235,45 @@ pub const ExpressionData = union(ExpressionDataTag)
 
     pub fn ToString(self: @This(), allocator: std.mem.Allocator) anyerror!string
     {
-        var str = string.init(allocator);
         switch (self)
         {
-            ExpressionDataTag.Literal => |literal| 
+            .Literal => |literal| 
             {
+                var str = string.init(allocator);
                 try str.concat(literal);
+                return str;
             },
-            ExpressionDataTag.Variable => |variable|
+            .Variable => |variable|
             {
+                var str = string.init(allocator);
                 try str.concat(variable);
+                return str;
             },
-            ExpressionDataTag.ModifiedVariable => |variable|
+            .ModifiedVariable => |variable|
             {
-                str.deinit();
                 return variable.ToString(allocator);
             },
-            ExpressionDataTag.Op => |op| 
+            .Op => |op| 
             {
-                str.deinit();
                 return op.ToString(allocator);
             },
-            ExpressionDataTag.FunctionCall => |call| 
+            .FunctionCall => |call| 
             {
-                str.deinit();
                 return call.ToString(allocator);
             },
-            ExpressionDataTag.IndexedAccessor => |call|
+            .IndexedAccessor => |call|
             {
-                str.deinit();
                 return call.ToString(allocator);
+            },
+            .TypeCast => |typeCast|
+            {
+                return typeCast.ToString(allocator);
+            },
+            else =>
+            {
+
             }
         }
-        return str;
     }
 };
 pub const Operator = enum
@@ -280,7 +306,8 @@ pub const Operator = enum
     PercentEqual,
     Equal,
     Period,
-    Arrow
+    Arrow,
+    TypeCast
 };
 pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"Plus", Operator.Plus},
@@ -311,7 +338,8 @@ pub const TokenToOperator = std.ComptimeStringMap(Operator, .{
     .{"Equal", Operator.Equal},
     .{"Period", Operator.Period},
     .{"Arrow", Operator.Arrow},
-    .{"Ampersand", Operator.ToPointer}
+    .{"Ampersand", Operator.ToPointer},
+    .{"TypeCast", Operator.TypeCast}
 });
 pub const OperatorData = struct
 {
