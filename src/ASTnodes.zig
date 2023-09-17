@@ -487,6 +487,7 @@ pub const IfData = struct
 pub const StructData = struct
 {
     name: []const u8,
+    tags: ?[]ExpressionData,
     body: CompoundStatementData
 ,
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
@@ -504,6 +505,14 @@ pub const StructData = struct
     }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
+        if (self.tags != null)
+        {
+            for (self.tags.?) |*tag|
+            {
+                tag.deinit(allocator);
+            }
+            allocator.free(self.tags.?);
+        }
         for (self.body.items) |*item|
         {
             item.deinit(allocator);
@@ -518,6 +527,7 @@ pub const StatementDataTag = enum
     constructorDeclaration,
     destructorDeclaration,
     structDeclaration,
+    traitDeclaration,
     functionInvoke,
     returnStatement,
     otherExpression,
@@ -536,6 +546,7 @@ pub const StatementData = union(StatementDataTag)
     constructorDeclaration: FunctionData,
     destructorDeclaration: FunctionData,
     structDeclaration: StructData,
+    traitDeclaration: StructData,
     functionInvoke: FunctionCallData,
     returnStatement: ExpressionData,
     otherExpression: ExpressionData,
@@ -556,6 +567,7 @@ pub const StatementData = union(StatementDataTag)
             .constructorDeclaration => |*decl| decl.deinit(allocator),
             .destructorDeclaration => |*decl| decl.deinit(allocator),
             .structDeclaration => |*decl| decl.deinit(allocator),
+            .traitDeclaration => |*decl| decl.deinit(allocator),
             .functionInvoke => |*invoke| invoke.deinit(allocator),
             .returnStatement => |*stmt| stmt.deinit(allocator),
             .otherExpression => |*stmt| stmt.deinit(allocator),
@@ -581,6 +593,7 @@ pub const StatementData = union(StatementDataTag)
             .constructorDeclaration => |*decl| return decl.ToString(allocator),
             .destructorDeclaration => |*decl| return decl.ToString(allocator),
             .structDeclaration => |*decl| return decl.ToString(allocator),
+            .traitDeclaration => |*decl| return decl.ToString(allocator),
             .functionInvoke => |*invoke| return invoke.ToString(allocator),
             .returnStatement => |*stmt| 
             {

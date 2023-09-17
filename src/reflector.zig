@@ -337,7 +337,9 @@ test "reflector"
 {
     const io = @import("io.zig");
     const lexer = @import("lexer.zig");
-    const Parser = @import("parser.zig").Parser;
+    const parsers = @import("parser.zig");
+    const Parser = parsers.Parser;
+    const ParseContext = parsers.ParseContext;
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -354,7 +356,7 @@ test "reflector"
     parser.postParseStatement = PostParseStatement;
     std.debug.print("\n", .{});
 
-    var result = parser.Parse(false, false, false, "")
+    var result = parser.Parse(ParseContext.other, "")
     catch
     {
         std.debug.print("ERROR:", .{});

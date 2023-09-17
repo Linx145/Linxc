@@ -1,6 +1,7 @@
 #pragma once
-#define namespace(T)
 #define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
+#define trait struct
+#define impl_trait(name)
 
 typedef signed char i8;
 typedef short i16;

@@ -1,10 +1,21 @@
 #include <Vector2.linxc>
+#include <stdlib.h>
 
 int main()
 {
-    Vector2 vector2;
-    vector2.x = 1;
-    vector2.y = 2;
-    vector2.Print();
+    Vector2 *vector2 = (Vector2*)malloc(sizeof(Vector2));
+
+    vector2->x = 1;
+    vector2->y = 2;
+
+    trait_Printable *asTrait = (trait_Printable*)vector2;
+    asTrait->Print();
+
+    free(vector2);
+
+    // Vector2 vector2;
+    // vector2.x = 1;
+    // vector2.y = 2;
+    // vector2.Print();
     return 0;
 }

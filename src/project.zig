@@ -4,7 +4,9 @@ const transpiler = @import("transpiler.zig");
 const reflector = @import("reflector.zig");
 const ast = @import("ASTnodes.zig");
 const lexer = @import("lexer.zig");
-const Parser = @import("parser.zig").Parser;
+const parsers = @import("parser.zig");
+const Parser = parsers.Parser;
+const ParseContext = parsers.ParseContext;
 const io = @import("io.zig");
 
 const StringList = std.ArrayList(string);
@@ -124,7 +126,7 @@ pub const project = struct {
             parser.currentFile = self.linxcFiles.items[i].str();
             parser.currentLine = 0;
             parser.charsParsed = 0;
-            var result = parser.Parse(false, false, false, "")
+            var result = parser.Parse(ParseContext.other, "")
             catch
             {
                 std.debug.print("ERROR:", .{});
