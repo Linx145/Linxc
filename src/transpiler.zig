@@ -3,6 +3,8 @@
 const std = @import("std");
 const ast = @import("ASTnodes.zig");
 const io = @import("io.zig");
+const refl = @import("reflector.zig");
+const String = @import("zig-string.zig").String;
 
 pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData) anyerror!void
 {
@@ -26,6 +28,14 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 _ = try writer.write(structDeclaration.name);
                 _ = try writer.write(" {\n");
                 try TranspileStatementH(writer, structDeclaration.body);
+                _ = try writer.write("};\n");
+            },
+            .traitDeclaration => |traitDeclaration|
+            {
+                _ = try writer.write("struct ");
+                _ = try writer.write(traitDeclaration.name);
+                _ = try writer.write(" {\n");
+                try TranspileStatementH(writer, traitDeclaration.body);
                 _ = try writer.write("};\n");
             },
             .functionDeclaration => |functionDeclaration|
@@ -119,6 +129,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
         },
         .FunctionCall => |FunctionCall|
         {
+            FunctionCall.
             _ = try writer.write(FunctionCall.name);
             _ = try writer.write("(");
             var j: usize = 0;
@@ -197,6 +208,10 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
             {
                 _ = try writer.write(" ");
             }
+            else if (Op.leftExpression == .Variable)
+            {
+                
+            }
             try TranspileExpression(writer, &Op.rightExpression);
             if (Op.priority)
             {
@@ -227,6 +242,71 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             .structDeclaration => |*structDeclaration|
             {
                 try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name);
+            },
+            .traitDeclaration => |*traitDeclaration|
+            {
+                for (traitDeclaration.body.items) |*traitStmt|
+                {
+                    if (traitStmt == .functionDeclaration)
+                    {
+                        _ = try writer.write(traitStmt.functionDeclaration.returnType);
+                        _ = try writer.write(" ");
+                        if (parent != null and parent.?.len > 0)
+                        {
+                            _ = try writer.write(parent.?);
+                            _ = try writer.write("::");
+                        }
+                        _ = try writer.write(traitStmt.functionDeclaration.name);
+                        _ = try writer.write("(");
+                        var j: usize = 0;
+                        while (j < traitStmt.functionDeclaration.args.len) : (j += 1)
+                        {
+                            const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
+                            if (arg.isConst)
+                            {
+                                _ = try writer.write("const ");
+                            }
+                            _ = try writer.write(arg.typeName);
+                            _ = try writer.write(" ");
+                            _ = try writer.write(arg.name);
+
+                            //dont need to handle default value here as it's already handled for us in the header file
+
+                            if (j < traitStmt.functionDeclaration.args.len - 1)
+                            {
+                                _ = try writer.write(", ");
+                            }
+                        }
+                        _ = try writer.write(") {\n");
+                        //shitty comptime vtable
+                        _ = try writer.write("   switch (_SELF.type->ID) {\n");
+                        
+                        j = 0;
+                        var traitType: *refl.LinxcType = try refl.globalDatabase.?.GetTypeSafe(traitDeclaration.name);
+                        while (j < traitType.implementedBy.items.len) : (j += 1)
+                        {
+                            try writer.print("      case {d}:\n", .{traitType.implementedBy.items[j].ID});
+                            try writer.print("         (({s}*)_SELF.ptr).{s}(", .{traitType.implementedBy.items[j].name.str(), traitStmt.functionDeclaration.name});
+                            var c: usize = 0;
+
+                            while (c < traitStmt.functionDeclaration.args.len) : (c += 1)
+                            {
+                                const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
+                                _ = try writer.write(arg.name);
+                                if (c < traitStmt.functionDeclaration.args.len - 1)
+                                {
+                                    _ = try writer.write(", ");
+                                }
+                            }
+                            
+                            _ = try writer.write(");\n");
+                            _ = try writer.write("         break;\n");
+                        }
+                        _ = try writer.write("   }\n");
+
+                        _ = try writer.write("}\n");
+                    }
+                }
             },
             .variableDeclaration => |*variableDeclaration|
             {
@@ -269,6 +349,8 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     _ = try writer.write(arg.typeName);
                     _ = try writer.write(" ");
                     _ = try writer.write(arg.name);
+
+                    //dont need to handle default value here as it's already handled for us in the header file
 
                     if (j < functionDeclaration.args.len - 1)
                     {

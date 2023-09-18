@@ -78,6 +78,7 @@ pub inline fn GetPrecedence(ID: lexer.TokenID) i32
 pub const ParseContext = enum
 {
     other,
+    elseWithoutBraces,
     traitDeclaration,
     forLoopInitialization,
     forLoopStep
@@ -209,7 +210,7 @@ pub const Parser = struct {
 
     pub fn Parse(self: *Self, parseContext: ParseContext, parent: ?[]const u8) !CompoundStatementData
     {
-        const endOnSemicolon = parseContext == ParseContext.forLoopInitialization;
+        const endOnSemicolon = parseContext == ParseContext.forLoopInitialization or parseContext == ParseContext.elseWithoutBraces;
         const commaIsSemicolon = parseContext == ParseContext.forLoopStep or parseContext == ParseContext.forLoopInitialization;
         const endOnRParen = parseContext == ParseContext.forLoopStep;
 
@@ -406,12 +407,12 @@ pub const Parser = struct {
                         var elseStatement: CompoundStatementData = undefined;
                         if (self.peekNextUntilValid().id == .LBrace)
                         {
-                            elseStatement = try self.Parse(endOnSemicolon, commaIsSemicolon, endOnRParen, null);
+                            elseStatement = try self.Parse(ParseContext.other, null);
                         }
                         else
                         {
                             //compound statement parse until semicolon
-                            elseStatement = try self.Parse(true, commaIsSemicolon, endOnRParen, null);
+                            elseStatement = try self.Parse(ParseContext.elseWithoutBraces, null);
                         }
                         try self.AppendToCompoundStatement(&result, StatementData{.ElseStatement=elseStatement}, parent);
                     }
@@ -654,12 +655,22 @@ pub const Parser = struct {
                                 ClearCompoundStatement(result);
                                 return Errors.SyntaxError;
                             }
-                            const body = self.Parse(ParseContext.traitDeclaration, traitName)
+                            var body = self.Parse(ParseContext.traitDeclaration, traitName)
                             catch |err|
                             {
                                 ClearCompoundStatement(result);
                                 return err;
                             };
+                            // try body.append(StatementData
+                            // {
+                            //     .variableDeclaration = VarData
+                            //     {
+                            //         .name = "_SELF",
+                            //         .typeName = "Object",
+                            //         .isConst = false,
+                            //         .defaultValue = null
+                            //     }
+                            // });
 
                             var tagsSlice: ?[]ExpressionData = null;
                             if (nextTags.items.len > 0)
@@ -746,8 +757,6 @@ pub const Parser = struct {
                             //if we are outside a function body, function invokes are treated as macro tags
                             if (parent != null and expr == .FunctionCall)
                             {
-                                std.debug.print("Tag found: {s}\n", .{expr.FunctionCall.name});
-                                //expr.deinit(self.allocator);
                                 try nextTags.append(expr);
                             }
                             else
@@ -839,7 +848,7 @@ pub const Parser = struct {
                                 const functionReturnType = self.SourceSlice(typeNameStart.?, typeNameEnd);
 
                                 //parse arguments
-                                var args = try self.ParseArgs();
+                                var args = try self.ParseArgs(parseContext);
 
                                 var next: lexer.Token = undefined;
                                 while (true)
@@ -859,6 +868,7 @@ pub const Parser = struct {
                                                 .statement = statement
                                             }
                                         }, parent);
+                                        break;
                                     }
                                     else if (next.id == .Semicolon)
                                     {
@@ -874,6 +884,7 @@ pub const Parser = struct {
                                                     .statement = CompoundStatementData.init(self.allocator)
                                                 }
                                             }, parent);
+                                            break;
                                         }
                                         else
                                         {
@@ -1043,8 +1054,9 @@ pub const Parser = struct {
         }
         return typeNameEnd;
     }
-    pub fn ParseArgs(self: *Self) ![]VarData
+    pub fn ParseArgs(self: *Self, context: ParseContext) ![]VarData
     {
+        _ = context;
         var vars = std.ArrayList(VarData).init(self.allocator);
 
         var nextIsConst = false;

@@ -21,7 +21,7 @@ struct Vector2
     }
 };
 
-struct trait_Printable
+trait trait_Printable
 {
     void Print();
 };

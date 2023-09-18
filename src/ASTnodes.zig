@@ -5,7 +5,7 @@ const Errors = @import("errors.zig").Errors;
 pub const VarData = struct
 {
     name: []const u8,
-    typeName: []const u8,
+    typeName: TypeNameData,
     isConst: bool,
     defaultValue: ?ExpressionData,
 
@@ -16,7 +16,8 @@ pub const VarData = struct
         {
             try str.concat("const ");
         }
-        try str.concat(self.typeName);
+        var typeNameStr = try self.typeName.ToString(allocator);
+        try str.concat_deinit(&typeNameStr);
         try str.concat(" ");
         try str.concat(self.name);
         if (self.defaultValue != null)
@@ -60,14 +61,15 @@ pub const MacroDefinitionData = struct
 };
 pub const FunctionCallData = struct
 {
-    name: []const u8,
+    name: TypeNameData,
     inputParams: []ExpressionData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
 
-        try str.concat(self.name);
+        var nameStr = try self.name.ToString();
+        try str.concat_deinit(&nameStr);
         try str.concat("(");
         var i: usize = 0;
         while (i < self.inputParams.len) : (i += 1)
@@ -85,6 +87,7 @@ pub const FunctionCallData = struct
     }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
+        self.name.deinit();
         for (self.inputParams) |*param|
         {
             param.deinit(allocator);
@@ -167,9 +170,42 @@ pub const ModifiedVariableData = struct
         return result;
     }
 };
+pub const TypeNameData = struct
+{
+    name: []const u8,
+    templateTypes: ?std.ArrayList(TypeNameData),
+
+    pub inline fn deinit(self: *@This()) void
+    {
+        if (self.templateTypes != null)
+        {
+            self.templateTypes.?.deinit();
+        }
+    }
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        try result.concat(self.name);
+        if (self.templateTypes != null)
+        {
+            try result.concat("<");
+            var i: usize = 0;
+            while (i < self.templateTypes.?.items.len) : (i += 1)
+            {
+                try result.concat(self.templateTypes.?.items[i].ToString(allocator));
+                if (i < self.templateTypes.?.items.len - 1)
+                {
+                    try result.concat(", ");
+                }
+            }
+            try result.concat(">");
+        }
+        return result;
+    }
+};
 pub const TypeCastData = struct
 {
-    typeName: []const u8,
+    typeName: TypeNameData,
     pointerCount: i32,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
@@ -180,9 +216,14 @@ pub const TypeCastData = struct
         {
             try result.concat("*");
         }
-        try result.concat(self.typeName);
+        var typeNameStr = self.typeName.ToString(allocator);
+        try result.concat_deinit(&typeNameStr);
 
         return result;
+    }
+    pub inline fn deinit(self: *@This()) void
+    {
+        self.typeName.deinit();
     }
 };
 pub const ExpressionDataTag = enum
@@ -228,6 +269,10 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 value.*.deinit(alloc);
                 alloc.destroy(value.*);
+            },
+            .TypeCast => |*typecast|
+            {
+                typecast.*.deinit();
             },
             else => {}
         }

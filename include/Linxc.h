@@ -1,4 +1,6 @@
 #pragma once
+#include "Reflection.h"
+
 #define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
 #define trait struct
 #define impl_trait(name)
@@ -12,3 +14,16 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
+
+struct Object
+{
+    void *ptr;
+    Reflection::Type *type;
+};
+
+/// All calls are replaced by the transpiler to point to the self variable when used in a trait function
+Object trait_self()
+{
+    Object obj;
+    return obj;
+}

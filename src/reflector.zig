@@ -13,13 +13,15 @@ pub const ReflectionDatabase = struct
     types: std.ArrayList(LinxcType),
     nameToType: std.StringHashMap(usize),
     allocator: std.mem.Allocator,
+    currentID: usize,
 
     pub fn init(allocator: std.mem.Allocator) !ReflectionDatabase
     {
         var result: ReflectionDatabase = ReflectionDatabase {
             .allocator = allocator,
             .nameToType = std.StringHashMap(usize).init(allocator),
-            .types = std.ArrayList(LinxcType).init(allocator)
+            .types = std.ArrayList(LinxcType).init(allocator),
+            .currentID = 1
         };
         try result.AddPrimitiveType("int");
         try result.AddPrimitiveType("float");
@@ -73,10 +75,15 @@ pub const ReflectionDatabase = struct
             try self.AddType(LinxcType
             {
                 .name = nameStr,
+                .ID = self.currentID,
                 .functions = std.ArrayList(LinxcFunc).init(self.allocator),
                 .variables = std.ArrayList(LinxcVariable).init(self.allocator),
-                .isPrimitiveType = false
+                .isPrimitiveType = false,
+                .isTrait = false,
+                .implsTraits = std.ArrayList(*LinxcType).init(self.allocator),
+                .implementedBy = std.ArrayList(*LinxcType).init(self.allocator)
             });
+            self.currentID += 1;
         }
         return self.GetType(name);
     }
@@ -148,6 +155,31 @@ pub fn PostParseStatement(statement: StatementData, parent: ?[]const u8) anyerro
     switch (statement)
     {
         //this is always called before the addition of the parent struct if any
+        .traitDeclaration => |traitDecl|
+        {
+            var typePtr: *LinxcType = try self.GetTypeSafe(traitDecl.name);
+            typePtr.isTrait = true;
+        },
+        .structDeclaration => |structDecl|
+        {
+            var typePtr: *LinxcType = try self.GetTypeSafe(structDecl.name);
+            var j: usize = 0;
+            while (j < structDecl.tags.?.len) : (j += 1)
+            {
+                var exprData: *ASTnodes.ExpressionData = &structDecl.tags.?[j];
+                if (exprData == .FunctionCall)
+                {
+                    if (std.mem.eql(u8, exprData.FunctionCall.name, "impl_trait"))
+                    {
+                        var traitName = exprData.FunctionCall.inputParams[0].Variable;
+                        var traitType = try self.GetTypeSafe(traitName);
+                        try traitType.implementedBy.append(typePtr);
+                        traitType.isTrait = true;
+                        try typePtr.implsTraits.append(traitType);
+                    }
+                }
+            }
+        },
         .variableDeclaration => |varDecl|
         {
             if (parent != null)
@@ -291,9 +323,13 @@ pub const LinxcFunc = struct
 pub const LinxcType = struct
 {
     name: string,
+    ID: usize,
     functions: std.ArrayList(LinxcFunc),
     variables: std.ArrayList(LinxcVariable),
     isPrimitiveType: bool,
+    isTrait: bool,
+    implsTraits: std.ArrayList(*LinxcType),
+    implementedBy: std.ArrayList(*LinxcType),
 
     pub fn ToString(self: *@This()) !string
     {
@@ -319,6 +355,9 @@ pub const LinxcType = struct
     }
     pub fn deinit(self: *@This()) void
     {
+        self.implsTraits.deinit();
+        self.implementedBy.deinit();
+
         self.name.deinit();
         for (self.functions.items) |*function|
         {

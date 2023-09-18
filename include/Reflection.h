@@ -8,8 +8,6 @@
 
 namespace Reflection
 {
-    Database InitDatabase();
-
     struct Type
     {
         uint32_t ID;
