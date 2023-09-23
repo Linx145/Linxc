@@ -3,20 +3,17 @@
 
 i32 main()
 {
-    Vector2 vector2;
-    vector2.x = 0.0f;
-    vector2.y = 1.0f;
+    Vector2 *vector2 = (Vector2*)malloc(sizeof(Vector2));
 
-    vector2.Print();
-    //Vector2 *vector2 = (Vector2*)malloc(sizeof(Vector2));
+    vector2->x = 1;
+    vector2->y = 2;
 
-    //vector2->x = 1;
-    //vector2->y = 2;
+    vector2->Print();
 
     //trait_Printable *asTrait = (trait_Printable*)vector2;
     //asTrait->Print();
 
-    //free(vector2);
+    free(vector2);
 
     // Vector2 vector2;
     // vector2.x = 1;

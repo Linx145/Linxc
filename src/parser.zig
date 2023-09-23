@@ -212,6 +212,7 @@ pub const Parser = struct {
         var skipThisLine: bool = false;
         var result = CompoundStatementData.init(self.allocator);
         var nextCanBeElseStatement: bool = false;
+        var expectSemicolon: bool = false;
 
         var nextTags = std.ArrayList(ExpressionData).init(self.allocator);
         defer nextTags.deinit();
@@ -219,6 +220,18 @@ pub const Parser = struct {
         while (true)
         {
             var token = self.tokenizer.next();
+
+            if (expectSemicolon)
+            {
+                if (token.id != .Nl and token.id != .LineComment and token.id != .MultiLineComment)
+                {
+                    if (token.id != .Semicolon)
+                    {
+                        try self.WriteError("Expected semicolon ;");
+                    }
+                    else expectSemicolon = false;
+                }
+            }
 
             switch (token.id)
             {
@@ -333,6 +346,7 @@ pub const Parser = struct {
                     {
                         .returnStatement = expr
                     }, state);
+                    expectSemicolon = true;
                 },
                 .Keyword_struct =>
                 {
@@ -367,8 +381,17 @@ pub const Parser = struct {
                     {
                         .structDeclaration = structData
                     }, state);
+                    expectSemicolon = true;
                 },
-                .Asterisk, .Bang, .Tilde =>
+                .Bang, .Tilde =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    try self.WriteError("Expression cannot start with !");
+                },
+                .Asterisk =>
                 {
                     if (skipThisLine)
                     {
@@ -386,6 +409,7 @@ pub const Parser = struct {
                     {
                         .otherExpression = expr
                     }, state);
+                    expectSemicolon = true;
                 },
                 .Identifier, .Keyword_void, .Keyword_bool, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_float, .Keyword_double, .Keyword_char =>
                 {
@@ -428,6 +452,7 @@ pub const Parser = struct {
                         {
                             .otherExpression = expression
                         }, state);
+                        expectSemicolon = true;
                     }
                     else if (next.id == .LBracket) //index into variable, optionally do stuff with result
                     {
@@ -459,6 +484,7 @@ pub const Parser = struct {
                         {
                             .otherExpression = expression
                         }, state);
+                        expectSemicolon = true;
                     }
                     else if (next.id == .Identifier) //function declaration or variable declaration
                     {
@@ -508,6 +534,7 @@ pub const Parser = struct {
                                     .typeName = typeName
                                 }
                             }, state);
+                            expectSemicolon = true;
                         }
                         else if (tokenAfterName.id == .Semicolon) //variable creation
                         {
@@ -546,6 +573,7 @@ pub const Parser = struct {
                         {
                             .otherExpression = expr
                         }, state);
+                        expectSemicolon = true;
                     }
                 },
                 .Keyword_namespace =>
@@ -740,6 +768,10 @@ pub const Parser = struct {
                     defaultValueExpr = null;
                     nextIsConst = false;
                 }
+                else if (variableType != null)
+                {
+                    try self.WriteError("Missing variable name");
+                }
                 break;
             }
             else if (token.id == .Eof)
@@ -760,6 +792,7 @@ pub const Parser = struct {
             }
             else if (token.id == .Identifier)
             {
+                self.tokenizer.index = token.start;
                 if (variableType == null)
                 {
                     //detect variable type
@@ -770,6 +803,7 @@ pub const Parser = struct {
                 else if (variableName == null)//variable name
                 {
                     variableName = self.SourceTokenSlice(token);
+                    self.tokenizer.index = token.end;
                 }
                 else
                 {
@@ -853,7 +887,7 @@ pub const Parser = struct {
                     return Errors.SyntaxError;
                 }
             }
-            else //type
+            else if (lexer.IsPrimitiveType(token.id))
             {
                 if (variableType == null)
                 {
@@ -865,6 +899,10 @@ pub const Parser = struct {
                     
                     return Errors.SyntaxError;
                 }
+            }
+            else
+            {
+                try self.WriteError("Issue parsing function input args");
             }
         }
 

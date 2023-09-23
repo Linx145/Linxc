@@ -1,4 +1,5 @@
-#pragma once
+#ifndef linxch
+#define linxch
 #include "Reflection.h"
 
 #define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
@@ -22,8 +23,5 @@ struct Object
 };
 
 /// All calls are replaced by the transpiler to point to the self variable when used in a trait function
-Object trait_self()
-{
-    Object obj;
-    return obj;
-}
+#define trait_self() Object{}
+#endif

@@ -137,20 +137,21 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
         },
         .FunctionCall => |FunctionCall|
         {
-            var functionCallName = try FunctionCall.ToString(allocator);
+            //TODO: change?
+            var functionCallName = try FunctionCall.name.ToString(allocator);
             defer functionCallName.deinit();
             _ = try writer.write(functionCallName.str());
-            // _ = try writer.write("(");
-            // var j: usize = 0;
-            // while (j < FunctionCall.inputParams.len) : (j += 1)
-            // {
-            //     try TranspileExpression(writer, &FunctionCall.inputParams[j], allocator);
-            //     if (j < FunctionCall.inputParams.len - 1)
-            //     {
-            //         _ = try writer.write(", ");
-            //     }
-            // }
-            // _ = try writer.write(")");
+            _ = try writer.write("(");
+            var j: usize = 0;
+            while (j < FunctionCall.inputParams.len) : (j += 1)
+            {
+                try TranspileExpression(writer, &FunctionCall.inputParams[j], allocator);
+                if (j < FunctionCall.inputParams.len - 1)
+                {
+                    _ = try writer.write(", ");
+                }
+            }
+            _ = try writer.write(")");
         },
         .IndexedAccessor => |IndexedAccessor|
         {
@@ -231,7 +232,6 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
         {
             var typeNameStr: string = try TypeCast.*.typeName.ToString(allocator);
             defer typeNameStr.deinit();
-            _ = try writer.write(typeNameStr.str());
             try writer.print("({s}", .{typeNameStr.str()});
             var i: i32 = 0;
             while (i < TypeCast.pointerCount) : (i += 1)
