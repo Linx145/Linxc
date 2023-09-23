@@ -17,8 +17,7 @@ const StructData = ASTnodes.StructData;
 const StatementDataTag = ASTnodes.StatementDataTag;
 const StatementData = ASTnodes.StatementData;
 const CompoundStatementData = ASTnodes.CompoundStatementData;
-const ClearCompoundStatement = ASTnodes.ClearCompoundStatement;
-const CompoundStatementToString = ASTnodes.CompoundStatementToString;
+const TypeNameData = ASTnodes.TypeNameData;
 
 const std = @import("std");
 const string = @import("zig-string.zig").String;
@@ -84,15 +83,57 @@ pub const ParseContext = enum
     forLoopStep
 };
 
+pub const ParserState = struct
+{
+    context: ParseContext,
+    namespaces: std.ArrayList([]const u8),
+    structNames: std.ArrayList([]const u8),
+    funcNames: std.ArrayList([]const u8),
+    braceCount: i32,
+
+    pub fn deinit(self: *@This()) void
+    {
+        self.namespaces.deinit();
+        self.structNames.deinit();
+        self.funcNames.deinit();
+    }
+    pub fn clone(self: *@This()) !ParserState
+    {
+        var namespaces = std.ArrayList([]const u8).init(self.namespaces.allocator);
+        var structNames = std.ArrayList([]const u8).init(self.structNames.allocator);
+        var funcNames = std.ArrayList([]const u8).init(self.funcNames.allocator);
+
+        for (self.namespaces.items) |namespace|
+        {
+            try namespaces.append(namespace);
+        }
+        for (self.structNames.items) |structName|
+        {
+            try structNames.append(structName);
+        }
+        for (self.funcNames.items) |funcName|
+        {
+            try funcNames.append(funcName);
+        }
+
+        return ParserState
+        {
+            .context = self.context,
+            .namespaces = namespaces,
+            .structNames = structNames,
+            .funcNames = funcNames,
+            .braceCount = self.braceCount
+        };
+    }
+};
+
 pub const Parser = struct {
     const Self = @This();
     allocator: std.mem.Allocator,
     tokenizer: lexer.Tokenizer,
     errorStatements: std.ArrayList(string),
-    currentLine: usize,
-    charsParsed: usize,
     currentFile: ?[]const u8,
-    postParseStatement: ?*const fn(statement: StatementData, parentStatement: ?[]const u8) anyerror!void,
+    postParseStatement: ?*const fn(statement: StatementData, parentStatement: *ParserState) anyerror!void,
 
     pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
     {
@@ -101,8 +142,6 @@ pub const Parser = struct {
             .allocator = allocator,
             .tokenizer = tokenizer,
             .errorStatements = std.ArrayList(string).init(allocator),
-            .currentLine = 0,
-            .charsParsed = 0,
             .postParseStatement = null,
             .currentFile = null
         };
@@ -116,7 +155,7 @@ pub const Parser = struct {
         self.errorStatements.deinit();
     }
 
-    pub fn WriteError(self: *Self, message: []const u8) Errors!string
+    pub fn WriteError(self: *Self, message: []const u8) anyerror!void
     {
         var err: string = string.init(self.allocator);
         err.concat(message)
@@ -129,7 +168,7 @@ pub const Parser = struct {
         {
             return Errors.OutOfMemoryError;
         };
-        var line: []u8 = std.fmt.allocPrint(self.allocator, "at file {s}, line {d}, column {d}\n", .{self.currentFile orelse "Null", self.currentLine + 1, self.tokenizer.index - self.charsParsed})
+        var line: []u8 = std.fmt.allocPrint(self.allocator, "at file {s}, line {d}, column {d}\n", .{self.currentFile orelse "Null", self.tokenizer.currentLine, self.tokenizer.index - self.tokenizer.charsParsed})
         catch
         {
             return Errors.OutOfMemoryError;
@@ -141,11 +180,9 @@ pub const Parser = struct {
         };
 
         self.allocator.free(line);
-        //var formatted: u8 = try std.fmt.allocPrint(self.allocator, "{d}", .{});
-        //defer self.allocator.free(formatted);
-        //try err.concat(formatted);
+        try self.errorStatements.append(err);
 
-        return err;
+        return Errors.SyntaxError;
     }
     pub inline fn SourceSlice(self: *Self, start: usize, end: usize) []const u8
     {
@@ -156,51 +193,12 @@ pub const Parser = struct {
         return self.tokenizer.buffer[token.start..token.end];
     }
 
-    pub fn nextUntilValid(self: *@This()) lexer.Token
-    {
-        var next = self.tokenizer.next();
-        while (next.id == .Nl or next.id == .LineComment or next.id == .MultiLineComment)
-        {
-            if (next.id == .Nl)
-            {
-                self.currentLine += 1;
-                self.charsParsed = self.tokenizer.index;
-            }
-            next = self.tokenizer.next();
-        }
-        return next;
-    }
-    pub fn peekNext(self: *@This()) lexer.Token
-    {
-        const prevIndex = self.tokenizer.prevIndex;
-        const currentIndex = self.tokenizer.index;
-
-        const result = self.tokenizer.next();
-
-        self.tokenizer.index = currentIndex;
-        self.tokenizer.prevIndex = prevIndex;
-
-        return result;
-    }
-    pub fn peekNextUntilValid(self: *@This()) lexer.Token
-    {
-        const prevIndex = self.tokenizer.prevIndex;
-        const currentIndex = self.tokenizer.index;
-
-        const result = self.nextUntilValid();
-
-        self.tokenizer.index = currentIndex;
-        self.tokenizer.prevIndex = prevIndex;
-
-        return result;
-    }
-
-    pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, parentStatementName: ?[]const u8) !void
+    pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, state: *ParserState) anyerror!void
     {
         try result.append(statement);
         if (self.postParseStatement != null)
         {
-            try self.postParseStatement.?(statement, parentStatementName);
+            try self.postParseStatement.?(statement, state);
         }
     }
     
@@ -208,802 +206,450 @@ pub const Parser = struct {
     //commaIsSemicolon: initializer in for loops, step statement(s) in for loops
     //end on rparen: step statement(s) in for loops
 
-    pub fn Parse(self: *Self, parseContext: ParseContext, parent: ?[]const u8) !CompoundStatementData
+    pub fn Parse(self: *Self, state: *ParserState) anyerror!CompoundStatementData
     {
-        const endOnSemicolon = parseContext == ParseContext.forLoopInitialization or parseContext == ParseContext.elseWithoutBraces;
-        const commaIsSemicolon = parseContext == ParseContext.forLoopStep or parseContext == ParseContext.forLoopInitialization;
-        const endOnRParen = parseContext == ParseContext.forLoopStep;
-
-        var result = CompoundStatementData.init(self.allocator);
-
-        //var start: ?usize = null;
-        //var end: usize = 0;
+        var braceCount: i32 = state.braceCount;
         var skipThisLine: bool = false;
-        var braceCont: i32 = 0;
-        var foundIdentifier: ?[]const u8 = null;
-        var expectSemicolon: bool = false;
-
-        var typeNameStart: ?usize = null;
-        var typeNameEnd: usize = 0;
-
-        var nextIsConst: bool = false;
-
-        var nextIsStruct: bool = false;
-        var nextIsTrait: bool = false;
+        var result = CompoundStatementData.init(self.allocator);
+        var nextCanBeElseStatement: bool = false;
 
         var nextTags = std.ArrayList(ExpressionData).init(self.allocator);
         defer nextTags.deinit();
 
         while (true)
         {
-            const token: lexer.Token = self.tokenizer.next();
-
-            //there are too many ways that a statement may just be an expression,
-            //which in itself is valid too. Thus, we just perform a check if the expression is statement. If so,
-            //we simply return
-            if (expectSemicolon)
-            {
-                if (token.id != .Nl)
-                {
-                    if (token.id == .RParen and endOnRParen)
-                    {
-
-                    }
-                    else if (token.id != .Semicolon and (!commaIsSemicolon or token.id != .Comma))
-                    {
-                        var err: string = try self.WriteError("Syntax Error: Missing semicolon");
-                        try self.errorStatements.append(err);
-                        ClearCompoundStatement(result);
-                        return Errors.SyntaxError;
-                    }
-                    expectSemicolon = false;
-                }
-            }
+            var token = self.tokenizer.next();
 
             switch (token.id)
             {
-                .Eof =>
-                {
-                    break;
-                },
                 .Nl =>
                 {
-                    self.currentLine += 1;
-                    self.charsParsed = self.tokenizer.index;
+                    self.tokenizer.currentLine += 1;
+                    self.tokenizer.charsParsed = self.tokenizer.index;
                     skipThisLine = false;
-                },
-                .Hash =>
-                {
-                    skipThisLine = true;
                 },
                 .MultiLineComment, .LineComment =>
                 {
                     continue;
                 },
-                .Keyword_delegate =>
+                .Hash =>
                 {
-
-                    while (true)
-                    {
-                        var next = self.tokenizer.next();
-                        if (next.id == .Semicolon)
-                        {
-                            break;
-                        }
-                        if (next.id == .LParen) //todo: delegate declaration statement
-                        {
-
-                        }
-                        else if (next.id == .RParen)
-                        {
-
-                        }
-                        else if (next.id == .Nl or next.id == .Eof)
-                        {
-                            var err: string = try self.WriteError("Syntax Error: Expected ; after delegate() declaration");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                    }
+                    skipThisLine = true;
                 },
-                .Keyword_include =>
+                .Semicolon =>
                 {
-                    const token2: lexer.Token = self.tokenizer.next();
-                    if (token2.id == .MacroString)
-                    {
-                        const str = self.SourceTokenSlice(token2);
-                        const statement: StatementData = StatementData
-                        {
-                            .includeStatement = str
-                        };
-                        try self.AppendToCompoundStatement(&result, statement, parent);
-                    }
-                    else
-                    {
-                        var err: string = try self.WriteError("Syntax Error: Expected enclosed string after #include statement, but found none ");
-                        try self.errorStatements.append(err);
-                        ClearCompoundStatement(result);
-                        return Errors.SyntaxError;
-                    }
-                },
-                .LBrace =>
-                {
-                    if (!skipThisLine)
-                    {
-                        braceCont += 1;
-                    }
-                },
-                .RBrace =>
-                {
-                    if (!skipThisLine)
-                    {
-                        braceCont -= 1;
-                        if (braceCont <= 0)
-                        {
-                            break;
-                        }
-                    }
-                },
-                .Keyword_void, .Keyword_bool, .Keyword_float, .Keyword_int, .Keyword_i16, .Keyword_u16, .Keyword_i32, .Keyword_u32, .Keyword_u64, .Keyword_i64 =>
-                {
-                    if (!skipThisLine)
-                    {
-                        if (typeNameStart == null)
-                        {
-                            typeNameStart = token.start;
-                        }
-                        else
-                        {
-                            if (foundIdentifier != null)
-                            {
-                                var err: string = try self.WriteError("Syntax Error: Missing semicolon");
-                                try self.errorStatements.append(err);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
-                            }
-                        }
-                        typeNameEnd = token.end;
-                    }
+                    continue;
                 },
                 .Keyword_if =>
                 {
-                    if (!skipThisLine)
+                    if (skipThisLine)
                     {
-                        var next = self.nextUntilValid();
-                        if (next.id == .LParen)
-                        {
-                            if (next.id == .Nl)
-                            {
-                                self.currentLine += 1;
-                                self.charsParsed = self.tokenizer.index;
-                                next = self.nextUntilValid();
-                            }
-                            var primary = try self.ParseExpression_Primary();
-                            var expression = try self.ParseExpression(primary, 0);
-                        
-                            next = self.nextUntilValid();
-                            while (next.id != .LBrace)
-                            {
-                                next = self.nextUntilValid();
-                            }
-                            const statement = try self.Parse(ParseContext.other, null);
+                        continue;
+                    }
+                    if (state.funcNames.items.len == 0)
+                    {
+                        try self.WriteError("If statement must be within the body of a function");
+                    }
+                    var next = self.tokenizer.nextUntilValid();
+                    if (next.id == .LParen)
+                    {
+                        var primary = try self.ParseExpression_Primary();
+                        var expression = try self.ParseExpression(primary, 0);
 
-                            try self.AppendToCompoundStatement(&result, StatementData
-                            {
-                                .IfStatement = IfData
-                                {
-                                    .condition = expression,
-                                    .statement = statement
-                                }
-                            }, parent);
+                        if (self.tokenizer.nextUntilValid().id != .RParen)
+                        {
+                            try self.WriteError("Expected ) after expression in if statement");
                         }
+                        if (self.tokenizer.nextUntilValid().id != .LBrace)
+                        {
+                            try self.WriteError("Expected { after ) in if statement");
+                        }
+                        var newState = try state.clone();
+                        newState.braceCount += 1;
+                        defer newState.deinit();
+
+                        var body = try self.Parse(&newState);
+                        try self.AppendToCompoundStatement(&result, StatementData
+                        {
+                            .IfStatement = ASTnodes.IfData
+                            {
+                                .condition = expression,
+                                .statement = body
+                            }
+                        }, state);
+                        nextCanBeElseStatement = true;
+                    }
+                    else
+                    {
+                        try self.WriteError("If statement must be followed up with a ()");
                     }
                 },
                 .Keyword_else =>
                 {
-                    if (!skipThisLine)
+                    if (skipThisLine)
                     {
-                        var elseStatement: CompoundStatementData = undefined;
-                        if (self.peekNextUntilValid().id == .LBrace)
-                        {
-                            elseStatement = try self.Parse(ParseContext.other, null);
-                        }
-                        else
-                        {
-                            //compound statement parse until semicolon
-                            elseStatement = try self.Parse(ParseContext.elseWithoutBraces, null);
-                        }
-                        try self.AppendToCompoundStatement(&result, StatementData{.ElseStatement=elseStatement}, parent);
+                        continue;
                     }
-                },
-                .Keyword_const => 
-                {
-                    if (!skipThisLine)
+                    if (!nextCanBeElseStatement)
                     {
-                        if (nextIsConst)
-                        {
-                            var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        else if (typeNameStart != null)
-                        {
-                            var err = try self.WriteError("Syntax Error: const should be before type");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        nextIsConst = true;
+                        try self.WriteError("Expected if statement before else statement");
                     }
-                },
-                .Keyword_for =>
-                {
-                    if (!skipThisLine)
+                    if (state.funcNames.items.len == 0)
                     {
-                        if (nextIsConst)
-                        {
-                            var err = try self.WriteError("Syntax Error: For statement cannot be const");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        if (self.nextUntilValid().id != .LParen)
-                        {
-                            var err = try self.WriteError("Syntax Error: Expected ( after for statement");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        //parse initializer statement
-                        
-                        const initializer = try self.Parse(ParseContext.forLoopInitialization, null);
+                        try self.WriteError("else statement must be within a function body");
+                    }
+                    var newState = try state.*.clone();
+                    defer newState.deinit();
+                    var peek = self.tokenizer.peekNextUntilValid();
+                    if (peek.id == .LBrace)
+                    {
+                        newState.braceCount += 1;
+                    }
+                    else
+                    {
+                        newState.context = ParseContext.elseWithoutBraces;
+                    }
 
-                        const conditionPrimary = try self.ParseExpression_Primary();
-                        const condition = try self.ParseExpression(conditionPrimary, 0);
-                        _ = self.tokenizer.next(); //skip the ;
-                        if (self.tokenizer.prev_tok_id != .Semicolon)
-                        {
-                            var err: string = try self.WriteError("Syntax Error: Expected semicolon at the end of the condition expression in a for loop");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        const shouldStep = try self.Parse(ParseContext.forLoopStep, null);
-                        var statement: CompoundStatementData = undefined;
-
-                        if (self.nextUntilValid().id != .LBrace)
-                        {
-                            self.tokenizer.index = self.tokenizer.prevIndex;
-                            statement = try self.Parse(ParseContext.other, null);
-                        }
-                        else
-                        {
-                            statement = try self.Parse(ParseContext.other, null);
-                        }
-
-                        try self.AppendToCompoundStatement(&result, StatementData
-                        {
-                            .ForStatement = ForData
-                            {
-                                .initializer = initializer,
-                                .condition = condition,
-                                .shouldStep = shouldStep,
-                                .statement = statement
-                            }
-                        }, parent);
-                    }
-                },
-                .Keyword_while =>
-                {
-                    if (!skipThisLine)
+                    const elseBody = try self.Parse(&newState);
+                    try self.AppendToCompoundStatement(&result, StatementData
                     {
-                        if (nextIsConst)
-                        {
-                            var err = try self.WriteError("Syntax Error: Duplicate const prefix! ");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        if (self.nextUntilValid().id != .LParen)
-                        {
-                            var err = try self.WriteError("Syntax Error: Expected ( after while statement");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        var primary = try self.ParseExpression_Primary();
-                        const condition = try self.ParseExpression(primary, 0);
-                        var next = self.nextUntilValid();
-                        while (next.id != .LBrace)
-                        {
-                            next = self.nextUntilValid();
-                        }
-                        const statement = try self.Parse(ParseContext.other, null);
-                        try self.AppendToCompoundStatement(&result, StatementData
-                        {
-                            .WhileStatement = WhileData
-                            {
-                                .condition = condition,
-                                .statement = statement
-                            }
-                        }, parent);
-                    }
+                        .ElseStatement = elseBody
+                    }, state);
                 },
                 .Keyword_return =>
                 {
-                    if (!skipThisLine)
+                    if (skipThisLine)
                     {
-                        if (parseContext == ParseContext.forLoopInitialization or parseContext == ParseContext.forLoopStep)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Cannot have return statement in for loop initialization or step function");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-
-                        var primary = self.ParseExpression_Primary()
-                        catch |err|
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression on return statement");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return err;
-                        };
-                        var expr = self.ParseExpression(primary, 0)
-                        catch |err|
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Issue parsing expression on return statement");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return err;
-                        };
-
-                        try self.AppendToCompoundStatement(&result, StatementData
-                        {
-                            .returnStatement = expr
-                        }, parent);
-
-                        expectSemicolon = true;
+                        continue;
                     }
-                },
-                .Keyword_trait =>
-                {
-                    if (!skipThisLine)
+                    if (state.funcNames.items.len == 0)
                     {
-                        if (parseContext == ParseContext.forLoopInitialization or parseContext == ParseContext.forLoopStep)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Cannot declare traits in for loop initialization or step function");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-
-                        if (nextIsTrait)
-                        {
-                            var err = try self.WriteError("Syntax Error: duplicate struct keyword");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        if (nextIsStruct)
-                        {
-                            var err = try self.WriteError("Syntax Error: cannot declare struct trait");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        if (nextIsConst)
-                        {
-                            var err = try self.WriteError("Syntax Error: cannot declare const trait");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        nextIsTrait = true;
+                        try self.WriteError("return statement must be within a function body");
                     }
+                    var primary = try self.ParseExpression_Primary();
+                    var expr = try self.ParseExpression(primary, 0);
+
+                    try self.AppendToCompoundStatement(&result, StatementData
+                    {
+                        .returnStatement = expr
+                    }, state);
                 },
                 .Keyword_struct =>
                 {
-                    if (!skipThisLine)
+                    if (skipThisLine)
                     {
-                        if (parseContext == ParseContext.forLoopInitialization or parseContext == ParseContext.forLoopStep)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Cannot declare structs in for loop initialization or step function");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
+                        continue;
+                    }
+                    var structNameToken = self.tokenizer.nextUntilValid();
+                    if (structNameToken.id != .Identifier)
+                    {
+                        try self.WriteError("Linxc expects struct name to be directly after struct keyword");
+                    }
+                    const structName = self.SourceTokenSlice(structNameToken);
+                    if (self.tokenizer.nextUntilValid().id != .LBrace)
+                    {
+                        try self.WriteError("Expected struct body after struct name");
+                    }
+                    var newState = try state.*.clone();
+                    defer newState.deinit();
+                    try newState.structNames.append(structName);
+                    newState.braceCount += 1;
 
-                        if (nextIsStruct)
+                    const body = try self.Parse(&newState);
+
+                    const structData = ASTnodes.StructData
+                    {
+                        .name = structName,
+                        .tags = null,
+                        .body = body
+                    };
+                    try self.AppendToCompoundStatement(&result, ASTnodes.StatementData
+                    {
+                        .structDeclaration = structData
+                    }, state);
+                },
+                .Asterisk, .Bang, .Tilde =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    if (state.funcNames.items.len == 0)
+                    {
+                        try self.WriteError("Expression must be within another function's body");
+                    }
+                    self.tokenizer.index = token.start;
+                    var primary = try self.ParseExpression_Primary();
+                    var expr = try self.ParseExpression(primary, 0);
+
+                    try self.AppendToCompoundStatement(&result, StatementData
+                    {
+                        .otherExpression = expr
+                    }, state);
+                },
+                .Identifier, .Keyword_void, .Keyword_bool, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_float, .Keyword_double, .Keyword_char =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    self.tokenizer.index = token.start;
+                    var typeName: ASTnodes.TypeNameData = try self.ParseTypeName(state.funcNames.items.len == 0);
+
+                    var next = self.tokenizer.peekNextUntilValid();
+
+                    if (next.id == .LParen) //call function, optionally do stuff with result
+                    {
+                        self.tokenizer.index = next.end;
+                        if (typeName.pointerCount > 0)
                         {
-                            var err = try self.WriteError("Syntax Error: duplicate struct keyword");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
+                            try self.WriteError("Invalid function call syntax, cannot have * between function name and () arguments");
                         }
-                        if (nextIsTrait)
+                        if (state.funcNames.items.len == 0)
                         {
-                            var err = try self.WriteError("Syntax Error: cannot declare struct trait");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
+                            try self.WriteError("Function call must be within another function's body");
                         }
-                        if (nextIsConst)
+                        if (lexer.IsPrimitiveType(token.id))
                         {
-                            var err = try self.WriteError("Syntax Error: cannot declare const struct");
-                            try self.errorStatements.append(err);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
+                            try self.WriteError("Cannot invoke function with a primitive type");
                         }
-                        nextIsStruct = true;
+                        const inputParams = try self.ParseInputParams(false);
+                        var functionCall = try self.allocator.create(FunctionCallData);
+                        functionCall.name = typeName;
+                        functionCall.inputParams = inputParams;
+
+                        var primary = ExpressionData
+                        {
+                            .FunctionCall = functionCall
+                        };
+                        var expression = try self.ParseExpression(primary, 0);
+
+                        try self.AppendToCompoundStatement(&result, StatementData
+                        {
+                            .otherExpression = expression
+                        }, state);
+                    }
+                    else if (next.id == .LBracket) //index into variable, optionally do stuff with result
+                    {
+                        self.tokenizer.index = next.end;
+                        if (typeName.pointerCount > 0)
+                        {
+                            try self.WriteError("Invalid variable indexing syntax, cannot have * between variable name and [] indexer arguments");
+                        }
+                        if (state.funcNames.items.len == 0)
+                        {
+                            try self.WriteError("Array indexer call must be within another function's body");
+                        }
+                        if (lexer.IsPrimitiveType(token.id))
+                        {
+                            try self.WriteError("Cannot index into a primitive type");
+                        }
+                        const inputParams = try self.ParseInputParams(true);
+                        var indexedAccessor = try self.allocator.create(FunctionCallData);
+                        indexedAccessor.name = typeName;
+                        indexedAccessor.inputParams = inputParams;
+
+                        var primary = ExpressionData
+                        {
+                            .IndexedAccessor = indexedAccessor
+                        };
+                        var expression = try self.ParseExpression(primary, 0);
+
+                        try self.AppendToCompoundStatement(&result, StatementData
+                        {
+                            .otherExpression = expression
+                        }, state);
+                    }
+                    else if (next.id == .Identifier) //function declaration or variable declaration
+                    {
+                        //advance beyond the identifier
+                        self.tokenizer.index = next.end;
+                        var name = self.SourceTokenSlice(next);
+
+                        var tokenAfterName = self.tokenizer.nextUntilValid();
+
+                        if (tokenAfterName.id == .LParen) //function declaration
+                        {
+                            var args = try self.ParseArgs();
+                            if (self.tokenizer.nextUntilValid().id != .LBrace)
+                            {
+                                try self.WriteError("Expected { after function arguments list () unless it is in a trait");
+                            }
+                            var newState = try state.*.clone();
+                            defer newState.deinit();
+                            try newState.funcNames.append(name);
+                            newState.braceCount += 1;
+                            const body = try self.Parse(&newState);
+
+                            const functionDeclaration = ASTnodes.FunctionData
+                            {
+                                .name = name,
+                                .args = args,
+                                .returnType = typeName,
+                                .statement = body
+                            };
+                            try self.AppendToCompoundStatement(&result, StatementData
+                            {
+                                .functionDeclaration = functionDeclaration
+                            }, state);
+                        }
+                        else if (tokenAfterName.id == .Equal) //variable creation and assignment
+                        {
+                            var primary = try self.ParseExpression_Primary();
+                            var expr = try self.ParseExpression(primary, 0);
+
+                            try self.AppendToCompoundStatement(&result, StatementData
+                            {
+                                .variableDeclaration = ASTnodes.VarData
+                                {
+                                    .defaultValue = expr,
+                                    .name = name,
+                                    .isConst = false,
+                                    .typeName = typeName
+                                }
+                            }, state);
+                        }
+                        else if (tokenAfterName.id == .Semicolon) //variable creation
+                        {
+                            try self.AppendToCompoundStatement(&result, StatementData
+                            {
+                                .variableDeclaration = ASTnodes.VarData
+                                {
+                                    .defaultValue = null,
+                                    .name = name,
+                                    .isConst = false,
+                                    .typeName = typeName
+                                }
+                            }, state);
+                        }
+                    }
+                    else
+                    {
+                        //is some kind of expression
+                        //eg: vector2.x = 1.0f;
+
+                        //what differentiates
+                        //vector2 *create()
+                        //and
+                        //a * b()
+
+                        //1: vector2 *create() MUST NOT be present within a function body, a * b() MUST be within a function body
+                        //2: vector2 is a type, a is a variable (Requires variable tracking, reserved for the future)
+
+                        var primary = ExpressionData
+                        {
+                            .Variable = typeName
+                        };
+                        var expr = try self.ParseExpression(primary, 0);
+
+                        try self.AppendToCompoundStatement(&result, StatementData
+                        {
+                            .otherExpression = expr
+                        }, state);
                     }
                 },
-                .Identifier => 
+                .Keyword_namespace =>
                 {
-                    if (!skipThisLine)
+                    if (skipThisLine)
                     {
-                        var next = self.peekNextUntilValid();
-                        if (nextIsTrait)
+                        continue;
+                    }
+                    if (state.structNames.items.len > 0 or state.funcNames.items.len > 0)
+                    {
+                        try self.WriteError("namespace statement must not be within the body of a struct or function");
+                    }
+                    var foundIdentifier: bool = false;
+                    var newState: ParserState = try state.*.clone();
+                    defer newState.deinit();
+                    var namespaceNameStart: ?usize = null;
+                    var namespaceNameEnd: usize = 0;
+                    while (true)
+                    {
+                        var next = self.tokenizer.next();
+                        if (next.id == .Identifier)
                         {
-                            const traitName = self.SourceTokenSlice(token);
-                            if (next.id != .LBrace)
+                            if (foundIdentifier)
                             {
-                                var err = try self.WriteError("Syntax Error: Unknown token after trait name, expected {");
-                                try self.errorStatements.append(err);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
+                                try self.WriteError("Expected { or :: after namespace name");
                             }
-                            var body = self.Parse(ParseContext.traitDeclaration, traitName)
-                            catch |err|
+                            foundIdentifier = true;
+                            try newState.namespaces.append(self.SourceTokenSlice(next));
+                            if (namespaceNameStart == null)
                             {
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-                            // try body.append(StatementData
-                            // {
-                            //     .variableDeclaration = VarData
-                            //     {
-                            //         .name = "_SELF",
-                            //         .typeName = "Object",
-                            //         .isConst = false,
-                            //         .defaultValue = null
-                            //     }
-                            // });
-
-                            var tagsSlice: ?[]ExpressionData = null;
-                            if (nextTags.items.len > 0)
-                            {
-                                tagsSlice = try nextTags.toOwnedSlice();
+                                namespaceNameStart = next.start;
                             }
-
-                            try self.AppendToCompoundStatement(&result, StatementData
-                            {
-                                .traitDeclaration = StructData
-                                {
-                                    .name = traitName,
-                                    .tags = tagsSlice,
-                                    .body = body
-                                }
-                            }, parent);
-                            nextIsTrait = false;
-                            typeNameStart = null;
-                            typeNameEnd = 0;
-
-                            expectSemicolon = true;
+                            namespaceNameEnd = next.end;
                         }
-                        else if (nextIsStruct)
+                        else if (next.id == .ColonColon)
                         {
-                            const structName = self.SourceTokenSlice(token);
-                            if (next.id != .LBrace)
+                            if (foundIdentifier)
                             {
-                                var err = try self.WriteError("Syntax Error: Unknown token after struct name, expected {");
-                                try self.errorStatements.append(err);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
-                            }
-                            const body = self.Parse(ParseContext.other, structName)
-                            catch |err|
-                            {
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-
-                            var tagsSlice: ?[]ExpressionData = null;
-                            if (nextTags.items.len > 0)
-                            {
-                                tagsSlice = try nextTags.toOwnedSlice();
-                            }
-
-                            try self.AppendToCompoundStatement(&result, StatementData
-                            {
-                                .structDeclaration = StructData
-                                {
-                                    .name = structName,
-                                    .tags = tagsSlice,
-                                    .body = body
-                                }
-                            }, parent);
-                            nextIsStruct = false;
-                            typeNameStart = null;
-                            typeNameEnd = 0;
-
-                            expectSemicolon = true;
-                        }
-                        else if (typeNameStart == null and (GetPrecedence(next.id) != -1 or next.id == .LParen))
-                        {
-                            //is some kind of expression
-                            //go back
-                            self.tokenizer.index = self.tokenizer.prevIndex;
-                            //parse expression as per normal
-                            var primary = self.ParseExpression_Primary()
-                            catch |err|
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Issue parsing primary expression");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-                            var expr = self.ParseExpression(primary, 0)
-                            catch |err|
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Issue parsing expression");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return err;
-                            };
-
-                            //if we are outside a function body, function invokes are treated as macro tags
-                            if (parent != null and expr == .FunctionCall)
-                            {
-                                try nextTags.append(expr);
+                                foundIdentifier = false;
                             }
                             else
                             {
+                                try self.WriteError(":: only permissible after identifier in namespace name");
+                            }
+                        }
+                        else if (next.id == .LBrace)
+                        {
+                            if (foundIdentifier)
+                            {
+                                newState.braceCount += 1;
+                                var body = try self.Parse(&newState);
                                 try self.AppendToCompoundStatement(&result, StatementData
                                 {
-                                    .otherExpression = expr
-                                }, parent);
-                                expectSemicolon = true;
-                            }
-                        }
-                        else if (typeNameStart == null)
-                        {
-                            typeNameStart = token.start;
-                            if (next.id == .ColonColon)
-                            {
-                                while (true)
-                                {
-                                    next = self.nextUntilValid();
-                                    if (next.id == .ColonColon or next.id == .Identifier)
+                                    .NamespaceStatement = ASTnodes.NamespaceData
                                     {
-                                        typeNameEnd = next.end;
+                                        .body = body,
+                                        .name = self.SourceSlice(namespaceNameStart.?, namespaceNameEnd)
                                     }
-                                    else break;
-                                }
-                            }
-                            else typeNameEnd = token.end;
-                        }
-                        else 
-                        {
-                            if (foundIdentifier != null)
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Duplicate identifier");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
-                            }
-                            foundIdentifier = self.SourceTokenSlice(token);
-                            if (next.id == .ColonColon)
-                            {
-                                var errStr = try self.WriteError("Syntax Error: Illegal token :: after function name declaration");
-                                try self.errorStatements.append(errStr);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
-                            }
-                        }
-                    }
-                },
-                .RParen =>
-                {
-                    if (endOnRParen)
-                    {
-                        break;
-                    }
-                },
-                .LParen =>
-                {
-                    if (!skipThisLine)
-                    {
-                        if (foundIdentifier == null and typeNameStart != null)
-                        {
-                            foundIdentifier = self.SourceSlice(typeNameStart.?, typeNameEnd);
-                            typeNameStart = null;
-                            typeNameEnd = 0;
-                        
-                            var next = self.peekNextUntilValid();
-                            if (next.id == .Asterisk)
-                            {
-                                var err = try self.WriteError("Syntax Error: found C style function pointer, use delegate() macro from Linxc.h to typedef function pointer types and then use them instead");
-                                try self.errorStatements.append(err);
-                                ClearCompoundStatement(result);
-                                return Errors.SyntaxError;
-                            }
-                        }
-                        //declare function
-                        if (foundIdentifier != null)
-                        {
-                            if (typeNameStart != null)
-                            {
-                                if (nextIsConst)
-                                {
-                                    var err = try self.WriteError("Syntax Error: Cannot declare function as const");
-                                    try self.errorStatements.append(err);
-                                    ClearCompoundStatement(result);
-                                    return Errors.SyntaxError;
-                                }
-
-                                const functionName = foundIdentifier.?;
-                                const functionReturnType = self.SourceSlice(typeNameStart.?, typeNameEnd);
-
-                                //parse arguments
-                                var args = try self.ParseArgs(parseContext);
-
-                                var next: lexer.Token = undefined;
-                                while (true)
-                                {
-                                    next = self.nextUntilValid();
-                                    if (next.id == .LBrace)
-                                    {
-                                        const statement = try self.Parse(ParseContext.other, null);
-
-                                        try self.AppendToCompoundStatement(&result, StatementData
-                                        {
-                                            .functionDeclaration = FunctionData
-                                            {
-                                                .name = functionName,
-                                                .returnType = functionReturnType,
-                                                .args = args,
-                                                .statement = statement
-                                            }
-                                        }, parent);
-                                        break;
-                                    }
-                                    else if (next.id == .Semicolon)
-                                    {
-                                        if (parseContext == ParseContext.traitDeclaration)
-                                        {
-                                            try self.AppendToCompoundStatement(&result, StatementData
-                                            {
-                                                .functionDeclaration = FunctionData
-                                                {
-                                                    .name = functionName,
-                                                    .returnType = functionReturnType,
-                                                    .args = args,
-                                                    .statement = CompoundStatementData.init(self.allocator)
-                                                }
-                                            }, parent);
-                                            break;
-                                        }
-                                        else
-                                        {
-                                            var err = try self.WriteError("Syntax Error: All functions must declare a body unless they are methods in a trait");
-                                            try self.errorStatements.append(err);
-                                            ClearCompoundStatement(result);
-                                            return Errors.SyntaxError;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        var err = try self.WriteError("Syntax Error: Expected either { or ; after function argument declaration, reached end of file instead");
-                                        try self.errorStatements.append(err);
-                                        ClearCompoundStatement(result);
-                                        return Errors.SyntaxError;
-                                    }
-                                }
+                                }, state);
+                                break;
                             }
                             else
                             {
-
+                                try self.WriteError("Expected namespace name before contents");
                             }
-
-                            foundIdentifier = null;
-                            typeNameStart = null;
-                            typeNameEnd = 0;
                         }
-                    }
-                },
-                .Bang, .Asterisk, .Plus, .Minus => 
-                {
-                    var errStr = try self.WriteError("Syntax Error: Expression must be a modifiable value");
-                    try self.errorStatements.append(errStr);
-                    ClearCompoundStatement(result);
-                    return Errors.SyntaxError;
-                },
-                .Semicolon =>
-                {
-                    if (!skipThisLine)
-                    {
-                        if (foundIdentifier != null)
+                        else
                         {
-                            //is variable
-                            const varName = foundIdentifier.?;
-                            const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
-                            const varData: VarData = VarData
-                            {
-                                .name = varName,
-                                .isConst = nextIsConst,
-                                .typeName = typeName,
-                                .defaultValue = null
-                            };
-                            try self.AppendToCompoundStatement(&result, StatementData{.variableDeclaration = varData}, parent);
-                            nextIsConst = false;
-                            foundIdentifier = null;
-                            typeNameStart = null;
-                            typeNameEnd = 0;
-                        }
-                        else if (nextIsStruct)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Expected identifier after struct declaration");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        else if (nextIsConst)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Expected identifier and type after const declaration");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        else if (typeNameStart != null)
-                        {
-                            var errStr = try self.WriteError("Syntax Error: Expected identifier after variable/function type");
-                            try self.errorStatements.append(errStr);
-                            ClearCompoundStatement(result);
-                            return Errors.SyntaxError;
-                        }
-                        if (endOnSemicolon)
-                        {
+                            try self.WriteError("Invalid namespace name");
                             break;
                         }
                     }
                 },
-                .Equal =>
+                .Eof =>
                 {
-                    if (!skipThisLine)
+                    break;
+                },
+                .RBrace => //this means that we will advance past the final } in a body compound statement
+                {
+                    if (skipThisLine)
                     {
-                        if (foundIdentifier != null)
-                        {
-                            //is variable
-                            var primary = try self.ParseExpression_Primary();
-                            const expression: ExpressionData = try self.ParseExpression(primary, 0);
-                            const varName = foundIdentifier.?;
-                            const typeName = self.SourceSlice(typeNameStart.?, typeNameEnd);
-                            const varData: VarData = VarData
-                            {
-                                .name = varName,
-                                .isConst = nextIsConst,
-                                .typeName = typeName,
-                                .defaultValue = expression
-                            };
-                            try self.AppendToCompoundStatement(&result, StatementData{.variableDeclaration = varData}, parent);
-                            nextIsConst = false;
-                            foundIdentifier = null;
-                            typeNameStart = null;
-                            typeNameEnd = 0;
-
-                            expectSemicolon = true;
-                        }
+                        continue;
                     }
+                    braceCount -= 1;
+                    if (braceCount <= state.braceCount)
+                    {
+                        break;
+                    }
+                },
+                .MacroString =>
+                {
+                    try self.AppendToCompoundStatement(&result, StatementData
+                    {
+                       .includeStatement = self.SourceTokenSlice(token) 
+                    }, state);
                 },
                 else =>
                 {
-
+                    continue;
                 }
             }
+            nextCanBeElseStatement = false;
         }
+
         return result;
     }
     ///Gets the full identifier of a variable type by compiling :: namespaces
@@ -1012,13 +658,13 @@ pub const Parser = struct {
         var typeNameEnd: ?usize = null;
         if (untilValid)
         {
-            var next = self.peekNextUntilValid();
+            var next = self.tokenizer.peekNextUntilValid();
             if (next.id == .ColonColon)
             {
                 while (true)
                 {
                     var initial: usize = self.tokenizer.index;
-                    next = self.nextUntilValid();
+                    next = self.tokenizer.nextUntilValid();
                     if (next.id == .ColonColon or next.id == .Identifier)
                     {
                         typeNameEnd = next.end;
@@ -1033,7 +679,7 @@ pub const Parser = struct {
         }
         else
         {
-            var next = self.peekNext();
+            var next = self.tokenizer.peekNext();
             if (next.id == .ColonColon)
             {
                 while (true)
@@ -1054,24 +700,23 @@ pub const Parser = struct {
         }
         return typeNameEnd;
     }
-    pub fn ParseArgs(self: *Self, context: ParseContext) ![]VarData
+    pub fn ParseArgs(self: *Self) anyerror![]VarData
     {
-        _ = context;
         var vars = std.ArrayList(VarData).init(self.allocator);
 
         var nextIsConst = false;
-        var variableType: ?[]const u8 = null;
+        var variableType: ?TypeNameData = null;
         var variableName: ?[]const u8 = null;
         var defaultValueExpr: ?ExpressionData = null;
         var encounteredFirstDefaultValue: bool = false;
 
         while (true)
         {
-            const token = self.nextUntilValid();
+            const token = self.tokenizer.nextUntilValid();
             if (token.id == .Semicolon or token.id == .Period)
             {
-                var err: string = try self.WriteError("Syntax Error: Unidentified/disallowed character token in arguments declaration");
-                try self.errorStatements.append(err);
+                try self.WriteError("Syntax Error: Unidentified/disallowed character token in arguments declaration");
+
                 return Errors.SyntaxError;
             }
             if (token.id == .RParen)
@@ -1080,9 +725,7 @@ pub const Parser = struct {
                 {
                     if (encounteredFirstDefaultValue and defaultValueExpr == null)
                     {
-                        var err: string = try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
-                        try self.errorStatements.append(err);
-                        return Errors.SyntaxError;
+                        try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
                     }
                     const variableData = VarData
                     {
@@ -1101,16 +744,16 @@ pub const Parser = struct {
             }
             else if (token.id == .Eof)
             {
-                var err: string = try self.WriteError("Syntax Error: End of file reached before arguments declaration end");
-                try self.errorStatements.append(err);
+                try self.WriteError("Syntax Error: End of file reached before arguments declaration end");
+                
                 return Errors.SyntaxError;
             }
             else if (token.id == .Keyword_const)
             {
                 if (nextIsConst)
                 {
-                    var err: string = try self.WriteError("Syntax Error: Duplicate const modifier");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Duplicate const modifier");
+                    
                     return Errors.SyntaxError;
                 }
                 nextIsConst = true;
@@ -1120,8 +763,9 @@ pub const Parser = struct {
                 if (variableType == null)
                 {
                     //detect variable type
-                    var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
-                    variableType = self.SourceSlice(token.start, typeNameEnd);
+                    variableType = try self.ParseTypeName(true);
+                    //var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
+                    //variableType = self.SourceSlice(token.start, typeNameEnd);
                 }
                 else if (variableName == null)//variable name
                 {
@@ -1129,8 +773,8 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Duplicate variable type or name in arguments declaration");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Duplicate variable type or name in arguments declaration");
+                    
                     return Errors.SyntaxError;
                 }
             }
@@ -1138,14 +782,14 @@ pub const Parser = struct {
             {
                 if (variableType == null)
                 {
-                    var err: string = try self.WriteError("Syntax Error: Expected argument type declaration before using = sign to declare default value");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Expected argument type declaration before using = sign to declare default value");
+                    
                     return Errors.SyntaxError;
                 }
                 if (variableName == null)
                 {
-                    var err: string = try self.WriteError("Syntax Error: Expected argument name declaration before using = sign to declare default value");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Expected argument name declaration before using = sign to declare default value");
+                    
                     return Errors.SyntaxError;
                 }
                 var primary = try self.ParseExpression_Primary();
@@ -1158,8 +802,8 @@ pub const Parser = struct {
                 {
                     if (encounteredFirstDefaultValue and defaultValueExpr == null)
                     {
-                        var err: string = try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
-                        try self.errorStatements.append(err);
+                        try self.WriteError("Syntax Error: All arguments with default values must be declared only after arguments without");
+                        
                         return Errors.SyntaxError;
                     }
                     const variableData = VarData
@@ -1177,8 +821,8 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Comma must be after variable type and name");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Comma must be after variable type and name");
+                    
                     return Errors.SyntaxError;
                 }
             }
@@ -1186,7 +830,7 @@ pub const Parser = struct {
             {
                 if (variableName != null and variableType != null)
                 {
-                    _ = self.nextUntilValid();
+                    _ = self.tokenizer.nextUntilValid();
                     var primary = try self.ParseExpression_Primary();
                     var expression = try self.ParseExpression(primary, 0);
 
@@ -1204,8 +848,8 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Comma must be after variable type and name");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Comma must be after variable type and name");
+                    
                     return Errors.SyntaxError;
                 }
             }
@@ -1213,12 +857,12 @@ pub const Parser = struct {
             {
                 if (variableType == null)
                 {
-                    variableType = self.SourceTokenSlice(token);
+                    variableType = try self.ParseTypeName(true);
                 }
                 else
                 {
-                    var err: string = try self.WriteError("Syntax Error: Duplicate variable type in arguments declaration");
-                    try self.errorStatements.append(err);
+                    try self.WriteError("Syntax Error: Duplicate variable type in arguments declaration");
+                    
                     return Errors.SyntaxError;
                 }
             }
@@ -1227,10 +871,10 @@ pub const Parser = struct {
         return vars.toOwnedSlice();
     }
 
-    pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) Errors![]ExpressionData
+    pub fn ParseInputParams(self: *Self, comptime endOnRBracket: bool) anyerror![]ExpressionData
     {
         var params = std.ArrayList(ExpressionData).init(self.allocator);
-        var token = self.nextUntilValid();
+        var token = self.tokenizer.nextUntilValid();
         while (true)
         {
             if (token.id == .RParen)
@@ -1241,12 +885,8 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err = try self.WriteError("Syntax Error: Expecting function arguments to be closed on a ), not ]");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
+                    try self.WriteError("Syntax Error: Expecting function arguments to be closed on a ), not ]");
+
                     return Errors.SyntaxError;
                 }
             }
@@ -1258,23 +898,15 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err = try self.WriteError("Syntax Error: Expecting indexer to be closed on a ], not )");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
+                    try self.WriteError("Syntax Error: Expecting indexer to be closed on a ], not )");
+
                     return Errors.SyntaxError;
                 }
             }
             else if (token.id == .Eof or token.id == .Semicolon)
             {
-                var err = try self.WriteError("Syntax Error: Reached end of line while expecting closing character");
-                self.errorStatements.append(err)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
+                try self.WriteError("Syntax Error: Reached end of line while expecting closing character");
+
                 return Errors.SyntaxError;
             }
             else if (token.id == .Comma)
@@ -1294,7 +926,7 @@ pub const Parser = struct {
                     return Errors.OutOfMemoryError;
                 };
             }
-            token = self.nextUntilValid();
+            token = self.tokenizer.nextUntilValid();
         }
         var ownedSlice = params.toOwnedSlice()
         catch
@@ -1304,17 +936,131 @@ pub const Parser = struct {
         return ownedSlice;
     }
 
-    /// parses an identifier in expression, returning either a ExpressionData with
-    /// variable, a function call, or a typecast
-    pub fn ParseExpression_Identifier(self: *Self, currentToken: lexer.Token) Errors!ExpressionData
+    pub fn ParseTypeName(self: *Self, parsePointer: bool) anyerror!TypeNameData
     {
-        var typeNameEnd: usize = self.GetFullIdentifier(false) orelse currentToken.end;
-        var identifierName = self.SourceSlice(currentToken.start, typeNameEnd);
+        var result: TypeNameData = TypeNameData
+        {
+            .name = "",
+            .fullName = "",
+            .namespace = "",
+            .templateTypes = null,
+            .pointerCount = 0
+        };
+        var typeNameStart: ?usize = null;
+        var typeNameEnd: usize = 0;
+        //TODO: namespace data
+        var foundAsterisk: bool = false;
+        var pointerCount: i32 = 0;
+        var expectConnectorNext: bool = false;
+        while (true)
+        {
+            var token: lexer.Token = self.tokenizer.peekNextUntilValid();
+            switch (token.id)
+            {
+                .Asterisk =>
+                {
+                    if (!parsePointer)
+                    {
+                        break;
+                    }
+                    foundAsterisk = true;
+                    pointerCount += 1;
+                    typeNameEnd = token.end;
+                    expectConnectorNext = false;
+                },
+                .Identifier, .ColonColon, .Keyword_float, .Keyword_void, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_double, .Keyword_char, .Keyword_bool =>
+                {
+                    if (expectConnectorNext and token.id != .ColonColon)
+                    {
+                        break;
+                    }
+                    expectConnectorNext = false;
+                    if (foundAsterisk)
+                    {
+                        break;
+                        //cant do the following as the next identifier may actually be the variable name
+                        // var err = try self.WriteError("Syntax Error: No type identifier after pointer declaration * allowed");
+                        // 
+                        // return Errors.SyntaxError;
+                    }
 
-        var token = self.peekNextUntilValid();
+                    if (typeNameStart == null)
+                    {
+                        if (token.id == .ColonColon)
+                        {
+                            try self.WriteError("Syntax Error: Cannot start type name declaration off with ::");
+                            
+                            return Errors.SyntaxError;
+                        }
+                        typeNameStart = token.start;
+                    }
+                    typeNameEnd = token.end;
+
+                    if (token.id != .ColonColon)
+                    {
+                        expectConnectorNext = true;
+                        result.name = self.SourceTokenSlice(token);
+                    }
+                    
+                },
+                .AngleBracketLeft =>
+                {
+                    self.tokenizer.index = token.end; //advance beyond the <
+                    result.templateTypes = std.ArrayList(TypeNameData).init(self.allocator);
+
+                    while (true)
+                    {
+                        var templateType = try self.ParseTypeName(true);
+                        if (templateType.name.len > 0)
+                        {
+                            //chance that the user declares typename<>, to deal with how this is done later
+                            //legal in languages like c# for generic reflection, might not have a use in linxc
+                            try result.templateTypes.?.append(templateType);
+                        }
+                        var next = self.tokenizer.nextUntilValid();
+                        if (next.id == .AngleBracketRight or next.id == .Comma)
+                        {
+                            break;
+                        }
+                        else
+                        {
+                            try self.WriteError("Syntax Error: Expected comma or closing angle bracket > after type name in template");
+                            
+                            return Errors.SyntaxError;
+                        }
+                    }
+                },
+                else =>
+                {
+                    break;
+                }
+            }
+            self.tokenizer.index = token.end;
+        }
+        result.pointerCount = pointerCount;
+        result.fullName = self.SourceSlice(typeNameStart.?, typeNameEnd);
+        return result;
+    }
+
+    /// parses an identifier in expression, returning either a ExpressionData with
+    /// variable, a function call
+    pub fn ParseExpression_Identifier(self: *Self) anyerror!ExpressionData
+    {
+        //under no circumstance can type name contain a pointer here, even if it may contain template stuff
+        //see:
+        //type_name*(): invalid
+        //type_name*[]: invalid
+        //type_name variable = type_name*: invalid
+        var typeName = try self.ParseTypeName(false);
+        //var typeName = try self.ParseTypeName();
+        //var identifierName = self.GetFullIdentifier(false);
+        // var typeNameEnd: usize = self.GetFullIdentifier(false) orelse self.tokenizer.index;
+        // var identifierName = self.SourceSlice(currentToken.start, typeNameEnd);
+
+        var token = self.tokenizer.peekNextUntilValid();
         if (token.id == .LParen)
         {
-            _ = self.nextUntilValid(); //advance beyond the (
+            _ = self.tokenizer.nextUntilValid(); //advance beyond the (
             var inputParams = try self.ParseInputParams(false);
 
             var functionCall = self.allocator.create(FunctionCallData)
@@ -1322,7 +1068,7 @@ pub const Parser = struct {
             {
                 return Errors.OutOfMemoryError;
             };
-            functionCall.name = identifierName;
+            functionCall.name = typeName;
             functionCall.inputParams = inputParams;
 
             return ExpressionData
@@ -1332,7 +1078,7 @@ pub const Parser = struct {
         }
         else if (token.id == .LBracket) //array indexer
         {
-            _ = self.nextUntilValid(); //advance beyond the [
+            _ = self.tokenizer.nextUntilValid(); //advance beyond the [
             var indexParams = try self.ParseInputParams(true);
 
             var functionCall = self.allocator.create(FunctionCallData)
@@ -1340,7 +1086,7 @@ pub const Parser = struct {
             {
                 return Errors.OutOfMemoryError;
             };
-            functionCall.name = identifierName;
+            functionCall.name = typeName;
             functionCall.inputParams = indexParams;
 
             return ExpressionData
@@ -1350,13 +1096,14 @@ pub const Parser = struct {
         }
         else
         {
-            return ExpressionData
+            const result = ExpressionData
             {
-                .Variable = identifierName
+                .Variable = typeName
             };
+            return result;
         }
     }
-    pub fn ParseExpression_Primary(self: *Self) Errors!ExpressionData
+    pub fn ParseExpression_Primary(self: *Self) anyerror!ExpressionData
     {
         const token = self.tokenizer.next();
         if (token.id == .LParen)
@@ -1368,12 +1115,7 @@ pub const Parser = struct {
 
             if (self.tokenizer.buffer[self.tokenizer.index] != ')')
             {
-                var err = try self.WriteError("Syntax Error: Expected )");
-                self.errorStatements.append(err)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
+                try self.WriteError("Syntax Error: Expected )");
                 return Errors.SyntaxError;
             }
             if (result == .Op)
@@ -1437,36 +1179,19 @@ pub const Parser = struct {
         }
         else if (token.id == .Identifier)
         {
-            //std.debug.print("Parsing identifier {s}\n", .{self.SourceSlice(token.start, typeNameEnd)});
-            return self.ParseExpression_Identifier(token);
+            self.tokenizer.index = self.tokenizer.prevIndex;
+            return self.ParseExpression_Identifier();
         }
-        else if (
-            token.id == .Keyword_char or
-            token.id == .Keyword_i8 or
-            token.id == .Keyword_i16 or
-            token.id == .Keyword_i32 or
-            token.id == .Keyword_i64 or
-            token.id == .Keyword_u8 or
-            token.id == .Keyword_u16 or
-            token.id == .Keyword_u32 or
-            token.id == .Keyword_u64 or
-            token.id == .Keyword_float or
-            token.id == .Keyword_double or
-            token.id == .Keyword_bool
-            )
+        else if (lexer.IsPrimitiveType(token.id))
         {
-            var pointerCount: i32 = 0;
-            while(self.peekNextUntilValid().id == .Asterisk)
-            {
-                _ = self.nextUntilValid();
-                pointerCount += 1;
-            }
+            self.tokenizer.index = token.start;
+            var nextTypeName = try self.ParseTypeName(true);
             return ExpressionData
             {
                 .TypeCast = ASTnodes.TypeCastData
                 {
-                    .typeName = self.SourceTokenSlice(token),
-                    .pointerCount = pointerCount
+                    .typeName = nextTypeName,
+                    .pointerCount = 0
                 }
             };
         }
@@ -1475,13 +1200,13 @@ pub const Parser = struct {
             return Errors.SyntaxError;
         }
     }
-    pub fn ParseExpression(self: *Self, initial: ExpressionData, minPrecedence: i32) Errors!ExpressionData
+    pub fn ParseExpression(self: *Self, initial: ExpressionData, minPrecedence: i32) anyerror!ExpressionData
     {
         var lhs = initial;
 
         while (true)
         {
-            var op = self.peekNext();
+            var op = self.tokenizer.peekNext();
             var precedence = GetPrecedence(op.id);
             if (op.id == .Eof or op.id == .Semicolon or precedence == -1 or precedence < minPrecedence)
             {
@@ -1489,7 +1214,7 @@ pub const Parser = struct {
             }
             _ = self.tokenizer.next();
 
-            const peekNextID = self.peekNext().id;
+            const peekNextID = self.tokenizer.peekNext().id;
             if (op.id == .Asterisk and peekNextID == .RParen or peekNextID == .Asterisk)
             {
                 if (lhs == .TypeCast)
@@ -1509,12 +1234,7 @@ pub const Parser = struct {
                 }
                 else
                 {
-                    var err = try self.WriteError("Syntax Error: Attempting to convert non-type name into a pointer");
-                    self.errorStatements.append(err)
-                    catch
-                    {
-                        return Errors.OutOfMemoryError;
-                    };
+                    try self.WriteError("Syntax Error: Attempting to convert non-type name into a pointer");
                     return Errors.SyntaxError;
                 }
                 continue;
@@ -1523,7 +1243,7 @@ pub const Parser = struct {
 
             while (true)
             {
-                var next = self.peekNext();
+                var next = self.tokenizer.peekNext();
                 var nextPrecedence = GetPrecedence(next.id);
                 var nextAssociation = GetAssociation(next.id);
                 if (next.id == .Eof or op.id == .Semicolon or nextPrecedence == -1 or !((nextPrecedence > precedence) or (nextAssociation == 1 and precedence == nextPrecedence)))

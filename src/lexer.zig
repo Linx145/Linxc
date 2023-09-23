@@ -108,6 +108,7 @@ pub const TokenID = union(enum)
     Keyword_volatile,
     Keyword_while,
     Keyword_delegate,
+    Keyword_namespace,
 
     // ISO C99
     Keyword_bool,
@@ -229,6 +230,7 @@ pub const TokenID = union(enum)
             .Keyword_struct => "struct",
             .Keyword_trait => "trait",
             .Keyword_template => "template",
+            .Keyword_namespace => "namespace",
             .Keyword_switch => "switch",
             .Keyword_typedef => "typedef",
             .Keyword_union => "union",
@@ -307,6 +309,7 @@ pub const TokenID = union(enum)
         .{ "volatile", .Keyword_volatile },
         .{ "while", .Keyword_while },
         .{ "delegate", .Keyword_delegate },
+        .{ "namespace", .Keyword_namespace },
 
         // ISO C99
         .{ "bool", .Keyword_bool },
@@ -369,6 +372,20 @@ pub const TokenID = union(enum)
         utf_32,
     };
 };
+pub inline fn IsPrimitiveType(id: TokenID) bool
+{
+    switch (id)
+    {
+        .Keyword_void, .Keyword_bool, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_float, .Keyword_double, .Keyword_char =>
+        {
+            return true;
+        },
+        else =>
+        {
+            return false;
+        }
+    }
+}
 pub const Token = struct {
     id: TokenID,
     start: usize,
@@ -380,6 +397,51 @@ pub const Tokenizer = struct {
     prevIndex: usize = 0,
     prev_tok_id: std.meta.Tag(TokenID) = .Invalid,
     pp_directive: bool = false,
+    currentLine: usize = 0,
+    charsParsed: usize = 0,
+
+    pub fn nextUntilValid(self: *@This()) Token
+    {
+        var nextResult = self.next();
+        while (nextResult.id == .Nl or nextResult.id == .LineComment or nextResult.id == .MultiLineComment)
+        {
+            if (nextResult.id == .Nl)
+            {
+                self.currentLine += 1;
+                self.charsParsed = self.index;
+            }
+            nextResult = self.next();
+        }
+        return nextResult;
+    }
+    pub fn peekNext(self: *@This()) Token
+    {
+        const currentLine = self.currentLine;
+        const currentCharsParsed = self.charsParsed;
+        const prevIndex = self.prevIndex;
+        const currentIndex = self.index;
+
+        const result = self.next();
+
+        self.index = currentIndex;
+        self.prevIndex = prevIndex;
+        self.currentLine = currentLine;
+        self.charsParsed = currentCharsParsed;
+
+        return result;
+    }
+    pub fn peekNextUntilValid(self: *@This()) Token
+    {
+        const prevIndex = self.prevIndex;
+        const currentIndex = self.index;
+
+        const result = self.nextUntilValid();
+
+        self.index = currentIndex;
+        self.prevIndex = prevIndex;
+
+        return result;
+    }
 
     pub fn next(self: *@This()) Token 
     {

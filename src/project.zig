@@ -1,12 +1,13 @@
 const std = @import("std");
 const string = @import("zig-string.zig").String;
 const transpiler = @import("transpiler.zig");
-const reflector = @import("reflector.zig");
+//const reflector = @import("reflector.zig");
 const ast = @import("ASTnodes.zig");
 const lexer = @import("lexer.zig");
 const parsers = @import("parser.zig");
 const Parser = parsers.Parser;
 const ParseContext = parsers.ParseContext;
+const ParserState = parsers.ParserState;
 const io = @import("io.zig");
 
 const StringList = std.ArrayList(string);
@@ -67,12 +68,13 @@ pub const project = struct {
 
     pub fn Compile(self: *Self, outputPath: []const u8) !void
     {
-        reflector.globalDatabase = try reflector.ReflectionDatabase.init(self.allocator);
+        //reflector.globalDatabase = try reflector.ReflectionDatabase.init(self.allocator);
         var parser: Parser = try Parser.init(self.allocator, lexer.Tokenizer
         {
             .buffer = ""
         });
-        parser.postParseStatement = reflector.PostParseStatement;
+        //parser.postParseStatement = reflector.PostParseStatement;
+
         //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
         //let outputPath be "C:\Users\Linus\source\repos\Linxc\linxc-out"
         var i: usize = 0;
@@ -124,9 +126,18 @@ pub const project = struct {
                 .buffer = fileContents
             };
             parser.currentFile = self.linxcFiles.items[i].str();
-            parser.currentLine = 0;
-            parser.charsParsed = 0;
-            var result = parser.Parse(ParseContext.other, "")
+            parser.tokenizer.currentLine = 0;
+            parser.tokenizer.charsParsed = 0;
+            var parserState = ParserState
+            {
+                .context = ParseContext.other,
+                .namespaces = std.ArrayList([]const u8).init(alloc),
+                .structNames = std.ArrayList([]const u8).init(alloc),
+                .funcNames = std.ArrayList([]const u8).init(alloc),
+                .braceCount = 0
+            };
+            defer parserState.deinit();
+            var result = parser.Parse(&parserState)
             catch
             {
                 std.debug.print("ERROR:", .{});
@@ -143,7 +154,7 @@ pub const project = struct {
             _ = try cppWriter.write("#include <");
             _ = try cppWriter.write(headerName.str());
             _ = try cppWriter.write(">\n");
-            try transpiler.TranspileStatementCpp(cppWriter, result, true, "");
+            try transpiler.TranspileStatementCpp(cppWriter, result, true, "", self.allocator);
             cppFile.close();
 
 
@@ -151,14 +162,14 @@ pub const project = struct {
             var hFile: std.fs.File = try std.fs.createFileAbsolute(hFilePath.str(), .{.truncate = true});
             var hWriter = hFile.writer();
             _ = try hWriter.write("#pragma once\n");
-            try transpiler.TranspileStatementH(hWriter, result);
+            try transpiler.TranspileStatementH(hWriter, result, self.allocator);
             hFile.close();
 
 
-            ast.ClearCompoundStatement(result);
+            ast.ClearCompoundStatement(&result);
         }
         parser.deinit();
-        reflector.globalDatabase.?.deinit();
+        //reflector.globalDatabase.?.deinit();
     }
     // pub fn Reflect(self: *Self, outputFile: []const u8) !void
     // {

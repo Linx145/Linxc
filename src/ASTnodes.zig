@@ -68,7 +68,7 @@ pub const FunctionCallData = struct
     {
         var str = string.init(allocator);
 
-        var nameStr = try self.name.ToString();
+        var nameStr = try self.name.ToString(allocator);
         try str.concat_deinit(&nameStr);
         try str.concat("(");
         var i: usize = 0;
@@ -98,16 +98,17 @@ pub const FunctionCallData = struct
 pub const FunctionData = struct
 {
     name: []const u8,
-    returnType: []const u8,
+    returnType: TypeNameData,
     args: []VarData,
     statement: CompoundStatementData,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
-        var compoundStatementString = try CompoundStatementToString(self.statement, allocator);
+        var compoundStatementString = try CompoundStatementToString(&self.statement, allocator);
 
         var str = string.init(allocator);
-        try str.concat(self.returnType);
+        var returnTypeStr = self.returnType.ToString(allocator);
+        try str.concat_deinit(&returnTypeStr);
         try str.concat(" ");
         try str.concat(self.name);
         try str.concat("(");
@@ -172,8 +173,11 @@ pub const ModifiedVariableData = struct
 };
 pub const TypeNameData = struct
 {
+    fullName: []const u8,
     name: []const u8,
+    namespace: []const u8,
     templateTypes: ?std.ArrayList(TypeNameData),
+    pointerCount: i32,
 
     pub inline fn deinit(self: *@This()) void
     {
@@ -182,23 +186,55 @@ pub const TypeNameData = struct
             self.templateTypes.?.deinit();
         }
     }
+    pub fn ToUseableString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        try result.concat(self.fullName);
+        if (self.templateTypes != null)
+        {
+            try result.concat("_");
+            var i: usize = 0;
+            while (i < self.templateTypes.?.items.len) : (i += 1)
+            {
+                var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator);
+                try result.concat_deinit(&templateTypeStr);
+                if (i < self.templateTypes.?.items.len - 1)
+                {
+                    try result.concat("_");
+                }
+            }
+            //try result.concat("_");
+        }
+        var j: i32 = 0;
+        while (j < self.pointerCount) : (j += 1)
+        {
+            try result.concat("*");
+        }
+        return result;
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var result: string = string.init(allocator);
-        try result.concat(self.name);
+        try result.concat(self.fullName);
         if (self.templateTypes != null)
         {
             try result.concat("<");
             var i: usize = 0;
             while (i < self.templateTypes.?.items.len) : (i += 1)
             {
-                try result.concat(self.templateTypes.?.items[i].ToString(allocator));
+                var templateTypeStr = try self.templateTypes.?.items[i].ToString(allocator);
+                try result.concat_deinit(&templateTypeStr);
                 if (i < self.templateTypes.?.items.len - 1)
                 {
                     try result.concat(", ");
                 }
             }
             try result.concat(">");
+        }
+        var j: i32 = 0;
+        while (j < self.pointerCount) : (j += 1)
+        {
+            try result.concat("*");
         }
         return result;
     }
@@ -216,7 +252,7 @@ pub const TypeCastData = struct
         {
             try result.concat("*");
         }
-        var typeNameStr = self.typeName.ToString(allocator);
+        var typeNameStr = try self.typeName.ToString(allocator);
         try result.concat_deinit(&typeNameStr);
 
         return result;
@@ -239,7 +275,7 @@ pub const ExpressionDataTag = enum
 pub const ExpressionData = union(ExpressionDataTag)
 {
     Literal: []const u8,
-    Variable: []const u8,
+    Variable: TypeNameData,
     ModifiedVariable: *ModifiedVariableData,
     Op: *OperatorData,
     FunctionCall: *FunctionCallData,
@@ -250,6 +286,10 @@ pub const ExpressionData = union(ExpressionDataTag)
     {
         switch (self.*)
         {
+            .Variable => |*value|
+            {
+                value.deinit();
+            },
             .ModifiedVariable => |*value|
             {
                 value.*.deinit(alloc);
@@ -278,9 +318,9 @@ pub const ExpressionData = union(ExpressionDataTag)
         }
     }
 
-    pub fn ToString(self: @This(), allocator: std.mem.Allocator) anyerror!string
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
-        switch (self)
+        switch (self.*)
         {
             .Literal => |literal| 
             {
@@ -288,11 +328,9 @@ pub const ExpressionData = union(ExpressionDataTag)
                 try str.concat(literal);
                 return str;
             },
-            .Variable => |variable|
+            .Variable => |*variable|
             {
-                var str = string.init(allocator);
-                try str.concat(variable);
-                return str;
+                return variable.ToString(allocator);
             },
             .ModifiedVariable => |variable|
             {
@@ -310,13 +348,9 @@ pub const ExpressionData = union(ExpressionDataTag)
             {
                 return call.ToString(allocator);
             },
-            .TypeCast => |typeCast|
+            .TypeCast => |*typeCast|
             {
                 return typeCast.ToString(allocator);
-            },
-            else =>
-            {
-
             }
         }
     }
@@ -431,7 +465,7 @@ pub const WhileData = struct
         var str = string.init(allocator);
 
         var conditionStr = try self.condition.ToString(allocator);
-        var statementStr = try CompoundStatementToString(self.statement, allocator);
+        var statementStr = try CompoundStatementToString(&self.statement, allocator);
     
         try str.concat("while (");
         try str.concat_deinit(&conditionStr);
@@ -481,10 +515,10 @@ pub const ForData = struct
     {
         var str = string.init(allocator);
 
-        var initializer = try CompoundStatementToString(self.initializer, allocator);
+        var initializer = try CompoundStatementToString(&self.initializer, allocator);
         var condition = try self.condition.ToString(allocator);
-        var shouldStep = try CompoundStatementToString(self.shouldStep, allocator);
-        var statement = try CompoundStatementToString(self.statement, allocator);
+        var shouldStep = try CompoundStatementToString(&self.shouldStep, allocator);
+        var statement = try CompoundStatementToString(&self.statement, allocator);
 
         try str.concat("for (");
         try str.concat_deinit(&initializer);
@@ -509,7 +543,7 @@ pub const IfData = struct
         var str = string.init(allocator);
 
         var conditionStr = try self.condition.ToString(allocator);
-        var statementStr = try CompoundStatementToString(self.statement, allocator);
+        var statementStr = try CompoundStatementToString(&self.statement, allocator);
     
         try str.concat("if (");
         try str.concat_deinit(&conditionStr);
@@ -542,7 +576,7 @@ pub const StructData = struct
         try str.concat(self.name);
         try str.concat(" { \n");
 
-        var bodyStr = try CompoundStatementToString(self.body, allocator);
+        var bodyStr = try CompoundStatementToString(&self.body, allocator);
         try str.concat_deinit(&bodyStr);
 
         try str.concat("}\n");
@@ -565,6 +599,29 @@ pub const StructData = struct
         self.body.deinit();
     }
 };
+pub const NamespaceData = struct
+{
+    body: CompoundStatementData,
+    name: []const u8,
+
+    pub fn deinit(self: *@This()) void
+    {
+        ClearCompoundStatement(&self.body);
+    }
+    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        var body = try CompoundStatementToString(&self.body, allocator);
+        var result = string.init(allocator);
+
+        try result.concat("namespace ");
+        try result.concat(self.name);
+        try result.concat(" {\n");
+        try result.concat_deinit(&body);
+        try result.concat("}\n");
+
+        return result;
+    }
+};
 pub const StatementDataTag = enum
 {
     functionDeclaration,
@@ -580,6 +637,7 @@ pub const StatementDataTag = enum
     ElseStatement,
     WhileStatement,
     ForStatement,
+    NamespaceStatement,
     Comment,
     includeStatement,
     //macroDefinition
@@ -599,6 +657,7 @@ pub const StatementData = union(StatementDataTag)
     ElseStatement: CompoundStatementData,
     WhileStatement: WhileData,
     ForStatement: ForData,
+    NamespaceStatement: NamespaceData,
     Comment: []const u8,
     includeStatement: []const u8,
     //macroDefinition: MacroDefinitionData
@@ -619,7 +678,11 @@ pub const StatementData = union(StatementDataTag)
             .IfStatement => |*ifData| ifData.deinit(allocator),
             .ElseStatement => |*elseData|
             {
-                ClearCompoundStatement(elseData.*);
+                ClearCompoundStatement(&elseData.*);
+            },
+            .NamespaceStatement => |*namespaceData|
+            {
+                ClearCompoundStatement(&namespaceData.body);
             },
             .WhileStatement => |*whileData| whileData.deinit(allocator),
             .ForStatement => |*forData| forData.deinit(allocator),
@@ -650,14 +713,18 @@ pub const StatementData = union(StatementDataTag)
             },
             .otherExpression => |*stmt| return stmt.ToString(allocator),
             .IfStatement => |*ifDat| return ifDat.ToString(allocator),
-            .ElseStatement => |*elseDat|
+            .ElseStatement => |*elseData|
             {
-                var stmtStr = try CompoundStatementToString(elseDat.*, allocator);
+                var stmtStr = try CompoundStatementToString(&elseData, allocator);
                 var str = string.init(allocator);
                 try str.concat("else {\n");
                 try str.concat_deinit(&stmtStr);
                 try str.concat("}");
                 return str;
+            },
+            .NamespaceStatement => |*namespaceData|
+            {
+                return namespaceData.*.ToString(allocator);
             },
             .WhileStatement => |*whileDat| return whileDat.ToString(allocator),
             .includeStatement => |include|
@@ -673,15 +740,15 @@ pub const StatementData = union(StatementDataTag)
     }
 };
 pub const CompoundStatementData = std.ArrayList(StatementData);
-pub fn ClearCompoundStatement(compoundStatement: CompoundStatementData) void
+pub fn ClearCompoundStatement(compoundStatement: *CompoundStatementData) void
 {
-    for (compoundStatement.items) |*stmt|
+    for (compoundStatement.*.items) |*stmt|
     {
         stmt.deinit(compoundStatement.allocator);
     }
     compoundStatement.deinit();
 }
-pub fn CompoundStatementToString(stmts: CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
+pub fn CompoundStatementToString(stmts: *CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
 {
     var str = string.init(allocator);
     for (stmts.items) |*stmt|

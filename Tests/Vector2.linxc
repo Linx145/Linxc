@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-impl_trait(trait_Printable)
+//impl_trait(trait_Printable)
 struct Vector2
 {
     float x;
@@ -21,7 +21,7 @@ struct Vector2
     }
 };
 
-trait trait_Printable
-{
-    void Print();
-};
+// trait trait_Printable
+// {
+//     void Print();
+// };

@@ -3,10 +3,10 @@
 const std = @import("std");
 const ast = @import("ASTnodes.zig");
 const io = @import("io.zig");
-const refl = @import("reflector.zig");
-const String = @import("zig-string.zig").String;
+//const refl = @import("reflector.zig");
+const string = @import("zig-string.zig").String;
 
-pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData) anyerror!void
+pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, allocator: std.mem.Allocator) anyerror!void
 {
     var i: usize = 0;
     while (i < cstmt.items.len) : (i += 1)
@@ -27,7 +27,7 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 _ = try writer.write("struct ");
                 _ = try writer.write(structDeclaration.name);
                 _ = try writer.write(" {\n");
-                try TranspileStatementH(writer, structDeclaration.body);
+                try TranspileStatementH(writer, structDeclaration.body, allocator);
                 _ = try writer.write("};\n");
             },
             .traitDeclaration => |traitDeclaration|
@@ -35,12 +35,14 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 _ = try writer.write("struct ");
                 _ = try writer.write(traitDeclaration.name);
                 _ = try writer.write(" {\n");
-                try TranspileStatementH(writer, traitDeclaration.body);
+                try TranspileStatementH(writer, traitDeclaration.body, allocator);
                 _ = try writer.write("};\n");
             },
-            .functionDeclaration => |functionDeclaration|
+            .functionDeclaration => |*functionDeclaration|
             {
-                _ = try writer.write(functionDeclaration.returnType);
+                var returnTypeStr = try functionDeclaration.*.returnType.ToUseableString(allocator);
+                defer returnTypeStr.deinit();
+                _ = try writer.write(returnTypeStr.str());
                 _ = try writer.write(" ");
                 _ = try writer.write(functionDeclaration.name);
                 _ = try writer.write("(");
@@ -52,14 +54,16 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                     {
                         _ = try writer.write("const ");
                     }
-                    _ = try writer.write(arg.typeName);
+                    var typeNameStr: string = try arg.typeName.ToString(allocator);
+                    defer typeNameStr.deinit();
+                    _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
                     _ = try writer.write(arg.name);
 
                     if (arg.defaultValue != null)
                     {
                         _ = try writer.write(" = ");
-                        try TranspileExpression(writer, &arg.defaultValue.?);
+                        try TranspileExpression(writer, &arg.defaultValue.?, allocator);
                     }
 
                     if (j < functionDeclaration.args.len - 1)
@@ -77,13 +81,15 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 {
                     _ = try writer.write("const ");
                 }
-                _ = try writer.write(variableDeclaration.*.typeName);
+                var typeNameStr: string = try variableDeclaration.*.typeName.ToString(allocator);
+                defer typeNameStr.deinit();
+                _ = try writer.write(typeNameStr.str());
                 _ = try writer.write(" ");
                 _ = try writer.write(variableDeclaration.*.name);
                 if (variableDeclaration.*.defaultValue != null)
                 {
                     _ = try writer.write(" = ");
-                    try TranspileExpression(writer, &variableDeclaration.defaultValue.?);
+                    try TranspileExpression(writer, &variableDeclaration.defaultValue.?, allocator);
                 }
                 _ = try writer.write(";\n");
             },
@@ -102,7 +108,7 @@ pub inline fn AppendEndOfLine(writer: std.fs.File.Writer, semicolon: bool) !void
     }
     else _ = try writer.write(",\n");
 }
-pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData) anyerror!void
+pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData, allocator: std.mem.Allocator) anyerror!void
 {
     switch (expr.*)
     {
@@ -110,9 +116,11 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
         {
             _ = try writer.write(literal);
         },
-        .Variable => |variable|
+        .Variable => |*variable|
         {
-            _ = try writer.write(variable);
+            var variableStr = try variable.ToUseableString(allocator);
+            _ = try writer.write(variableStr.str());
+            variableStr.deinit();
         },
         .ModifiedVariable => |variable|
         {
@@ -125,23 +133,24 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
                 .ToPointer => _ = try writer.write("&"),
                 else => {}
             }
-            try TranspileExpression(writer, &variable.expression);
+            try TranspileExpression(writer, &variable.expression, allocator);
         },
         .FunctionCall => |FunctionCall|
         {
-            FunctionCall.
-            _ = try writer.write(FunctionCall.name);
-            _ = try writer.write("(");
-            var j: usize = 0;
-            while (j < FunctionCall.inputParams.len) : (j += 1)
-            {
-                try TranspileExpression(writer, &FunctionCall.inputParams[j]);
-                if (j < FunctionCall.inputParams.len - 1)
-                {
-                    _ = try writer.write(", ");
-                }
-            }
-            _ = try writer.write(")");
+            var functionCallName = try FunctionCall.ToString(allocator);
+            defer functionCallName.deinit();
+            _ = try writer.write(functionCallName.str());
+            // _ = try writer.write("(");
+            // var j: usize = 0;
+            // while (j < FunctionCall.inputParams.len) : (j += 1)
+            // {
+            //     try TranspileExpression(writer, &FunctionCall.inputParams[j], allocator);
+            //     if (j < FunctionCall.inputParams.len - 1)
+            //     {
+            //         _ = try writer.write(", ");
+            //     }
+            // }
+            // _ = try writer.write(")");
         },
         .IndexedAccessor => |IndexedAccessor|
         {
@@ -149,7 +158,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
             var j: usize = 0;
             while (j < IndexedAccessor.inputParams.len) : (j += 1)
             {
-                try TranspileExpression(writer, &IndexedAccessor.inputParams[j]);
+                try TranspileExpression(writer, &IndexedAccessor.inputParams[j], allocator);
                 if (j < IndexedAccessor.inputParams.len - 1)
                 {
                     _ = try writer.write(", ");
@@ -163,7 +172,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
             {
                 _ = try writer.write("(");
             }
-            try TranspileExpression(writer, &Op.leftExpression);
+            try TranspileExpression(writer, &Op.leftExpression, allocator);
             if (Op.operator != .Arrow and Op.operator != .Period and Op.operator != .TypeCast)
             {
                 _ = try writer.write(" ");
@@ -212,15 +221,18 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
             {
                 
             }
-            try TranspileExpression(writer, &Op.rightExpression);
+            try TranspileExpression(writer, &Op.rightExpression, allocator);
             if (Op.priority)
             {
                 _ = try writer.write(")");
             }
         },
-        .TypeCast => |TypeCast|
+        .TypeCast => |*TypeCast|
         {
-            try writer.print("({s}", .{TypeCast.typeName});
+            var typeNameStr: string = try TypeCast.*.typeName.ToString(allocator);
+            defer typeNameStr.deinit();
+            _ = try writer.write(typeNameStr.str());
+            try writer.print("({s}", .{typeNameStr.str()});
             var i: i32 = 0;
             while (i < TypeCast.pointerCount) : (i += 1)
             {
@@ -231,7 +243,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
     }
 }
 //parent is not null if we are in reflectable compound statement
-pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, eolIsSemicolon: bool, parent: ?[]const u8) anyerror!void
+pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, eolIsSemicolon: bool, parent: ?[]const u8, allocator: std.mem.Allocator) anyerror!void
 {
     var i: usize = 0;
     while (i < cstmt.items.len) : (i += 1)
@@ -241,72 +253,76 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
         {
             .structDeclaration => |*structDeclaration|
             {
-                try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name);
+                try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name, allocator);
             },
-            .traitDeclaration => |*traitDeclaration|
+            .traitDeclaration =>// |*traitDeclaration|
             {
-                for (traitDeclaration.body.items) |*traitStmt|
-                {
-                    if (traitStmt == .functionDeclaration)
-                    {
-                        _ = try writer.write(traitStmt.functionDeclaration.returnType);
-                        _ = try writer.write(" ");
-                        if (parent != null and parent.?.len > 0)
-                        {
-                            _ = try writer.write(parent.?);
-                            _ = try writer.write("::");
-                        }
-                        _ = try writer.write(traitStmt.functionDeclaration.name);
-                        _ = try writer.write("(");
-                        var j: usize = 0;
-                        while (j < traitStmt.functionDeclaration.args.len) : (j += 1)
-                        {
-                            const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
-                            if (arg.isConst)
-                            {
-                                _ = try writer.write("const ");
-                            }
-                            _ = try writer.write(arg.typeName);
-                            _ = try writer.write(" ");
-                            _ = try writer.write(arg.name);
+                // for (traitDeclaration.*.body.items) |*traitStmt|
+                // {
+                //     if (traitStmt.* == .functionDeclaration)
+                //     {
+                //         var returnTypeStr = try traitStmt.*.functionDeclaration.returnType.ToUseableString(allocator);
+                //         defer returnTypeStr.deinit();
+                //         _ = try writer.write(returnTypeStr.str());
+                //         _ = try writer.write(" ");
+                //         if (parent != null and parent.?.len > 0)
+                //         {
+                //             _ = try writer.write(parent.?);
+                //             _ = try writer.write("::");
+                //         }
+                //         _ = try writer.write(traitStmt.functionDeclaration.name);
+                //         _ = try writer.write("(");
+                //         var j: usize = 0;
+                //         while (j < traitStmt.functionDeclaration.args.len) : (j += 1)
+                //         {
+                //             const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
+                //             if (arg.isConst)
+                //             {
+                //                 _ = try writer.write("const ");
+                //             }
+                //             var typeNameStr: string = try arg.typeName.ToString(allocator);
+                //             defer typeNameStr.deinit();
+                //             _ = try writer.write(typeNameStr.str());
+                //             _ = try writer.write(" ");
+                //             _ = try writer.write(arg.name);
 
-                            //dont need to handle default value here as it's already handled for us in the header file
+                //             //dont need to handle default value here as it's already handled for us in the header file
 
-                            if (j < traitStmt.functionDeclaration.args.len - 1)
-                            {
-                                _ = try writer.write(", ");
-                            }
-                        }
-                        _ = try writer.write(") {\n");
-                        //shitty comptime vtable
-                        _ = try writer.write("   switch (_SELF.type->ID) {\n");
+                //             if (j < traitStmt.functionDeclaration.args.len - 1)
+                //             {
+                //                 _ = try writer.write(", ");
+                //             }
+                //         }
+                //         _ = try writer.write(") {\n");
+
+                //         _ = try writer.write("   switch (_SELF.type->ID) {\n");
                         
-                        j = 0;
-                        var traitType: *refl.LinxcType = try refl.globalDatabase.?.GetTypeSafe(traitDeclaration.name);
-                        while (j < traitType.implementedBy.items.len) : (j += 1)
-                        {
-                            try writer.print("      case {d}:\n", .{traitType.implementedBy.items[j].ID});
-                            try writer.print("         (({s}*)_SELF.ptr).{s}(", .{traitType.implementedBy.items[j].name.str(), traitStmt.functionDeclaration.name});
-                            var c: usize = 0;
+                //         j = 0;
+                //         var traitType: *refl.LinxcType = try refl.globalDatabase.?.GetTypeSafe(traitDeclaration.name);
+                //         while (j < traitType.implementedBy.items.len) : (j += 1)
+                //         {
+                //             try writer.print("      case {d}:\n", .{traitType.implementedBy.items[j].ID});
+                //             try writer.print("         (({s}*)_SELF.ptr).{s}(", .{traitType.implementedBy.items[j].name.str(), traitStmt.functionDeclaration.name});
+                //             var c: usize = 0;
 
-                            while (c < traitStmt.functionDeclaration.args.len) : (c += 1)
-                            {
-                                const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
-                                _ = try writer.write(arg.name);
-                                if (c < traitStmt.functionDeclaration.args.len - 1)
-                                {
-                                    _ = try writer.write(", ");
-                                }
-                            }
+                //             while (c < traitStmt.functionDeclaration.args.len) : (c += 1)
+                //             {
+                //                 const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
+                //                 _ = try writer.write(arg.name);
+                //                 if (c < traitStmt.functionDeclaration.args.len - 1)
+                //                 {
+                //                     _ = try writer.write(", ");
+                //                 }
+                //             }
                             
-                            _ = try writer.write(");\n");
-                            _ = try writer.write("         break;\n");
-                        }
-                        _ = try writer.write("   }\n");
+                //             _ = try writer.write(");\n");
+                //             _ = try writer.write("         break;\n");
+                //         }
+                //         _ = try writer.write("   }\n");
 
-                        _ = try writer.write("}\n");
-                    }
-                }
+                //         _ = try writer.write("}\n");
+                //     }
+                // }
             },
             .variableDeclaration => |*variableDeclaration|
             {
@@ -316,20 +332,24 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     {
                         _ = try writer.write("const ");
                     }
-                    _ = try writer.write(variableDeclaration.typeName);
+                    var typeNameStr: string = try variableDeclaration.typeName.ToString(allocator);
+                    defer typeNameStr.deinit();
+                    _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
                     _ = try writer.write(variableDeclaration.name);
                     if (variableDeclaration.defaultValue != null)
                     {
                         _ = try writer.write(" = ");
-                        try TranspileExpression(writer, &variableDeclaration.defaultValue.?);
+                        try TranspileExpression(writer, &variableDeclaration.defaultValue.?, allocator);
                     }
                     try AppendEndOfLine(writer, eolIsSemicolon);
                 }
             },
             .functionDeclaration => |*functionDeclaration|
             {
-                _ = try writer.write(functionDeclaration.returnType);
+                var returnTypeStr = try functionDeclaration.returnType.ToUseableString(allocator);
+                defer returnTypeStr.deinit();
+                _ = try writer.write(returnTypeStr.str());
                 _ = try writer.write(" ");
                 if (parent != null and parent.?.len > 0)
                 {
@@ -346,7 +366,9 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     {
                         _ = try writer.write("const ");
                     }
-                    _ = try writer.write(arg.typeName);
+                    var typeNameStr: string = try arg.typeName.ToString(allocator);
+                    defer typeNameStr.deinit();
+                    _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
                     _ = try writer.write(arg.name);
 
@@ -358,17 +380,19 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     }
                 }
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, functionDeclaration.statement, true, null);
+                try TranspileStatementCpp(writer, functionDeclaration.statement, true, null, allocator);
                 _ = try writer.write("}\n");
             },
             .functionInvoke => |*functionInvoke|
             {
-                _ = try writer.write(functionInvoke.name);
+                var invokeNameStr = try functionInvoke.name.ToUseableString(allocator);
+                defer invokeNameStr.deinit();
+                _ = try writer.write(invokeNameStr.str());
                 _ = try writer.write("(");
                 var j: usize = 0;
                 while (j < functionInvoke.inputParams.len) : (j += 1)
                 {
-                    try TranspileExpression(writer, &functionInvoke.inputParams[j]);
+                    try TranspileExpression(writer, &functionInvoke.inputParams[j], allocator);
                     if (j < functionInvoke.inputParams.len - 1)
                     {
                         _ = try writer.write(", ");
@@ -380,20 +404,20 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             .returnStatement => |*returnStatement|
             {
                 _ = try writer.write("return ");
-                try TranspileExpression(writer, returnStatement);
+                try TranspileExpression(writer, returnStatement, allocator);
                 try AppendEndOfLine(writer, eolIsSemicolon);
             },
             .otherExpression => |*otherExpression|
             {
-                try TranspileExpression(writer, otherExpression);
+                try TranspileExpression(writer, otherExpression, allocator);
                 try AppendEndOfLine(writer, eolIsSemicolon);
             },
             .IfStatement => |*IfStatement|
             {
                 _ = try writer.write("if (");
-                try TranspileExpression(writer, &IfStatement.condition);
+                try TranspileExpression(writer, &IfStatement.condition, allocator);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, IfStatement.statement, true, null);
+                try TranspileStatementCpp(writer, IfStatement.statement, true, null, allocator);
                 _ = try writer.write("}\n");
             },
             .ElseStatement => |*ElseStatement|
@@ -406,27 +430,27 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 }
                 else
                 {
-                    try TranspileStatementCpp(writer, ElseStatement.*, true, null);
+                    try TranspileStatementCpp(writer, ElseStatement.*, true, null, allocator);
                 }
             },
             .WhileStatement => |*WhileStatement|
             {
                 _ = try writer.write("while (");
-                try TranspileExpression(writer, &WhileStatement.condition);
+                try TranspileExpression(writer, &WhileStatement.condition, allocator);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, WhileStatement.statement, true, null);
+                try TranspileStatementCpp(writer, WhileStatement.statement, true, null, allocator);
                 _ = try writer.write("}\n");
             },
             .ForStatement => |*ForStatement|
             {
                 _ = try writer.write("for (");
-                try TranspileStatementCpp(writer, ForStatement.initializer, false, null);
+                try TranspileStatementCpp(writer, ForStatement.initializer, false, null, allocator);
                 _ = try writer.write("; ");
-                try TranspileExpression(writer, &ForStatement.condition);
+                try TranspileExpression(writer, &ForStatement.condition, allocator);
                 _ = try writer.write("; ");
-                try TranspileStatementCpp(writer, ForStatement.shouldStep, false, null);
+                try TranspileStatementCpp(writer, ForStatement.shouldStep, false, null, allocator);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, ForStatement.statement, true, null);
+                try TranspileStatementCpp(writer, ForStatement.statement, true, null, allocator);
                 _ = try writer.write("}\n");
             },
             else =>
