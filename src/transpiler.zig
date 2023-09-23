@@ -22,6 +22,14 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 _ = try writer.write(withoutExtension);
                 _ = try writer.write(".h>\n");
             },
+            .NamespaceStatement => |namespaceStatement|
+            {
+                _ = try writer.write("namespace ");
+                _ = try writer.write(namespaceStatement.name);
+                _ = try writer.write(" {\n");
+                try TranspileStatementH(writer, namespaceStatement.body, allocator);
+                _ = try writer.write("}\n");
+            },
             .structDeclaration => |structDeclaration|
             {
                 _ = try writer.write("struct ");
@@ -254,6 +262,14 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             .structDeclaration => |*structDeclaration|
             {
                 try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name, allocator);
+            },
+            .NamespaceStatement => |namespaceStatement|
+            {
+                _ = try writer.write("namespace ");
+                _ = try writer.write(namespaceStatement.name);
+                _ = try writer.write(" {\n");
+                try TranspileStatementCpp(writer, namespaceStatement.body, false, null, allocator);
+                _ = try writer.write("}\n");
             },
             .traitDeclaration =>// |*traitDeclaration|
             {

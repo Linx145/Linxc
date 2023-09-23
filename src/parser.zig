@@ -593,7 +593,7 @@ pub const Parser = struct {
                     var namespaceNameEnd: usize = 0;
                     while (true)
                     {
-                        var next = self.tokenizer.next();
+                        var next = self.tokenizer.nextUntilValid();
                         if (next.id == .Identifier)
                         {
                             if (foundIdentifier)

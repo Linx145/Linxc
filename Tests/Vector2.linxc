@@ -2,24 +2,27 @@
 #include <Linxc.h>
 
 //impl_trait(trait_Printable)
-struct Vector2
+namespace Numerics
 {
-    float x;
-    float y;
+    struct Vector2
+    {
+        float x;
+        float y;
 
-    bool Equals(Vector2 other)
-    {
-        return x == other.x && y == other.y;
-    }
-    float Dot(Vector2 other)
-    {
-        return x * other.x + y * other.y;
-    }
-    void Print()
-    {
-        printf("%d, %d\n", (i32)x, (i32)y);
-    }
-};
+        bool Equals(Vector2 other)
+        {
+            return x == other.x && y == other.y;
+        }
+        float Dot(Vector2 other)
+        {
+            return x * other.x + y * other.y;
+        }
+        void Print()
+        {
+            printf("%d, %d\n", (i32)x, (i32)y);
+        }
+    };
+}
 
 // trait trait_Printable
 // {

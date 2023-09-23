@@ -3,7 +3,7 @@
 
 i32 main()
 {
-    Vector2 *vector2 = (Vector2*)malloc(sizeof(Vector2));
+    Numerics::Vector2 *vector2 = (Numerics::Vector2*)malloc(sizeof(Numerics::Vector2));
 
     vector2->x = 1;
     vector2->y = 2;
