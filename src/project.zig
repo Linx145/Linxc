@@ -5,9 +5,10 @@ const transpiler = @import("transpiler.zig");
 const ast = @import("ASTnodes.zig");
 const lexer = @import("lexer.zig");
 const parsers = @import("parser.zig");
+const parserStates = @import("parser-state.zig");
 const Parser = parsers.Parser;
-const ParseContext = parsers.ParseContext;
-const ParserState = parsers.ParserState;
+const ParseContext = parserStates.ParseContext;
+const ParserState = parserStates.ParserState;
 const io = @import("io.zig");
 
 const StringList = std.ArrayList(string);
@@ -134,6 +135,7 @@ pub const project = struct {
                 .namespaces = std.ArrayList([]const u8).init(alloc),
                 .structNames = std.ArrayList([]const u8).init(alloc),
                 .funcNames = std.ArrayList([]const u8).init(alloc),
+                .templateTypenames = std.ArrayList([]const u8).init(alloc),
                 .braceCount = 0
             };
             defer parserState.deinit();

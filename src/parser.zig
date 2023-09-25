@@ -1,29 +1,33 @@
 //the parser is in charge of turning raw tokens received from the tokenizer(lexer) into an AST.
-const ASTnodes = @import("ASTnodes.zig");
-const VarData = ASTnodes.VarData;
-const TagData = ASTnodes.TagData;
-const MacroDefinitionData = ASTnodes.MacroDefinitionData;
-const FunctionCallData = ASTnodes.FunctionCallData;
-const FunctionData = ASTnodes.FunctionData;
-const ExpressionDataTag = ASTnodes.ExpressionDataTag;
-const ExpressionData = ASTnodes.ExpressionData;
-const Operator = ASTnodes.Operator;
-const TokenToOperator = ASTnodes.TokenToOperator;
-const OperatorData = ASTnodes.OperatorData;
-const WhileData = ASTnodes.WhileData;
-const ForData = ASTnodes.ForData;
-const IfData = ASTnodes.IfData;
-const StructData = ASTnodes.StructData;
-const StatementDataTag = ASTnodes.StatementDataTag;
-const StatementData = ASTnodes.StatementData;
-const CompoundStatementData = ASTnodes.CompoundStatementData;
-const TypeNameData = ASTnodes.TypeNameData;
+const ast = @import("ASTnodes.zig");
+const VarData = ast.VarData;
+const TagData = ast.TagData;
+const MacroDefinitionData = ast.MacroDefinitionData;
+const FunctionCallData = ast.FunctionCallData;
+const FunctionData = ast.FunctionData;
+const ExpressionDataTag = ast.ExpressionDataTag;
+const ExpressionData = ast.ExpressionData;
+const Operator = ast.Operator;
+const TokenToOperator = ast.TokenToOperator;
+const OperatorData = ast.OperatorData;
+const WhileData = ast.WhileData;
+const ForData = ast.ForData;
+const IfData = ast.IfData;
+const StructData = ast.StructData;
+const StatementDataTag = ast.StatementDataTag;
+const StatementData = ast.StatementData;
+const CompoundStatementData = ast.CompoundStatementData;
+const TypeNameData = ast.TypeNameData;
 
 const std = @import("std");
 const string = @import("zig-string.zig").String;
 const lexer = @import("lexer.zig");
 const io = @import("io.zig");
 const Errors = @import("errors.zig").Errors;
+const refl = @import("reflector.zig");
+const states = @import("parser-state.zig");
+const ParseContext = states.ParseContext;
+const ParserState = states.ParserState;
 
 pub inline fn GetAssociation(ID: lexer.TokenID) i8
 {
@@ -74,76 +78,27 @@ pub inline fn GetPrecedence(ID: lexer.TokenID) i32
     }
 }
 
-pub const ParseContext = enum
-{
-    other,
-    elseWithoutBraces,
-    traitDeclaration,
-    forLoopInitialization,
-    forLoopStep
-};
-
-pub const ParserState = struct
-{
-    context: ParseContext,
-    namespaces: std.ArrayList([]const u8),
-    structNames: std.ArrayList([]const u8),
-    funcNames: std.ArrayList([]const u8),
-    braceCount: i32,
-
-    pub fn deinit(self: *@This()) void
-    {
-        self.namespaces.deinit();
-        self.structNames.deinit();
-        self.funcNames.deinit();
-    }
-    pub fn clone(self: *@This()) !ParserState
-    {
-        var namespaces = std.ArrayList([]const u8).init(self.namespaces.allocator);
-        var structNames = std.ArrayList([]const u8).init(self.structNames.allocator);
-        var funcNames = std.ArrayList([]const u8).init(self.funcNames.allocator);
-
-        for (self.namespaces.items) |namespace|
-        {
-            try namespaces.append(namespace);
-        }
-        for (self.structNames.items) |structName|
-        {
-            try structNames.append(structName);
-        }
-        for (self.funcNames.items) |funcName|
-        {
-            try funcNames.append(funcName);
-        }
-
-        return ParserState
-        {
-            .context = self.context,
-            .namespaces = namespaces,
-            .structNames = structNames,
-            .funcNames = funcNames,
-            .braceCount = self.braceCount
-        };
-    }
-};
-
 pub const Parser = struct {
     const Self = @This();
     allocator: std.mem.Allocator,
     tokenizer: lexer.Tokenizer,
     errorStatements: std.ArrayList(string),
     currentFile: ?[]const u8,
+    database: refl.ReflectionDatabase,
+
     postParseStatement: ?*const fn(statement: StatementData, parentStatement: *ParserState) anyerror!void,
 
-    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) !Self 
+    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) anyerror!Self 
     {
+        const db = try refl.ReflectionDatabase.init(allocator);
         return Self
         {
             .allocator = allocator,
             .tokenizer = tokenizer,
             .errorStatements = std.ArrayList(string).init(allocator),
             .postParseStatement = null,
-            .currentFile = null
+            .currentFile = null,
+            .database = db
         };
     }
     pub fn deinit(self: *Self) void
@@ -196,6 +151,7 @@ pub const Parser = struct {
     pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, state: *ParserState) anyerror!void
     {
         try result.append(statement);
+        //try self.database.PostParseStatement(&statement, state);
         if (self.postParseStatement != null)
         {
             try self.postParseStatement.?(statement, state);
@@ -212,9 +168,11 @@ pub const Parser = struct {
         var skipThisLine: bool = false;
         var result = CompoundStatementData.init(self.allocator);
         var nextCanBeElseStatement: bool = false;
+        var nextIsStatic: bool = false;
         var expectSemicolon: bool = false;
 
         var nextTags = std.ArrayList(ExpressionData).init(self.allocator);
+        var nextTemplateTypes: ?[][]const u8 = null;
         defer nextTags.deinit();
 
         while (true)
@@ -284,7 +242,7 @@ pub const Parser = struct {
                         var body = try self.Parse(&newState);
                         try self.AppendToCompoundStatement(&result, StatementData
                         {
-                            .IfStatement = ASTnodes.IfData
+                            .IfStatement = ast.IfData
                             {
                                 .condition = expression,
                                 .statement = body
@@ -348,6 +306,112 @@ pub const Parser = struct {
                     }, state);
                     expectSemicolon = true;
                 },
+                .Keyword_static =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    if (nextIsStatic)
+                    {
+                        try self.WriteError("Duplicate static modifier");
+                    }
+                    nextIsStatic = true;
+                },
+                .Keyword_template =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    var next = self.tokenizer.nextUntilValid();
+                    if (next.id != .AngleBracketLeft)
+                    {
+                        try self.WriteError("Expected < after template keyword");
+                    }
+                    var typenames = std.ArrayList([]const u8).init(self.allocator);
+                    while (true)
+                    {
+                        next = self.tokenizer.nextUntilValid();
+                        if (next.id != .Keyword_typename)
+                        {
+                            try self.WriteError("Expected keyword typename before declaring type of template parameter");
+                        }
+                        next = self.tokenizer.nextUntilValid();
+                        if (next.id != .Identifier)
+                        {
+                            try self.WriteError("Expected identifier");
+                        }
+                        try typenames.append(self.SourceTokenSlice(next));
+                        next = self.tokenizer.nextUntilValid();
+                        if (next.id == .Comma)
+                        {
+                            continue;
+                        }
+                        else if (next.id == .AngleBracketRight)
+                        {
+                            if (typenames.items.len == 0)
+                            {
+                                try self.WriteError("Expected at least one parameter in the template declaration");
+                            }
+                            break;
+                        }
+                        else
+                        {
+                            try self.WriteError("Unidentified token after template parameter");
+                        }
+                    }
+                    //if we get to this point successfully, would have advanced beyond the closing >
+                    nextTemplateTypes = try typenames.toOwnedSlice();
+                },
+                .Keyword_trait =>
+                {
+                    if (skipThisLine)
+                    {
+                        continue;
+                    }
+                    if (nextTemplateTypes != null)
+                    {
+                        try self.WriteError("Traits do not currently support templates");
+                        nextTemplateTypes = null;
+                    }
+                    var traitNameToken = self.tokenizer.nextUntilValid();
+                    if (traitNameToken.id != .Identifier)
+                    {
+                        try self.WriteError("Linxc expects trait name to be directly after trait keyword");
+                    }
+                    const traitName = self.SourceTokenSlice(traitNameToken);
+                    if (self.tokenizer.nextUntilValid().id != .LBrace)
+                    {
+                        try self.WriteError("Expected trait body after trait name");
+                    }
+                    var newState = try state.*.clone();
+                    defer newState.deinit();
+                    newState.context = ParseContext.traitDeclaration;
+                    try newState.structNames.append(traitName);
+                    newState.braceCount += 1;
+
+                    const body = try self.Parse(&newState);
+
+                    var tagsSlice: ?[]ExpressionData = null;
+                    if (nextTags.items.len > 0)
+                    {
+                        tagsSlice = try nextTags.toOwnedSlice();
+                    }
+
+                    const traitData = ast.StructData
+                    {
+                        .name = traitName,
+                        .tags = tagsSlice,
+                        .body = body,
+                        .templateTypes = null
+                    };
+                    try self.AppendToCompoundStatement(&result, ast.StatementData
+                    {
+                        .traitDeclaration = traitData
+                    }, state);
+                    expectSemicolon = true;
+                },
                 .Keyword_struct =>
                 {
                     if (skipThisLine)
@@ -371,13 +435,20 @@ pub const Parser = struct {
 
                     const body = try self.Parse(&newState);
 
-                    const structData = ASTnodes.StructData
+                    var tagsSlice: ?[]ExpressionData = null;
+                    if (nextTags.items.len > 0)
+                    {
+                        tagsSlice = try nextTags.toOwnedSlice();
+                    }
+
+                    const structData = ast.StructData
                     {
                         .name = structName,
-                        .tags = null,
-                        .body = body
+                        .tags = tagsSlice,
+                        .body = body,
+                        .templateTypes = nextTemplateTypes
                     };
-                    try self.AppendToCompoundStatement(&result, ASTnodes.StatementData
+                    try self.AppendToCompoundStatement(&result, ast.StatementData
                     {
                         .structDeclaration = structData
                     }, state);
@@ -418,12 +489,13 @@ pub const Parser = struct {
                         continue;
                     }
                     self.tokenizer.index = token.start;
-                    var typeName: ASTnodes.TypeNameData = try self.ParseTypeName(state.funcNames.items.len == 0);
+                    var typeName: ast.TypeNameData = try self.ParseTypeName(state.funcNames.items.len == 0);
 
                     var next = self.tokenizer.peekNextUntilValid();
 
-                    if (next.id == .LParen) //call function, optionally do stuff with result
+                    if (next.id == .LParen) //call function or macro, optionally do stuff with result
                     {
+                        var isTag: bool = false;
                         self.tokenizer.index = next.end;
                         if (typeName.pointerCount > 0)
                         {
@@ -431,7 +503,8 @@ pub const Parser = struct {
                         }
                         if (state.funcNames.items.len == 0)
                         {
-                            try self.WriteError("Function call must be within another function's body");
+                            isTag = true;
+                            //try self.WriteError("Function call must be within another function's body");
                         }
                         if (lexer.IsPrimitiveType(token.id))
                         {
@@ -447,12 +520,23 @@ pub const Parser = struct {
                             .FunctionCall = functionCall
                         };
                         var expression = try self.ParseExpression(primary, 0);
-
-                        try self.AppendToCompoundStatement(&result, StatementData
+                        if (isTag)
                         {
-                            .otherExpression = expression
-                        }, state);
-                        expectSemicolon = true;
+                            if (expression != .FunctionCall) //user put an expression outside of a function body, invalid tag
+                            {
+                                try self.WriteError("Function call must be within another function's body");
+                            }
+                            try nextTags.append(expression);
+                            //don't need semicolon after tag
+                        }
+                        else 
+                        {
+                            try self.AppendToCompoundStatement(&result, StatementData
+                            {
+                                .otherExpression = expression
+                            }, state);
+                            expectSemicolon = true;
+                        }
                     }
                     else if (next.id == .LBracket) //index into variable, optionally do stuff with result
                     {
@@ -497,27 +581,45 @@ pub const Parser = struct {
                         if (tokenAfterName.id == .LParen) //function declaration
                         {
                             var args = try self.ParseArgs();
-                            if (self.tokenizer.nextUntilValid().id != .LBrace)
+                            var immediateNext = self.tokenizer.nextUntilValid();
+                            if (immediateNext.id == .LBrace)
+                            {
+                                var newState = try state.*.clone();
+                                defer newState.deinit();
+                                try newState.funcNames.append(name);
+                                newState.braceCount += 1;
+                                const body = try self.Parse(&newState);
+
+                                const functionDeclaration = ast.FunctionData
+                                {
+                                    .name = name,
+                                    .args = args,
+                                    .returnType = typeName,
+                                    .statement = body
+                                };
+                                try self.AppendToCompoundStatement(&result, StatementData
+                                {
+                                    .functionDeclaration = functionDeclaration
+                                }, state);
+                            }
+                            else if (immediateNext.id == .Semicolon and state.context == ParseContext.traitDeclaration)
+                            {
+                                const functionDeclaration = ast.FunctionData
+                                {
+                                    .name = name,
+                                    .args = args,
+                                    .returnType = typeName,
+                                    .statement = CompoundStatementData.init(self.allocator)
+                                };
+                                try self.AppendToCompoundStatement(&result, StatementData
+                                {
+                                    .functionDeclaration = functionDeclaration
+                                }, state);
+                            }
+                            else
                             {
                                 try self.WriteError("Expected { after function arguments list () unless it is in a trait");
                             }
-                            var newState = try state.*.clone();
-                            defer newState.deinit();
-                            try newState.funcNames.append(name);
-                            newState.braceCount += 1;
-                            const body = try self.Parse(&newState);
-
-                            const functionDeclaration = ASTnodes.FunctionData
-                            {
-                                .name = name,
-                                .args = args,
-                                .returnType = typeName,
-                                .statement = body
-                            };
-                            try self.AppendToCompoundStatement(&result, StatementData
-                            {
-                                .functionDeclaration = functionDeclaration
-                            }, state);
                         }
                         else if (tokenAfterName.id == .Equal) //variable creation and assignment
                         {
@@ -526,28 +628,32 @@ pub const Parser = struct {
 
                             try self.AppendToCompoundStatement(&result, StatementData
                             {
-                                .variableDeclaration = ASTnodes.VarData
+                                .variableDeclaration = ast.VarData
                                 {
                                     .defaultValue = expr,
                                     .name = name,
                                     .isConst = false,
-                                    .typeName = typeName
+                                    .typeName = typeName,
+                                    .isStatic = nextIsStatic
                                 }
                             }, state);
+                            nextIsStatic = false;
                             expectSemicolon = true;
                         }
                         else if (tokenAfterName.id == .Semicolon) //variable creation
                         {
                             try self.AppendToCompoundStatement(&result, StatementData
                             {
-                                .variableDeclaration = ASTnodes.VarData
+                                .variableDeclaration = ast.VarData
                                 {
                                     .defaultValue = null,
                                     .name = name,
                                     .isConst = false,
-                                    .typeName = typeName
+                                    .typeName = typeName,
+                                    .isStatic = nextIsStatic
                                 }
                             }, state);
+                            nextIsStatic = false;
                         }
                     }
                     else
@@ -567,6 +673,7 @@ pub const Parser = struct {
                         {
                             .Variable = typeName
                         };
+                        std.debug.print("var: {s}\n", .{typeName.fullName});
                         var expr = try self.ParseExpression(primary, 0);
 
                         try self.AppendToCompoundStatement(&result, StatementData
@@ -627,7 +734,7 @@ pub const Parser = struct {
                                 var body = try self.Parse(&newState);
                                 try self.AppendToCompoundStatement(&result, StatementData
                                 {
-                                    .NamespaceStatement = ASTnodes.NamespaceData
+                                    .NamespaceStatement = ast.NamespaceData
                                     {
                                         .body = body,
                                         .name = self.SourceSlice(namespaceNameStart.?, namespaceNameEnd)
@@ -760,7 +867,8 @@ pub const Parser = struct {
                         .name = variableName.?,
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
-                        .defaultValue = defaultValueExpr
+                        .defaultValue = defaultValueExpr,
+                        .isStatic = false
                     };
                     try vars.append(variableData);
                     variableName = null;
@@ -845,7 +953,8 @@ pub const Parser = struct {
                         .name = variableName.?,
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
-                        .defaultValue = defaultValueExpr
+                        .defaultValue = defaultValueExpr,
+                        .isStatic = false
                     };
                     try vars.append(variableData);
                     variableName = null;
@@ -873,7 +982,8 @@ pub const Parser = struct {
                         .name = variableName.?,
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
-                        .defaultValue = expression
+                        .defaultValue = expression,
+                        .isStatic = false
                     };
                     try vars.append(variableData);
                     variableName = null;
@@ -982,11 +1092,15 @@ pub const Parser = struct {
             .fullName = "",
             .namespace = "",
             .templateTypes = null,
-            .pointerCount = 0
+            .pointerCount = 0,
+            .next = null
         };
-        var typeNameStart: ?usize = null;
-        var typeNameEnd: usize = 0;
-        //TODO: namespace data
+        var fullNameStart: ?usize = null;
+        var fullNameEnd: usize = 0;
+        
+        var namespaceStart: ?usize = null;
+        var pendingNamespaceEnd: usize = 0;
+
         var foundAsterisk: bool = false;
         var pointerCount: i32 = 0;
         var expectConnectorNext: bool = false;
@@ -995,6 +1109,7 @@ pub const Parser = struct {
             var token: lexer.Token = self.tokenizer.peekNextUntilValid();
             switch (token.id)
             {
+                //TODO: fix asterisk before identifier error
                 .Asterisk =>
                 {
                     if (!parsePointer)
@@ -1003,8 +1118,9 @@ pub const Parser = struct {
                     }
                     foundAsterisk = true;
                     pointerCount += 1;
-                    typeNameEnd = token.end;
+                    fullNameEnd = token.end;
                     expectConnectorNext = false;
+                    self.tokenizer.index = token.end;
                 },
                 .Identifier, .ColonColon, .Keyword_float, .Keyword_void, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_double, .Keyword_char, .Keyword_bool =>
                 {
@@ -1022,7 +1138,7 @@ pub const Parser = struct {
                         // return Errors.SyntaxError;
                     }
 
-                    if (typeNameStart == null)
+                    if (fullNameStart == null)
                     {
                         if (token.id == .ColonColon)
                         {
@@ -1030,19 +1146,31 @@ pub const Parser = struct {
                             
                             return Errors.SyntaxError;
                         }
-                        typeNameStart = token.start;
+                        namespaceStart = token.start;
+                        pendingNamespaceEnd = token.start;
+                        fullNameStart = token.start;
                     }
-                    typeNameEnd = token.end;
+                    fullNameEnd = token.end;
 
                     if (token.id != .ColonColon)
                     {
                         expectConnectorNext = true;
+                        pendingNamespaceEnd = token.end;
                         result.name = self.SourceTokenSlice(token);
                     }
+                    else
+                    {
+                        if (pendingNamespaceEnd > namespaceStart.?)
+                        {
+                            result.namespace = self.SourceSlice(namespaceStart.?, pendingNamespaceEnd);
+                        }
+                    }
                     
+                    self.tokenizer.index = token.end;
                 },
                 .AngleBracketLeft =>
                 {
+                    pendingNamespaceEnd = 0;
                     self.tokenizer.index = token.end; //advance beyond the <
                     result.templateTypes = std.ArrayList(TypeNameData).init(self.allocator);
 
@@ -1056,9 +1184,14 @@ pub const Parser = struct {
                             try result.templateTypes.?.append(templateType);
                         }
                         var next = self.tokenizer.nextUntilValid();
-                        if (next.id == .AngleBracketRight or next.id == .Comma)
+                        fullNameEnd = next.end;
+                        if (next.id == .AngleBracketRight)
                         {
                             break;
+                        }
+                        else if (next.id == .Comma)
+                        {
+                            continue;
                         }
                         else
                         {
@@ -1067,16 +1200,32 @@ pub const Parser = struct {
                             return Errors.SyntaxError;
                         }
                     }
+                    const last = self.tokenizer.peekNextUntilValid();
+                    if (last.id == .ColonColon) //not indeed final
+                    {
+                        self.tokenizer.index = last.end;
+                        const nextInChain: TypeNameData = try self.ParseTypeName(parsePointer);
+                        //move to heap
+                        var onHeap: *TypeNameData = try self.allocator.create(TypeNameData);
+                        onHeap.fullName = nextInChain.fullName;
+                        onHeap.name = nextInChain.name;
+                        onHeap.namespace = nextInChain.namespace;
+                        onHeap.templateTypes = nextInChain.templateTypes;
+                        onHeap.pointerCount = nextInChain.pointerCount;
+                        onHeap.next = nextInChain.next;
+
+                        result.next = onHeap;
+                    }
+                    break;
                 },
                 else =>
                 {
                     break;
                 }
             }
-            self.tokenizer.index = token.end;
         }
         result.pointerCount = pointerCount;
-        result.fullName = self.SourceSlice(typeNameStart.?, typeNameEnd);
+        result.fullName = self.SourceSlice(fullNameStart.?, fullNameEnd);
         return result;
     }
 
@@ -1191,11 +1340,11 @@ pub const Parser = struct {
         }
         else if (token.id == .Asterisk or token.id == .Minus or token.id == .Bang or token.id == .Ampersand or token.id == .Tilde)
         {
-            var op = ASTnodes.TokenToOperator.get(@tagName(token.id)).?;
+            var op = ast.TokenToOperator.get(@tagName(token.id)).?;
             var nextPrimary = try self.ParseExpression_Primary();
             var result = try self.ParseExpression(nextPrimary, 4);
 
-            var modifiedVarDataPtr: *ASTnodes.ModifiedVariableData = self.allocator.create(ASTnodes.ModifiedVariableData)
+            var modifiedVarDataPtr: *ast.ModifiedVariableData = self.allocator.create(ast.ModifiedVariableData)
             catch
             {
                 return Errors.OutOfMemoryError;
@@ -1226,7 +1375,7 @@ pub const Parser = struct {
             var nextTypeName = try self.ParseTypeName(true);
             return ExpressionData
             {
-                .TypeCast = ASTnodes.TypeCastData
+                .TypeCast = ast.TypeCastData
                 {
                     .typeName = nextTypeName,
                     .pointerCount = 0
@@ -1263,7 +1412,7 @@ pub const Parser = struct {
                 {
                     lhs = ExpressionData
                     {
-                        .TypeCast = ASTnodes.TypeCastData
+                        .TypeCast = ast.TypeCastData
                         {
                             .typeName = lhs.Variable,
                             .pointerCount = 1

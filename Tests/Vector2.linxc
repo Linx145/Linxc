@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-//impl_trait(trait_Printable)
 namespace Numerics
 {
+    //impl_trait(trait_Printable)
     struct Vector2
     {
         float x;

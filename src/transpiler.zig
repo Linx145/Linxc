@@ -32,11 +32,14 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
             },
             .structDeclaration => |structDeclaration|
             {
-                _ = try writer.write("struct ");
-                _ = try writer.write(structDeclaration.name);
-                _ = try writer.write(" {\n");
-                try TranspileStatementH(writer, structDeclaration.body, allocator);
-                _ = try writer.write("};\n");
+                if (structDeclaration.templateTypes == null)
+                {
+                    _ = try writer.write("struct ");
+                    _ = try writer.write(structDeclaration.name);
+                    _ = try writer.write(" {\n");
+                    try TranspileStatementH(writer, structDeclaration.body, allocator);
+                    _ = try writer.write("};\n");
+                }
             },
             .traitDeclaration => |traitDeclaration|
             {
@@ -85,6 +88,10 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
             },
             .variableDeclaration => |*variableDeclaration|
             {
+                if (variableDeclaration.*.isStatic)
+                {
+                    _ = try writer.write("static ");
+                }
                 if (variableDeclaration.*.isConst)
                 {
                     _ = try writer.write("const ");
@@ -261,7 +268,8 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
         {
             .structDeclaration => |*structDeclaration|
             {
-                try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name, allocator);
+                if (structDeclaration.templateTypes == null)
+                    try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name, allocator);
             },
             .NamespaceStatement => |namespaceStatement|
             {

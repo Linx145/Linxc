@@ -8,10 +8,15 @@ pub const VarData = struct
     typeName: TypeNameData,
     isConst: bool,
     defaultValue: ?ExpressionData,
+    isStatic: bool,
 
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
+        if (self.isStatic)
+        {
+            try str.concat("static ");
+        }
         if (self.isConst)
         {
             try str.concat("const ");
@@ -178,6 +183,7 @@ pub const TypeNameData = struct
     namespace: []const u8,
     templateTypes: ?std.ArrayList(TypeNameData),
     pointerCount: i32,
+    next: ?*TypeNameData,
 
     pub inline fn deinit(self: *@This()) void
     {
@@ -189,7 +195,13 @@ pub const TypeNameData = struct
     pub fn ToUseableString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var result: string = string.init(allocator);
-        try result.concat(self.fullName);
+        if (self.namespace.len > 0)
+        {
+            try result.concat(self.namespace);
+            try result.concat("::");
+        }
+        try result.concat(self.name);
+        //try result.concat(self.fullName);
         if (self.templateTypes != null)
         {
             try result.concat("_");
@@ -209,6 +221,12 @@ pub const TypeNameData = struct
         while (j < self.pointerCount) : (j += 1)
         {
             try result.concat("*");
+        }
+        if (self.next != null)
+        {
+            try result.concat("::");
+            var nextStr = try self.next.?.ToUseableString(allocator);
+            try result.concat_deinit(&nextStr);
         }
         return result;
     }
@@ -235,6 +253,12 @@ pub const TypeNameData = struct
         while (j < self.pointerCount) : (j += 1)
         {
             try result.concat("*");
+        }
+        if (self.next != null)
+        {
+            try result.concat("::");
+            var nextStr = try self.next.?.ToString(allocator);
+            try result.concat_deinit(&nextStr);
         }
         return result;
     }
@@ -567,7 +591,8 @@ pub const StructData = struct
 {
     name: []const u8,
     tags: ?[]ExpressionData,
-    body: CompoundStatementData
+    body: CompoundStatementData,
+    templateTypes: ?[][]const u8
 ,
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
@@ -595,6 +620,10 @@ pub const StructData = struct
         for (self.body.items) |*item|
         {
             item.deinit(allocator);
+        }
+        if (self.templateTypes != null)
+        {
+            allocator.free(self.templateTypes.?);
         }
         self.body.deinit();
     }

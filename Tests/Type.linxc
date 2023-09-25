@@ -1,0 +1,7 @@
+#include <Linxc.h>
+
+template<typename T>
+struct Type
+{
+    static u32 ID;
+};

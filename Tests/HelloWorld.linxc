@@ -1,23 +1,19 @@
 #include <Vector2.linxc>
+#include <Type.linxc>
 #include <stdlib.h>
 
 i32 main()
 {
-    Numerics::Vector2 *vector2 = (Numerics::Vector2*)malloc(sizeof(Numerics::Vector2));
+    // Numerics::Vector2 *vector2 = (Numerics::Vector2*)malloc(sizeof(Numerics::Vector2));
 
-    vector2->x = 1;
-    vector2->y = 2;
+    // vector2->x = 1;
+    // vector2->y = 2;
 
-    vector2->Print();
+    // vector2->Print();
 
-    //trait_Printable *asTrait = (trait_Printable*)vector2;
-    //asTrait->Print();
+    // free(vector2);
 
-    free(vector2);
+    Type<i32>::ID = 1;
 
-    // Vector2 vector2;
-    // vector2.x = 1;
-    // vector2.y = 2;
-    // vector2.Print();
     return 0;
 }
