@@ -13,7 +13,7 @@ i32 main()
 
     // free(vector2);
 
-    Type<i32>::ID = 1;
+    Type<Numerics::Vector2>::ID = 1;
 
     return 0;
 }

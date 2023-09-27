@@ -3,10 +3,10 @@
 const std = @import("std");
 const ast = @import("ASTnodes.zig");
 const io = @import("io.zig");
-//const refl = @import("reflector.zig");
+const refl = @import("reflector.zig");
 const string = @import("zig-string.zig").String;
 
-pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, allocator: std.mem.Allocator) anyerror!void
+pub fn TranspileStatementH(allocator: std.mem.Allocator, writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, database: *refl.ReflectionDatabase, specializationMap: ?std.StringHashMap([]const u8)) anyerror!void
 {
     var i: usize = 0;
     while (i < cstmt.items.len) : (i += 1)
@@ -25,9 +25,18 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
             .NamespaceStatement => |namespaceStatement|
             {
                 _ = try writer.write("namespace ");
-                _ = try writer.write(namespaceStatement.name);
+                _ = try writer.write(namespaceStatement.name.str());
                 _ = try writer.write(" {\n");
-                try TranspileStatementH(writer, namespaceStatement.body, allocator);
+
+                // var nextNamespace: string = string.init(allocator);
+                // if (namespaces.len > 0)
+                // {
+                //     try nextNamespace.concat(namespaces);
+                //     try nextNamespace.concat("::");
+                // }
+                // try nextNamespace.concat(namespaceStatement.name.str());
+
+                try TranspileStatementH(allocator, writer, namespaceStatement.body, database, specializationMap);
                 _ = try writer.write("}\n");
             },
             .structDeclaration => |structDeclaration|
@@ -35,18 +44,18 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 if (structDeclaration.templateTypes == null)
                 {
                     _ = try writer.write("struct ");
-                    _ = try writer.write(structDeclaration.name);
+                    _ = try writer.write(structDeclaration.name.str());
                     _ = try writer.write(" {\n");
-                    try TranspileStatementH(writer, structDeclaration.body, allocator);
+                    try TranspileStatementH(allocator, writer, structDeclaration.body, database, specializationMap);
                     _ = try writer.write("};\n");
                 }
             },
             .traitDeclaration => |traitDeclaration|
             {
                 _ = try writer.write("struct ");
-                _ = try writer.write(traitDeclaration.name);
+                _ = try writer.write(traitDeclaration.name.str());
                 _ = try writer.write(" {\n");
-                try TranspileStatementH(writer, traitDeclaration.body, allocator);
+                try TranspileStatementH(allocator, writer, traitDeclaration.body, database, specializationMap);
                 _ = try writer.write("};\n");
             },
             .functionDeclaration => |*functionDeclaration|
@@ -55,7 +64,7 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 defer returnTypeStr.deinit();
                 _ = try writer.write(returnTypeStr.str());
                 _ = try writer.write(" ");
-                _ = try writer.write(functionDeclaration.name);
+                _ = try writer.write(functionDeclaration.name.str());
                 _ = try writer.write("(");
                 var j: usize = 0;
                 while (j < functionDeclaration.args.len) : (j += 1)
@@ -69,7 +78,7 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                     defer typeNameStr.deinit();
                     _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
-                    _ = try writer.write(arg.name);
+                    _ = try writer.write(arg.name.str());
 
                     if (arg.defaultValue != null)
                     {
@@ -100,7 +109,7 @@ pub fn TranspileStatementH(writer: std.fs.File.Writer, cstmt: ast.CompoundStatem
                 defer typeNameStr.deinit();
                 _ = try writer.write(typeNameStr.str());
                 _ = try writer.write(" ");
-                _ = try writer.write(variableDeclaration.*.name);
+                _ = try writer.write(variableDeclaration.*.name.str());
                 if (variableDeclaration.*.defaultValue != null)
                 {
                     _ = try writer.write(" = ");
@@ -129,7 +138,7 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
     {
         .Literal => |literal|
         {
-            _ = try writer.write(literal);
+            _ = try writer.write(literal.str());
         },
         .Variable => |*variable|
         {
@@ -245,20 +254,14 @@ pub fn TranspileExpression(writer: std.fs.File.Writer, expr: *ast.ExpressionData
         },
         .TypeCast => |*TypeCast|
         {
-            var typeNameStr: string = try TypeCast.*.typeName.ToString(allocator);
+            var typeNameStr: string = try TypeCast.*.typeName.ToUseableString(allocator);
             defer typeNameStr.deinit();
-            try writer.print("({s}", .{typeNameStr.str()});
-            var i: i32 = 0;
-            while (i < TypeCast.pointerCount) : (i += 1)
-            {
-                _ = try writer.write("*");    
-            }
             _ = try writer.write(")");
         }
     }
 }
 //parent is not null if we are in reflectable compound statement
-pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, eolIsSemicolon: bool, parent: ?[]const u8, allocator: std.mem.Allocator) anyerror!void
+pub fn TranspileStatementCpp(allocator: std.mem.Allocator, writer: std.fs.File.Writer, cstmt: ast.CompoundStatementData, eolIsSemicolon: bool, parent: ?[]const u8) anyerror!void
 {
     var i: usize = 0;
     while (i < cstmt.items.len) : (i += 1)
@@ -269,14 +272,14 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
             .structDeclaration => |*structDeclaration|
             {
                 if (structDeclaration.templateTypes == null)
-                    try TranspileStatementCpp(writer, structDeclaration.body, true, structDeclaration.name, allocator);
+                    try TranspileStatementCpp(allocator, writer, structDeclaration.body, true, structDeclaration.name.str());
             },
             .NamespaceStatement => |namespaceStatement|
             {
                 _ = try writer.write("namespace ");
-                _ = try writer.write(namespaceStatement.name);
+                _ = try writer.write(namespaceStatement.name.str());
                 _ = try writer.write(" {\n");
-                try TranspileStatementCpp(writer, namespaceStatement.body, false, null, allocator);
+                try TranspileStatementCpp(allocator, writer, namespaceStatement.body, false, null);
                 _ = try writer.write("}\n");
             },
             .traitDeclaration =>// |*traitDeclaration|
@@ -294,7 +297,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 //             _ = try writer.write(parent.?);
                 //             _ = try writer.write("::");
                 //         }
-                //         _ = try writer.write(traitStmt.functionDeclaration.name);
+                //         _ = try writer.write(traitStmt.functionDeclaration.name.str());
                 //         _ = try writer.write("(");
                 //         var j: usize = 0;
                 //         while (j < traitStmt.functionDeclaration.args.len) : (j += 1)
@@ -308,7 +311,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 //             defer typeNameStr.deinit();
                 //             _ = try writer.write(typeNameStr.str());
                 //             _ = try writer.write(" ");
-                //             _ = try writer.write(arg.name);
+                //             _ = try writer.write(arg.name.str());
 
                 //             //dont need to handle default value here as it's already handled for us in the header file
 
@@ -322,7 +325,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 //         _ = try writer.write("   switch (_SELF.type->ID) {\n");
                         
                 //         j = 0;
-                //         var traitType: *refl.LinxcType = try refl.globalDatabase.?.GetTypeSafe(traitDeclaration.name);
+                //         var traitType: *refl.LinxcType = try refl.globalDatabase.?.GetTypeSafe(traitDeclaration.name.str());
                 //         while (j < traitType.implementedBy.items.len) : (j += 1)
                 //         {
                 //             try writer.print("      case {d}:\n", .{traitType.implementedBy.items[j].ID});
@@ -332,7 +335,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 //             while (c < traitStmt.functionDeclaration.args.len) : (c += 1)
                 //             {
                 //                 const arg: *ast.VarData = &traitStmt.functionDeclaration.args[j];
-                //                 _ = try writer.write(arg.name);
+                //                 _ = try writer.write(arg.name.str());
                 //                 if (c < traitStmt.functionDeclaration.args.len - 1)
                 //                 {
                 //                     _ = try writer.write(", ");
@@ -360,7 +363,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     defer typeNameStr.deinit();
                     _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
-                    _ = try writer.write(variableDeclaration.name);
+                    _ = try writer.write(variableDeclaration.name.str());
                     if (variableDeclaration.defaultValue != null)
                     {
                         _ = try writer.write(" = ");
@@ -380,7 +383,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     _ = try writer.write(parent.?);
                     _ = try writer.write("::");
                 }
-                _ = try writer.write(functionDeclaration.name);
+                _ = try writer.write(functionDeclaration.name.str());
                 _ = try writer.write("(");
                 var j: usize = 0;
                 while (j < functionDeclaration.args.len) : (j += 1)
@@ -394,7 +397,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     defer typeNameStr.deinit();
                     _ = try writer.write(typeNameStr.str());
                     _ = try writer.write(" ");
-                    _ = try writer.write(arg.name);
+                    _ = try writer.write(arg.name.str());
 
                     //dont need to handle default value here as it's already handled for us in the header file
 
@@ -404,26 +407,8 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                     }
                 }
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, functionDeclaration.statement, true, null, allocator);
+                try TranspileStatementCpp(allocator, writer, functionDeclaration.statement, true, null);
                 _ = try writer.write("}\n");
-            },
-            .functionInvoke => |*functionInvoke|
-            {
-                var invokeNameStr = try functionInvoke.name.ToUseableString(allocator);
-                defer invokeNameStr.deinit();
-                _ = try writer.write(invokeNameStr.str());
-                _ = try writer.write("(");
-                var j: usize = 0;
-                while (j < functionInvoke.inputParams.len) : (j += 1)
-                {
-                    try TranspileExpression(writer, &functionInvoke.inputParams[j], allocator);
-                    if (j < functionInvoke.inputParams.len - 1)
-                    {
-                        _ = try writer.write(", ");
-                    }
-                }
-                _ = try writer.write(")");
-                try AppendEndOfLine(writer, eolIsSemicolon);
             },
             .returnStatement => |*returnStatement|
             {
@@ -441,7 +426,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 _ = try writer.write("if (");
                 try TranspileExpression(writer, &IfStatement.condition, allocator);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, IfStatement.statement, true, null, allocator);
+                try TranspileStatementCpp(allocator, writer, IfStatement.statement, true, null);
                 _ = try writer.write("}\n");
             },
             .ElseStatement => |*ElseStatement|
@@ -454,7 +439,7 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 }
                 else
                 {
-                    try TranspileStatementCpp(writer, ElseStatement.*, true, null, allocator);
+                    try TranspileStatementCpp(allocator, writer, ElseStatement.*, true, null);
                 }
             },
             .WhileStatement => |*WhileStatement|
@@ -462,19 +447,19 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
                 _ = try writer.write("while (");
                 try TranspileExpression(writer, &WhileStatement.condition, allocator);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, WhileStatement.statement, true, null, allocator);
+                try TranspileStatementCpp(allocator, writer, WhileStatement.statement, true, null);
                 _ = try writer.write("}\n");
             },
             .ForStatement => |*ForStatement|
             {
                 _ = try writer.write("for (");
-                try TranspileStatementCpp(writer, ForStatement.initializer, false, null, allocator);
+                try TranspileStatementCpp(allocator, writer, ForStatement.initializer, false, null);
                 _ = try writer.write("; ");
                 try TranspileExpression(writer, &ForStatement.condition, allocator);
                 _ = try writer.write("; ");
-                try TranspileStatementCpp(writer, ForStatement.shouldStep, false, null, allocator);
+                try TranspileStatementCpp(allocator, writer, ForStatement.shouldStep, false, null);
                 _ = try writer.write(") {\n");
-                try TranspileStatementCpp(writer, ForStatement.statement, true, null, allocator);
+                try TranspileStatementCpp(allocator, writer, ForStatement.statement, true, null);
                 _ = try writer.write("}\n");
             },
             else =>
@@ -482,5 +467,59 @@ pub fn TranspileStatementCpp(writer: std.fs.File.Writer, cstmt: ast.CompoundStat
 
             }
         }
+    }
+}
+
+pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.File.Writer, database: *refl.ReflectionDatabase, templatedStruct: *refl.TemplatedStruct) anyerror!void
+{
+    _ = cwriter;
+    const allocator = templatedStruct.allocator;
+
+    var genericTypeName: string = string.init(allocator);
+    defer genericTypeName.deinit();
+    if (templatedStruct.namespace.str().len > 0)
+    {
+        try genericTypeName.concat(templatedStruct.namespace.str());
+        try genericTypeName.concat("::");
+    }
+    try genericTypeName.concat(templatedStruct.structData.name.str());
+
+    var genericType = try database.GetTypeSafe(genericTypeName.str());
+
+    var genericMap = std.StringHashMap([]const u8).init(allocator);
+
+    var j: usize = 0;
+    const genericTypeArgsCount: usize = templatedStruct.structData.templateTypes.?.len;
+    //collect (generic type arguments count) specializations from genericType.templateSpecializations
+    while (j < genericType.templateSpecializations.items.len)
+    {
+        if (templatedStruct.namespace.str().len > 0)
+        {
+            _ = try hwriter.write(templatedStruct.namespace.str());
+            _ = try hwriter.write(" {\n");
+        }
+        _ = try hwriter.write("struct ");
+        _ = try hwriter.write(templatedStruct.structData.name.str());
+
+        //append to specialization map, at the same time transpile fill name
+        var i: usize = 0;
+        while (i < genericTypeArgsCount) : (i += 1)
+        {
+            const specializationStr = genericType.templateSpecializations.items[j + i].str();
+            try genericMap.put(templatedStruct.structData.templateTypes.?[i].str(), specializationStr);
+            _ = try hwriter.write("_");
+            _ = try hwriter.write(specializationStr);
+        }
+
+        _ = try hwriter.write(" {\n");
+        try TranspileStatementH(allocator, hwriter, templatedStruct.structData.body, database, genericMap);
+        _ = try hwriter.write("};\n");
+        if (templatedStruct.namespace.str().len > 0)
+        {
+            _ = try hwriter.write("}\n");
+        }
+
+        genericMap.clearRetainingCapacity();
+        j += genericTypeArgsCount;
     }
 }

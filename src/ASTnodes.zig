@@ -1,15 +1,26 @@
 const std = @import("std");
-const string = @import("zig-string.zig").String;
+const zstr = @import("zig-string.zig");
+const string = zstr.String;
+const OptString = zstr.OptString;
 const Errors = @import("errors.zig").Errors;
 
 pub const VarData = struct
 {
-    name: []const u8,
+    name: OptString,
     typeName: TypeNameData,
     isConst: bool,
     defaultValue: ?ExpressionData,
     isStatic: bool,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.name.ToOwned(allocator);
+        try self.typeName.ToOwned(allocator);
+        if (self.defaultValue != null)
+        {
+            try self.defaultValue.?.ToOwned(allocator);
+        }
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
@@ -24,7 +35,7 @@ pub const VarData = struct
         var typeNameStr = try self.typeName.ToString(allocator);
         try str.concat_deinit(&typeNameStr);
         try str.concat(" ");
-        try str.concat(self.name);
+        try str.concat(self.name.str());
         if (self.defaultValue != null)
         {
             try str.concat(" = ");
@@ -46,29 +57,36 @@ pub const VarData = struct
 };
 pub const TagData = struct 
 {
-    name: []const u8,
+    name: OptString,
     args: []VarData,
 
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.name.ToOwned(allocator);
+    }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
-        //self.name.deinit();
+        self.name.deinit();
         for (self.args) |arg|
         {
             arg.deinit(allocator);
         }
     }
 };
-pub const MacroDefinitionData = struct
-{
-    name: []const u8,
-    args: [][]const u8,
-    expandsTo: []const u8
-};
 pub const FunctionCallData = struct
 {
     name: TypeNameData,
     inputParams: []ExpressionData,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.name.ToOwned(allocator);
+        var i: usize = 0;
+        while (i < self.inputParams.len) : (i += 1)
+        {
+            try self.inputParams[i].ToOwned(allocator);
+        }
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
@@ -102,20 +120,30 @@ pub const FunctionCallData = struct
 };
 pub const FunctionData = struct
 {
-    name: []const u8,
+    name: OptString,
     returnType: TypeNameData,
     args: []VarData,
     statement: CompoundStatementData,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.name.ToOwned(allocator);
+        try self.returnType.ToOwned(allocator);
+        for (self.args) |*arg|
+        {
+            try arg.ToOwned(allocator);
+        }
+        try CompoundStatementToOwned(&self.statement, allocator);
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var compoundStatementString = try CompoundStatementToString(&self.statement, allocator);
 
         var str = string.init(allocator);
-        var returnTypeStr = self.returnType.ToString(allocator);
+        var returnTypeStr = try self.returnType.ToString(allocator);
         try str.concat_deinit(&returnTypeStr);
         try str.concat(" ");
-        try str.concat(self.name);
+        try str.concat(self.name.str());
         try str.concat("(");
         var i: usize = 0;
         while (i < self.args.len) : (i += 1)
@@ -135,8 +163,8 @@ pub const FunctionData = struct
     }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
-        //self.name.deinit();
-        //self.returnType.deinit();
+        self.name.deinit();
+        self.returnType.deinit();
         for (self.args) |*arg|
         {
             arg.deinit(allocator);
@@ -154,6 +182,10 @@ pub const ModifiedVariableData = struct
     expression: ExpressionData,
     Op: Operator,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.expression.ToOwned(allocator);
+    }
     pub inline fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         self.expression.deinit(allocator);
@@ -178,37 +210,66 @@ pub const ModifiedVariableData = struct
 };
 pub const TypeNameData = struct
 {
-    fullName: []const u8,
-    name: []const u8,
-    namespace: []const u8,
+    allocator: std.mem.Allocator,
+    fullName: OptString,
+    name: OptString,
+    namespace: OptString,
     templateTypes: ?std.ArrayList(TypeNameData),
     pointerCount: i32,
     next: ?*TypeNameData,
 
-    pub inline fn deinit(self: *@This()) void
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
     {
+        try self.fullName.ToOwned(allocator);
+        try self.name.ToOwned(allocator);
+        try self.namespace.ToOwned(allocator);
         if (self.templateTypes != null)
         {
+            for (self.templateTypes.?.items) |*templateType|
+            {
+                try templateType.ToOwned(allocator);
+            }
+        }
+        if (self.next != null)
+        {
+            try self.next.?.ToOwned(allocator);
+        }
+    }
+    pub fn deinit(self: *@This()) void
+    {
+        self.fullName.deinit();
+        self.name.deinit();
+        self.namespace.deinit();
+        if (self.templateTypes != null)
+        {
+            for (self.templateTypes.?.items) |*templateType|
+            {
+                templateType.deinit();
+            }
             self.templateTypes.?.deinit();
+        }
+        if (self.next != null)
+        {
+            self.next.?.deinit();
+            self.allocator.destroy(self.next.?);
         }
     }
     pub fn ToUseableString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var result: string = string.init(allocator);
-        if (self.namespace.len > 0)
+        if (self.namespace.str().len > 0)
         {
-            try result.concat(self.namespace);
+            try result.concat(self.namespace.str());
             try result.concat("::");
         }
-        try result.concat(self.name);
-        //try result.concat(self.fullName);
+        try result.concat(self.name.str());
         if (self.templateTypes != null)
         {
             try result.concat("_");
             var i: usize = 0;
             while (i < self.templateTypes.?.items.len) : (i += 1)
             {
-                var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator);
+                var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator, true);
                 try result.concat_deinit(&templateTypeStr);
                 if (i < self.templateTypes.?.items.len - 1)
                 {
@@ -233,7 +294,7 @@ pub const TypeNameData = struct
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var result: string = string.init(allocator);
-        try result.concat(self.fullName);
+        try result.concat(self.fullName.str());
         if (self.templateTypes != null)
         {
             try result.concat("<");
@@ -266,20 +327,14 @@ pub const TypeNameData = struct
 pub const TypeCastData = struct
 {
     typeName: TypeNameData,
-    pointerCount: i32,
 
-    pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
     {
-        var result: string = string.init(allocator);
-        var i: i32 = 0;
-        while (i < self.pointerCount) : (i += 1)
-        {
-            try result.concat("*");
-        }
-        var typeNameStr = try self.typeName.ToString(allocator);
-        try result.concat_deinit(&typeNameStr);
-
-        return result;
+        try self.typeName.ToOwned(allocator);
+    }
+    pub inline fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
+    {
+        return self.typeName.ToString(allocator);
     }
     pub inline fn deinit(self: *@This()) void
     {
@@ -298,7 +353,7 @@ pub const ExpressionDataTag = enum
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
-    Literal: []const u8,
+    Literal: OptString,
     Variable: TypeNameData,
     ModifiedVariable: *ModifiedVariableData,
     Op: *OperatorData,
@@ -306,10 +361,48 @@ pub const ExpressionData = union(ExpressionDataTag)
     IndexedAccessor: *FunctionCallData,
     TypeCast: TypeCastData,
 
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        switch (self.*)
+        {
+            .Literal => |*literal|
+            {
+                try literal.ToOwned(allocator);
+            },
+            .Variable => |*variable|
+            {
+                try variable.ToOwned(allocator);
+            },
+            .ModifiedVariable => |*variable|
+            {
+                try variable.*.ToOwned(allocator);
+            },
+            .Op => |*operatorData|
+            {
+                try operatorData.*.ToOwned(allocator);
+            },
+            .FunctionCall => |*funcCall|
+            {
+                try funcCall.*.ToOwned(allocator);
+            },
+            .IndexedAccessor => |*indexedAccessor|
+            {
+                try indexedAccessor.*.ToOwned(allocator);
+            },
+            .TypeCast => |*typeCast|
+            {
+                try typeCast.*.ToOwned(allocator);
+            }
+        }
+    }
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
         switch (self.*)
         {
+            .Literal => |*literal|
+            {
+                literal.deinit();
+            },
             .Variable => |*value|
             {
                 value.deinit();
@@ -337,8 +430,7 @@ pub const ExpressionData = union(ExpressionDataTag)
             .TypeCast => |*typecast|
             {
                 typecast.*.deinit();
-            },
-            else => {}
+            }
         }
     }
 
@@ -349,7 +441,7 @@ pub const ExpressionData = union(ExpressionDataTag)
             .Literal => |literal| 
             {
                 var str = string.init(allocator);
-                try str.concat(literal);
+                try str.concat(literal.str());
                 return str;
             },
             .Variable => |*variable|
@@ -451,6 +543,11 @@ pub const OperatorData = struct
     rightExpression: ExpressionData,
     priority: bool,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.leftExpression.ToOwned(allocator);
+        try self.rightExpression.ToOwned(allocator);
+    }
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void
     {
         self.leftExpression.deinit(alloc);
@@ -484,6 +581,10 @@ pub const WhileData = struct
     condition: ExpressionData,
     statement: CompoundStatementData,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try CompoundStatementToOwned(&self.statement, allocator);
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
@@ -516,6 +617,13 @@ pub const ForData = struct
     shouldStep: CompoundStatementData,
     statement: CompoundStatementData,
 
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try CompoundStatementToOwned(&self.initializer, allocator);
+        try self.condition.ToOwned(allocator);
+        try CompoundStatementToOwned(&self.shouldStep, allocator);
+        try CompoundStatementToOwned(&self.statement, allocator);
+    }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         for (self.initializer.items) |*statement|
@@ -562,6 +670,11 @@ pub const IfData = struct
     condition: ExpressionData,
     statement: CompoundStatementData,
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.condition.ToOwned(allocator);
+        try CompoundStatementToOwned(&self.statement, allocator);
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
@@ -589,16 +702,35 @@ pub const IfData = struct
 };
 pub const StructData = struct
 {
-    name: []const u8,
+    name: OptString,
     tags: ?[]ExpressionData,
     body: CompoundStatementData,
-    templateTypes: ?[][]const u8
-,
+    templateTypes: ?[]OptString,
+
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try self.name.ToOwned(allocator);
+        if (self.tags != null)
+        {
+            for (self.tags.?) |*tag|
+            {
+                try tag.ToOwned(allocator);
+            }
+        }
+        try CompoundStatementToOwned(&self.body, allocator);
+        if (self.templateTypes != null)
+        {
+            for (self.templateTypes.?) |*templateType|
+            {
+                try templateType.ToOwned(allocator);
+            }
+        }
+    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) !string
     {
         var str = string.init(allocator);
         try str.concat("struct ");
-        try str.concat(self.name);
+        try str.concat(self.name.str());
         try str.concat(" { \n");
 
         var bodyStr = try CompoundStatementToString(&self.body, allocator);
@@ -631,8 +763,13 @@ pub const StructData = struct
 pub const NamespaceData = struct
 {
     body: CompoundStatementData,
-    name: []const u8,
+    name: OptString,
 
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        try CompoundStatementToOwned(&self.body, allocator);
+        try self.name.ToOwned(allocator);
+    }
     pub fn deinit(self: *@This()) void
     {
         ClearCompoundStatement(&self.body);
@@ -643,7 +780,7 @@ pub const NamespaceData = struct
         var result = string.init(allocator);
 
         try result.concat("namespace ");
-        try result.concat(self.name);
+        try result.concat(self.name.str());
         try result.concat(" {\n");
         try result.concat_deinit(&body);
         try result.concat("}\n");
@@ -659,7 +796,6 @@ pub const StatementDataTag = enum
     destructorDeclaration,
     structDeclaration,
     traitDeclaration,
-    functionInvoke,
     returnStatement,
     otherExpression,
     IfStatement,
@@ -679,7 +815,6 @@ pub const StatementData = union(StatementDataTag)
     destructorDeclaration: FunctionData,
     structDeclaration: StructData,
     traitDeclaration: StructData,
-    functionInvoke: FunctionCallData,
     returnStatement: ExpressionData,
     otherExpression: ExpressionData,
     IfStatement: IfData,
@@ -691,6 +826,29 @@ pub const StatementData = union(StatementDataTag)
     includeStatement: []const u8,
     //macroDefinition: MacroDefinitionData
 
+    pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        switch (self.*)
+        {
+            .functionDeclaration => |*decl| try decl.ToOwned(allocator),
+            .variableDeclaration => |*decl| try decl.ToOwned(allocator),
+            .constructorDeclaration => |*decl| try decl.ToOwned(allocator),
+            .destructorDeclaration => |*decl| try decl.ToOwned(allocator),
+            .structDeclaration => |*decl| try decl.ToOwned(allocator),
+            .traitDeclaration => |*decl| try decl.ToOwned(allocator),
+            .returnStatement => |*stmt| try stmt.ToOwned(allocator),
+            .otherExpression => |*expr| try expr.ToOwned(allocator),
+            .IfStatement => |*stmt| try stmt.ToOwned(allocator),
+            .ElseStatement => |*stmt| try CompoundStatementToOwned(stmt, allocator),
+            .WhileStatement => |*stmt| try stmt.ToOwned(allocator),
+            .ForStatement => |*stmt| try stmt.ToOwned(allocator),
+            .NamespaceStatement => |*stmt| try stmt.ToOwned(allocator),
+            else =>
+            {
+                
+            }
+        }
+    }
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void
     {
         switch (self.*)
@@ -701,7 +859,6 @@ pub const StatementData = union(StatementDataTag)
             .destructorDeclaration => |*decl| decl.deinit(allocator),
             .structDeclaration => |*decl| decl.deinit(allocator),
             .traitDeclaration => |*decl| decl.deinit(allocator),
-            .functionInvoke => |*invoke| invoke.deinit(allocator),
             .returnStatement => |*stmt| stmt.deinit(allocator),
             .otherExpression => |*stmt| stmt.deinit(allocator),
             .IfStatement => |*ifData| ifData.deinit(allocator),
@@ -731,7 +888,6 @@ pub const StatementData = union(StatementDataTag)
             .destructorDeclaration => |*decl| return decl.ToString(allocator),
             .structDeclaration => |*decl| return decl.ToString(allocator),
             .traitDeclaration => |*decl| return decl.ToString(allocator),
-            .functionInvoke => |*invoke| return invoke.ToString(allocator),
             .returnStatement => |*stmt| 
             {
                 var stmtStr = try stmt.ToString(allocator);
@@ -744,7 +900,7 @@ pub const StatementData = union(StatementDataTag)
             .IfStatement => |*ifDat| return ifDat.ToString(allocator),
             .ElseStatement => |*elseData|
             {
-                var stmtStr = try CompoundStatementToString(&elseData, allocator);
+                var stmtStr = try CompoundStatementToString(elseData, allocator);
                 var str = string.init(allocator);
                 try str.concat("else {\n");
                 try str.concat_deinit(&stmtStr);
@@ -776,6 +932,13 @@ pub fn ClearCompoundStatement(compoundStatement: *CompoundStatementData) void
         stmt.deinit(compoundStatement.allocator);
     }
     compoundStatement.deinit();
+}
+pub inline fn CompoundStatementToOwned(compoundStatement: *CompoundStatementData, allocator: std.mem.Allocator) anyerror!void
+{
+    for (compoundStatement.*.items) |*stmt|
+    {
+        try stmt.ToOwned(allocator);
+    }
 }
 pub fn CompoundStatementToString(stmts: *CompoundStatementData, allocator: std.mem.Allocator) anyerror!string
 {

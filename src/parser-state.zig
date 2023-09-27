@@ -1,5 +1,5 @@
 const std = @import("std");
-const string = @import("zig-string.zig");
+const string = @import("zig-string.zig").String;
 
 pub const ParseContext = enum
 {
@@ -12,6 +12,9 @@ pub const ParseContext = enum
 
 pub const ParserState = struct
 {
+    filename: string,
+    outputHeader: []const u8,
+    outputC: []const u8,
     context: ParseContext,
     namespaces: std.ArrayList([]const u8),
     structNames: std.ArrayList([]const u8),
@@ -21,6 +24,7 @@ pub const ParserState = struct
 
     pub fn deinit(self: *@This()) void
     {
+        self.filename.deinit();
         self.namespaces.deinit();
         self.structNames.deinit();
         self.funcNames.deinit();
@@ -38,12 +42,13 @@ pub const ParserState = struct
             }
         }
     }
-    pub fn clone(self: *@This()) !ParserState
+    pub fn clone_with(self: *@This(), allocator: std.mem.Allocator) anyerror!ParserState
     {
-        var namespaces = std.ArrayList([]const u8).init(self.namespaces.allocator);
-        var structNames = std.ArrayList([]const u8).init(self.structNames.allocator);
-        var funcNames = std.ArrayList([]const u8).init(self.funcNames.allocator);
-        var templateTypenames = std.ArrayList([]const u8).init(self.templateTypenames.allocator);
+        var namespaces = std.ArrayList([]const u8).init(allocator);
+        var structNames = std.ArrayList([]const u8).init(allocator);
+        var funcNames = std.ArrayList([]const u8).init(allocator);
+        var templateTypenames = std.ArrayList([]const u8).init(allocator);
+        var filename = try string.init_with_contents(allocator, self.filename.str());
 
         for (self.namespaces.items) |namespace|
         {
@@ -64,6 +69,9 @@ pub const ParserState = struct
 
         return ParserState
         {
+            .outputHeader = self.outputHeader,
+            .outputC = self.outputC,
+            .filename = filename,
             .context = self.context,
             .namespaces = namespaces,
             .structNames = structNames,
@@ -71,5 +79,9 @@ pub const ParserState = struct
             .braceCount = self.braceCount,
             .templateTypenames = templateTypenames
         };
+    }
+    pub inline fn clone(self: *@This()) anyerror!ParserState
+    {
+        return self.clone_with(self.structNames.allocator);
     }
 };

@@ -486,3 +486,41 @@ pub const String = struct {
         };
     }
 };
+
+pub const OptString = struct
+{
+    notOwned: ?[]const u8,
+    owned: ?String,
+
+    pub inline fn init(notOwned: []const u8) OptString
+    {
+        return OptString
+        {
+            .notOwned = notOwned,
+            .owned = null
+        };
+    }
+    pub inline fn str(self: @This()) []const u8
+    {
+        if (self.notOwned != null)
+        {
+            return self.notOwned.?;
+        }
+        else return self.owned.?.str();
+    }
+    pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
+    {
+        if (self.notOwned != null)
+        {
+            self.owned = try String.init_with_contents(allocator, self.notOwned.?);
+            self.notOwned = null;
+        }
+    }
+    pub inline fn deinit(self: *@This()) void
+    {
+        if (self.owned != null)
+        {
+            self.owned.?.deinit();
+        }
+    }
+};

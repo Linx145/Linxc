@@ -20,7 +20,9 @@ const CompoundStatementData = ast.CompoundStatementData;
 const TypeNameData = ast.TypeNameData;
 
 const std = @import("std");
-const string = @import("zig-string.zig").String;
+const zstr = @import("zig-string.zig");
+const string = zstr.String;
+const OptString = zstr.OptString;
 const lexer = @import("lexer.zig");
 const io = @import("io.zig");
 const Errors = @import("errors.zig").Errors;
@@ -84,13 +86,12 @@ pub const Parser = struct {
     tokenizer: lexer.Tokenizer,
     errorStatements: std.ArrayList(string),
     currentFile: ?[]const u8,
-    database: refl.ReflectionDatabase,
+    database: *refl.ReflectionDatabase,
 
     postParseStatement: ?*const fn(statement: StatementData, parentStatement: *ParserState) anyerror!void,
 
-    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer) anyerror!Self 
+    pub fn init(allocator: std.mem.Allocator, tokenizer: lexer.Tokenizer, db: *refl.ReflectionDatabase) Self 
     {
-        const db = try refl.ReflectionDatabase.init(allocator);
         return Self
         {
             .allocator = allocator,
@@ -150,8 +151,9 @@ pub const Parser = struct {
 
     pub fn AppendToCompoundStatement(self: *Self, result: *CompoundStatementData, statement: StatementData, state: *ParserState) anyerror!void
     {
-        try result.append(statement);
-        //try self.database.PostParseStatement(&statement, state);
+        var stmt = statement;
+        try result.append(stmt);
+        try self.database.PostParseStatement(&stmt, state);
         if (self.postParseStatement != null)
         {
             try self.postParseStatement.?(statement, state);
@@ -172,7 +174,7 @@ pub const Parser = struct {
         var expectSemicolon: bool = false;
 
         var nextTags = std.ArrayList(ExpressionData).init(self.allocator);
-        var nextTemplateTypes: ?[][]const u8 = null;
+        var nextTemplateTypes = std.ArrayList(OptString).init(self.allocator);
         defer nextTags.deinit();
 
         while (true)
@@ -329,7 +331,6 @@ pub const Parser = struct {
                     {
                         try self.WriteError("Expected < after template keyword");
                     }
-                    var typenames = std.ArrayList([]const u8).init(self.allocator);
                     while (true)
                     {
                         next = self.tokenizer.nextUntilValid();
@@ -342,7 +343,7 @@ pub const Parser = struct {
                         {
                             try self.WriteError("Expected identifier");
                         }
-                        try typenames.append(self.SourceTokenSlice(next));
+                        try nextTemplateTypes.append(OptString.init(self.SourceTokenSlice(next)));
                         next = self.tokenizer.nextUntilValid();
                         if (next.id == .Comma)
                         {
@@ -350,7 +351,7 @@ pub const Parser = struct {
                         }
                         else if (next.id == .AngleBracketRight)
                         {
-                            if (typenames.items.len == 0)
+                            if (nextTemplateTypes.items.len == 0)
                             {
                                 try self.WriteError("Expected at least one parameter in the template declaration");
                             }
@@ -362,7 +363,6 @@ pub const Parser = struct {
                         }
                     }
                     //if we get to this point successfully, would have advanced beyond the closing >
-                    nextTemplateTypes = try typenames.toOwnedSlice();
                 },
                 .Keyword_trait =>
                 {
@@ -370,10 +370,10 @@ pub const Parser = struct {
                     {
                         continue;
                     }
-                    if (nextTemplateTypes != null)
+                    if (nextTemplateTypes.items.len > 0)
                     {
                         try self.WriteError("Traits do not currently support templates");
-                        nextTemplateTypes = null;
+                        //nextTemplateTypes = null;
                     }
                     var traitNameToken = self.tokenizer.nextUntilValid();
                     if (traitNameToken.id != .Identifier)
@@ -401,7 +401,7 @@ pub const Parser = struct {
 
                     const traitData = ast.StructData
                     {
-                        .name = traitName,
+                        .name = OptString.init(traitName),
                         .tags = tagsSlice,
                         .body = body,
                         .templateTypes = null
@@ -433,25 +433,86 @@ pub const Parser = struct {
                     try newState.structNames.append(structName);
                     newState.braceCount += 1;
 
-                    const body = try self.Parse(&newState);
-
-                    var tagsSlice: ?[]ExpressionData = null;
-                    if (nextTags.items.len > 0)
+                    if (nextTemplateTypes.items.len == 0)
                     {
-                        tagsSlice = try nextTags.toOwnedSlice();
+                        const body = try self.Parse(&newState);
+
+                        var tagsSlice: ?[]ExpressionData = null;
+                        if (nextTags.items.len > 0)
+                        {
+                            tagsSlice = try nextTags.toOwnedSlice();
+                        }
+
+                        const structData = ast.StructData
+                        {
+                            .name = OptString.init(structName),
+                            .tags = tagsSlice,
+                            .body = body,
+                            .templateTypes = null
+                        };
+                        try self.AppendToCompoundStatement(&result, ast.StatementData
+                        {
+                            .structDeclaration = structData
+                        }, state);
                     }
+                    else
+                    {
+                        const originalAllocator = self.allocator;
 
-                    const structData = ast.StructData
-                    {
-                        .name = structName,
-                        .tags = tagsSlice,
-                        .body = body,
-                        .templateTypes = nextTemplateTypes
-                    };
-                    try self.AppendToCompoundStatement(&result, ast.StatementData
-                    {
-                        .structDeclaration = structData
-                    }, state);
+                        self.allocator = self.database.allocator;
+                        var body = try self.Parse(&newState);
+                        try ast.CompoundStatementToOwned(&body, self.database.allocator);
+                        self.allocator = originalAllocator;
+                        
+                        var tagsSlice: ?[]ExpressionData = null;
+                        if (nextTags.items.len > 0)
+                        {
+                            tagsSlice = try self.database.allocator.alloc(ExpressionData, nextTags.items.len);
+                            var i: usize = 0;
+                            while (i < nextTags.items.len) : (i += 1)
+                            {
+                                tagsSlice.?[i] = nextTags.items[i];
+                                try tagsSlice.?[i].ToOwned(self.database.allocator);
+                            }
+                            nextTags.clearAndFree();
+                        }
+                        var templateTypesSlice: ?[]OptString = null;
+                        if (nextTemplateTypes.items.len > 0)
+                        {
+                            templateTypesSlice = try self.database.allocator.alloc(OptString, nextTemplateTypes.items.len);
+                            var i: usize = 0;
+                            while (i < nextTemplateTypes.items.len) : (i += 1)
+                            {
+                                templateTypesSlice.?[i] = nextTemplateTypes.items[i];
+                                try templateTypesSlice.?[i].ToOwned(self.database.allocator);
+                            }
+                            nextTemplateTypes.clearAndFree();
+                        }
+                        var nameOwned = OptString.init(structName);
+                        try nameOwned.ToOwned(self.database.allocator);
+                        const structData = ast.StructData
+                        {
+                            .name = nameOwned,
+                            .tags = tagsSlice,
+                            .body = body,
+                            .templateTypes = templateTypesSlice
+                        };
+                        const outputC = try string.init_with_contents(self.database.allocator, state.outputC);
+                        const outputH = try string.init_with_contents(self.database.allocator, state.outputHeader);
+                        const linxcFile = try string.init_with_contents(self.database.allocator, state.filename.str());
+                        var currentNamespace = string.init(self.database.allocator);
+                        try state.ConcatNamespaces(&currentNamespace);
+                        //append to storage alongside file name
+                        try self.database.templatedStructs.append(refl.TemplatedStruct
+                        {
+                            .outputC = outputC,
+                            .outputH = outputH,
+                            .allocator = self.database.allocator,
+                            .linxcFile = linxcFile,
+                            .namespace = currentNamespace,
+                            .structData = structData
+                        });
+                    }
                     expectSemicolon = true;
                 },
                 .Bang, .Tilde =>
@@ -592,7 +653,7 @@ pub const Parser = struct {
 
                                 const functionDeclaration = ast.FunctionData
                                 {
-                                    .name = name,
+                                    .name = OptString.init(name),
                                     .args = args,
                                     .returnType = typeName,
                                     .statement = body
@@ -606,7 +667,7 @@ pub const Parser = struct {
                             {
                                 const functionDeclaration = ast.FunctionData
                                 {
-                                    .name = name,
+                                    .name = OptString.init(name),
                                     .args = args,
                                     .returnType = typeName,
                                     .statement = CompoundStatementData.init(self.allocator)
@@ -631,7 +692,7 @@ pub const Parser = struct {
                                 .variableDeclaration = ast.VarData
                                 {
                                     .defaultValue = expr,
-                                    .name = name,
+                                    .name = OptString.init(name),
                                     .isConst = false,
                                     .typeName = typeName,
                                     .isStatic = nextIsStatic
@@ -647,7 +708,7 @@ pub const Parser = struct {
                                 .variableDeclaration = ast.VarData
                                 {
                                     .defaultValue = null,
-                                    .name = name,
+                                    .name = OptString.init(name),
                                     .isConst = false,
                                     .typeName = typeName,
                                     .isStatic = nextIsStatic
@@ -673,7 +734,6 @@ pub const Parser = struct {
                         {
                             .Variable = typeName
                         };
-                        std.debug.print("var: {s}\n", .{typeName.fullName});
                         var expr = try self.ParseExpression(primary, 0);
 
                         try self.AppendToCompoundStatement(&result, StatementData
@@ -737,7 +797,7 @@ pub const Parser = struct {
                                     .NamespaceStatement = ast.NamespaceData
                                     {
                                         .body = body,
-                                        .name = self.SourceSlice(namespaceNameStart.?, namespaceNameEnd)
+                                        .name = OptString.init(self.SourceSlice(namespaceNameStart.?, namespaceNameEnd))
                                     }
                                 }, state);
                                 break;
@@ -864,7 +924,7 @@ pub const Parser = struct {
                     }
                     const variableData = VarData
                     {
-                        .name = variableName.?,
+                        .name = OptString.init(variableName.?),
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
                         .defaultValue = defaultValueExpr,
@@ -950,7 +1010,7 @@ pub const Parser = struct {
                     }
                     const variableData = VarData
                     {
-                        .name = variableName.?,
+                        .name = OptString.init(variableName.?),
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
                         .defaultValue = defaultValueExpr,
@@ -979,7 +1039,7 @@ pub const Parser = struct {
 
                     const variableData = VarData
                     {
-                        .name = variableName.?,
+                        .name = OptString.init(variableName.?),
                         .typeName = variableType.?,
                         .isConst = nextIsConst,
                         .defaultValue = expression,
@@ -1088,9 +1148,10 @@ pub const Parser = struct {
     {
         var result: TypeNameData = TypeNameData
         {
-            .name = "",
-            .fullName = "",
-            .namespace = "",
+            .allocator = self.allocator,
+            .name = OptString.init(""),
+            .fullName = OptString.init(""),
+            .namespace = OptString.init(""),
             .templateTypes = null,
             .pointerCount = 0,
             .next = null
@@ -1156,13 +1217,13 @@ pub const Parser = struct {
                     {
                         expectConnectorNext = true;
                         pendingNamespaceEnd = token.end;
-                        result.name = self.SourceTokenSlice(token);
+                        result.name.notOwned = self.SourceTokenSlice(token);
                     }
                     else
                     {
                         if (pendingNamespaceEnd > namespaceStart.?)
                         {
-                            result.namespace = self.SourceSlice(namespaceStart.?, pendingNamespaceEnd);
+                            result.namespace.notOwned = self.SourceSlice(namespaceStart.?, pendingNamespaceEnd);
                         }
                     }
                     
@@ -1177,7 +1238,7 @@ pub const Parser = struct {
                     while (true)
                     {
                         var templateType = try self.ParseTypeName(true);
-                        if (templateType.name.len > 0)
+                        if (templateType.name.str().len > 0)
                         {
                             //chance that the user declares typename<>, to deal with how this is done later
                             //legal in languages like c# for generic reflection, might not have a use in linxc
@@ -1207,6 +1268,7 @@ pub const Parser = struct {
                         const nextInChain: TypeNameData = try self.ParseTypeName(parsePointer);
                         //move to heap
                         var onHeap: *TypeNameData = try self.allocator.create(TypeNameData);
+                        onHeap.allocator = nextInChain.allocator;
                         onHeap.fullName = nextInChain.fullName;
                         onHeap.name = nextInChain.name;
                         onHeap.namespace = nextInChain.namespace;
@@ -1225,7 +1287,7 @@ pub const Parser = struct {
             }
         }
         result.pointerCount = pointerCount;
-        result.fullName = self.SourceSlice(fullNameStart.?, fullNameEnd);
+        result.fullName.notOwned = self.SourceSlice(fullNameStart.?, fullNameEnd);
         return result;
     }
 
@@ -1239,10 +1301,6 @@ pub const Parser = struct {
         //type_name*[]: invalid
         //type_name variable = type_name*: invalid
         var typeName = try self.ParseTypeName(false);
-        //var typeName = try self.ParseTypeName();
-        //var identifierName = self.GetFullIdentifier(false);
-        // var typeNameEnd: usize = self.GetFullIdentifier(false) orelse self.tokenizer.index;
-        // var identifierName = self.SourceSlice(currentToken.start, typeNameEnd);
 
         var token = self.tokenizer.peekNextUntilValid();
         if (token.id == .LParen)
@@ -1340,6 +1398,7 @@ pub const Parser = struct {
         }
         else if (token.id == .Asterisk or token.id == .Minus or token.id == .Bang or token.id == .Ampersand or token.id == .Tilde)
         {
+            //all errors at this point is for type system to check, aka not my problem (yet)
             var op = ast.TokenToOperator.get(@tagName(token.id)).?;
             var nextPrimary = try self.ParseExpression_Primary();
             var result = try self.ParseExpression(nextPrimary, 4);
@@ -1359,28 +1418,31 @@ pub const Parser = struct {
         }
         else if (token.id == .IntegerLiteral or token.id == .StringLiteral or token.id == .FloatLiteral or token.id == .CharLiteral or token.id == .Keyword_true or token.id == .Keyword_false)
         {
-            return ExpressionData
+            var result = ExpressionData
             {
-                .Literal = self.SourceTokenSlice(token)
+                .Literal = OptString.init(self.SourceTokenSlice(token))
             };
+            return result;
         }
         else if (token.id == .Identifier)
         {
             self.tokenizer.index = self.tokenizer.prevIndex;
-            return self.ParseExpression_Identifier();
+            var result = self.ParseExpression_Identifier();
+            return result;
         }
         else if (lexer.IsPrimitiveType(token.id))
         {
             self.tokenizer.index = token.start;
             var nextTypeName = try self.ParseTypeName(true);
-            return ExpressionData
+            //primitive type identifier can't be anything but typecast
+            var result = ExpressionData
             {
                 .TypeCast = ast.TypeCastData
                 {
-                    .typeName = nextTypeName,
-                    .pointerCount = 0
+                    .typeName = nextTypeName
                 }
             };
+            return result;
         }
         else
         {
@@ -1401,31 +1463,31 @@ pub const Parser = struct {
             }
             _ = self.tokenizer.next();
 
-            const peekNextID = self.tokenizer.peekNext().id;
-            if (op.id == .Asterisk and peekNextID == .RParen or peekNextID == .Asterisk)
-            {
-                if (lhs == .TypeCast)
-                {
-                    lhs.TypeCast.pointerCount += 1;
-                }
-                else if (lhs == .Variable)
-                {
-                    lhs = ExpressionData
-                    {
-                        .TypeCast = ast.TypeCastData
-                        {
-                            .typeName = lhs.Variable,
-                            .pointerCount = 1
-                        }
-                    };
-                }
-                else
-                {
-                    try self.WriteError("Syntax Error: Attempting to convert non-type name into a pointer");
-                    return Errors.SyntaxError;
-                }
-                continue;
-            }
+            // const peekNextID = self.tokenizer.peekNext().id;
+            // if (op.id == .Asterisk and peekNextID == .RParen or peekNextID == .Asterisk)
+            // {
+            //     if (lhs == .TypeCast)
+            //     {
+            //         lhs.TypeCast.pointerCount += 1;
+            //     }
+            //     else if (lhs == .Variable)
+            //     {
+            //         lhs = ExpressionData
+            //         {
+            //             .TypeCast = ast.TypeCastData
+            //             {
+            //                 .typeName = lhs.Variable,
+            //                 .pointerCount = 1
+            //             }
+            //         };
+            //     }
+            //     else
+            //     {
+            //         try self.WriteError("Syntax Error: Attempting to convert non-type name into a pointer");
+            //         return Errors.SyntaxError;
+            //     }
+            //     continue;
+            // }
             var rhs = try self.ParseExpression_Primary();
 
             while (true)

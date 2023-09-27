@@ -9,8 +9,27 @@ const parsing = @import("parser-state.zig");
 const StatementDataTag = ast.StatementDataTag;
 const StatementData = ast.StatementData;
 
+pub const TemplatedStruct = struct
+{
+    allocator: std.mem.Allocator,
+    structData: ast.StructData,
+    linxcFile: string,
+    outputC: string,
+    outputH: string,
+    namespace: string,
+
+    pub inline fn deinit(self: *@This()) void
+    {
+        self.outputC.deinit();
+        self.outputH.deinit();
+        self.structData.deinit(self.allocator);
+        self.linxcFile.deinit();
+        self.namespace.deinit();
+    }
+};
 pub const ReflectionDatabase = struct
 {
+    templatedStructs: std.ArrayList(TemplatedStruct),
     types: std.ArrayList(LinxcType),
     nameToType: std.StringHashMap(usize),
     allocator: std.mem.Allocator,
@@ -21,6 +40,7 @@ pub const ReflectionDatabase = struct
         var result: ReflectionDatabase = ReflectionDatabase {
             .allocator = allocator,
             .nameToType = std.StringHashMap(usize).init(allocator),
+            .templatedStructs = std.ArrayList(TemplatedStruct).init(allocator),
             .types = std.ArrayList(LinxcType).init(allocator),
             .currentID = 1
         };
@@ -46,10 +66,15 @@ pub const ReflectionDatabase = struct
         }
         self.types.deinit();
         self.nameToType.deinit();
+        for (self.templatedStructs.items) |*templatedStruct|
+        {
+            templatedStruct.deinit();
+        }
+        self.templatedStructs.deinit();
     }
-    pub inline fn GetType(self: *@This(), name: ast.TypeNameData) Errors!*LinxcType
+    pub inline fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
     {
-        const index = self.nameToType.get(name.fullName);
+        const index = self.nameToType.get(name);
         if (index != null)
         {
             return &self.types.items[index.?];
@@ -80,7 +105,7 @@ pub const ReflectionDatabase = struct
     }
     pub inline fn GetTypeSafe(self: *@This(), name: []const u8) anyerror!*LinxcType
     {
-        if (!self.nameToType.contains(name.fullName))
+        if (!self.nameToType.contains(name))
         {
             const nameStr = try string.init_with_contents(self.allocator, name);
             try self.AddType(LinxcType
@@ -117,7 +142,7 @@ pub const ReflectionDatabase = struct
     }
     pub inline fn GetVariable(self: *@This(), variableTypeName: ast.TypeNameData, variableName: []const u8) anyerror!LinxcVariable
     {
-        const variableType: *LinxcType = try self.GetTypeSafe(variableTypeName.fullName);
+        const variableType: *LinxcType = try self.GetTypeSafe(variableTypeName.fullName.str());
 
         const variableNameStr = try string.init_with_contents(self.allocator, variableName);
 
@@ -135,9 +160,12 @@ pub const ReflectionDatabase = struct
             //cannot use fullname here as it would contain the templates
             var baseName: string = string.init(self.allocator);
             defer baseName.deinit();
-            try baseName.append(typeName.namespace);
-            try baseName.append("::");
-            try baseName.append(typeName.name);
+            if (typeName.namespace.str().len > 0)
+            {
+                try baseName.concat(typeName.namespace.str());
+                try baseName.concat("::");
+            }
+            try baseName.concat(typeName.name.str());
 
             var linxcType = try self.GetTypeSafe(baseName.str());
             var i: usize = 0;
@@ -145,16 +173,56 @@ pub const ReflectionDatabase = struct
             {
                 const templateType: *ast.TypeNameData = &typeName.templateTypes.?.items[i];
                 //parse child as well, in case it is another templated type
-                self.CheckTypeName(templateType);
+                try self.CheckTypeName(templateType);
+
                 //can use fullname here
-                const templateTypeNameStr = try string.init_with_contents(self.allocator, templateType.fullName);
+                //edit: turns out we can't
+                const templateTypeNameStr = try string.init_with_contents(self.allocator, templateType.fullName.str());
                 try linxcType.templateSpecializations.append(templateTypeNameStr);
+            }
+            //dont check next as if there exists a next, it must be a static variable
+            //namespace::type<spec>::namespace::var
+            //or namespace::type<spec>::nestedtype::var does not exist
+        }
+    }
+    pub fn PostParseExpression(self: *@This(), expr: *ast.ExpressionData) anyerror!void
+    {
+        switch (expr.*)
+        {
+            .Variable => |*variable|
+            {
+                try self.CheckTypeName(variable);
+            },
+            .Literal =>
+            {
+
+            },
+            .ModifiedVariable => |*modifiedVariable|
+            {
+                try self.PostParseExpression(&modifiedVariable.*.expression);
+            },
+            .Op => |*operator|
+            {
+                try self.PostParseExpression(&operator.*.leftExpression);
+                try self.PostParseExpression(&operator.*.rightExpression);
+            },
+            .FunctionCall =>// |*funcCall|
+            {
+                //self.checkFunctionName
+            },
+            .IndexedAccessor =>// |*indexedAccessor|
+            {
+                //self.checkFunctionName
+            },
+            .TypeCast => |*typeCast|
+            {
+                try self.CheckTypeName(&typeCast.*.typeName);
             }
         }
     }
     pub fn PostParseStatement(self: *@This(), statement: *StatementData, state: *parsing.ParserState) anyerror!void
     {
-        switch (statement)
+        switch (statement.*)
         {
             .structDeclaration => |*structDeclaration|
             {
@@ -164,20 +232,30 @@ pub const ReflectionDatabase = struct
 
                 var fullName = string.init(self.allocator);
                 defer fullName.deinit();
-                try fullName.concat(namespaceName.str());
-                try fullName.concat("::");
-                try fullName.concat(structDeclaration.name);
-
-                var structType = try self.GetTypeSafe(fullName);
-                for (structDeclaration.templateTypes.?) |templateType|
+                if (namespaceName.str().len > 0)
                 {
-                    const templateTypeName = try string.init_with_contents(self.allocator, templateType);
-                    try structType.genericTypes.append(templateTypeName);
+                    try fullName.concat(namespaceName.str());
+                    try fullName.concat("::");
+                }
+                try fullName.concat(structDeclaration.name.str());
+
+                var structType = try self.GetTypeSafe(fullName.str());
+                if (structDeclaration.templateTypes != null)
+                {
+                    for (structDeclaration.templateTypes.?) |templateType|
+                    {
+                        const templateTypeName = try string.init_with_contents(self.allocator, templateType.str());
+                        try structType.genericTypes.append(templateTypeName);
+                    }
                 }
             },
             .variableDeclaration => |*varDecl|
             {
                 try self.CheckTypeName(&varDecl.typeName);
+            },
+            .otherExpression => |*otherExpression|
+            {
+                try self.PostParseExpression(otherExpression);
             },
             else =>
             {
@@ -316,7 +394,7 @@ pub const LinxcType = struct
             variable.deinit();
         }
         self.variables.deinit();
-        for (self.genericTypes.items) |genericType|
+        for (self.genericTypes.items) |*genericType|
         {
             genericType.deinit();
         }

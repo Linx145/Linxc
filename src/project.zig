@@ -4,6 +4,7 @@ const transpiler = @import("transpiler.zig");
 //const reflector = @import("reflector.zig");
 const ast = @import("ASTnodes.zig");
 const lexer = @import("lexer.zig");
+const refl = @import("reflector.zig");
 const parsers = @import("parser.zig");
 const parserStates = @import("parser-state.zig");
 const Parser = parsers.Parser;
@@ -69,11 +70,11 @@ pub const project = struct {
 
     pub fn Compile(self: *Self, outputPath: []const u8) !void
     {
-        //reflector.globalDatabase = try reflector.ReflectionDatabase.init(self.allocator);
-        var parser: Parser = try Parser.init(self.allocator, lexer.Tokenizer
+        var database: refl.ReflectionDatabase = try refl.ReflectionDatabase.init(self.allocator);
+        var parser: Parser = Parser.init(self.allocator, lexer.Tokenizer
         {
             .buffer = ""
-        });
+        }, &database);
         //parser.postParseStatement = reflector.PostParseStatement;
 
         //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
@@ -129,8 +130,13 @@ pub const project = struct {
             parser.currentFile = self.linxcFiles.items[i].str();
             parser.tokenizer.currentLine = 0;
             parser.tokenizer.charsParsed = 0;
+
+            const parserStateFilename = try string.init_with_contents(alloc, originalFilePath.str());
             var parserState = ParserState
             {
+                .outputC = cppFilePath.str(),
+                .outputHeader = hFilePath.str(),
+                .filename = parserStateFilename,
                 .context = ParseContext.other,
                 .namespaces = std.ArrayList([]const u8).init(alloc),
                 .structNames = std.ArrayList([]const u8).init(alloc),
@@ -156,7 +162,7 @@ pub const project = struct {
             _ = try cppWriter.write("#include <");
             _ = try cppWriter.write(headerName.str());
             _ = try cppWriter.write(">\n");
-            try transpiler.TranspileStatementCpp(cppWriter, result, true, "", self.allocator);
+            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "");
             cppFile.close();
 
 
@@ -164,14 +170,39 @@ pub const project = struct {
             var hFile: std.fs.File = try std.fs.createFileAbsolute(hFilePath.str(), .{.truncate = true});
             var hWriter = hFile.writer();
             _ = try hWriter.write("#pragma once\n");
-            try transpiler.TranspileStatementH(hWriter, result, self.allocator);
+            try transpiler.TranspileStatementH(alloc, hWriter, result, &database, null);
             hFile.close();
 
 
             ast.ClearCompoundStatement(&result);
         }
+        //go through files one more time and append to them the instantiated structs
+        for (database.templatedStructs.items) |*templatedStruct|
+        {
+            var cppFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputC.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+            try cppFile.seekFromEnd(0);
+            var cppWriter = cppFile.writer();
+            
+            var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+            try hFile.seekFromEnd(0);
+            var hWriter = hFile.writer();
+
+            try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
+
+            cppFile.close();
+            hFile.close();
+        }
+
         parser.deinit();
-        //reflector.globalDatabase.?.deinit();
+        //test that memory has been correctly transferred
+        // for (database.templatedStructs.items) |*templatedStruct|
+        // {
+        //     const structData: *ast.StructData = &templatedStruct.structData;
+        //     var str = try ast.CompoundStatementToString(&structData.*.body, std.heap.c_allocator);
+        //     defer str.deinit();
+        //     std.debug.print("{s}\n", .{str.str()});
+        // }
+        database.deinit();
     }
     // pub fn Reflect(self: *Self, outputFile: []const u8) !void
     // {
