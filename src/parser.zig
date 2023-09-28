@@ -543,6 +543,10 @@ pub const Parser = struct {
                     }, state);
                     expectSemicolon = true;
                 },
+                .Keyword_sizeof => {
+                    try self.WriteError("Random sizeof expression detected");
+                    //no secondary
+                },
                 .Identifier, .Keyword_void, .Keyword_bool, .Keyword_i8, .Keyword_i16, .Keyword_i32, .Keyword_i64, .Keyword_u8, .Keyword_u16, .Keyword_u32, .Keyword_u64, .Keyword_float, .Keyword_double, .Keyword_char =>
                 {
                     if (skipThisLine)
@@ -1307,6 +1311,7 @@ pub const Parser = struct {
         var typeName = try self.ParseTypeName(false);
 
         var token = self.tokenizer.peekNextUntilValid();
+        //function call
         if (token.id == .LParen)
         {
             _ = self.tokenizer.nextUntilValid(); //advance beyond the (
@@ -1428,6 +1433,57 @@ pub const Parser = struct {
             };
             return result;
         }
+        else if (token.id == .Keyword_sizeof)
+        {
+            if (self.tokenizer.nextUntilValid().id != .LParen)
+            {
+                try self.WriteError("Expected () after sizeof keyword");
+            }
+            var typeName: ast.TypeNameData = try self.ParseTypeName(true);
+            if (self.tokenizer.nextUntilValid().id != .RParen)
+            {
+                try self.WriteError("Expected ) after sizeof(type name");
+            }
+
+            return ExpressionData
+            {
+                .sizeOf = typeName
+            };
+        }
+        else if (token.id == .Keyword_typeof)
+        {
+            if (self.tokenizer.nextUntilValid().id != .LParen)
+            {
+                try self.WriteError("Expected () after typeof keyword");
+            }
+            var typeName: ast.TypeNameData = try self.ParseTypeName(true);
+            if (self.tokenizer.nextUntilValid().id != .RParen)
+            {
+                try self.WriteError("Expected ) after typeof(type name");
+            }
+
+            return ExpressionData
+            {
+                .sizeOf = typeName
+            };
+        }
+        else if (token.id == .Keyword_nameof)
+        {
+            if (self.tokenizer.nextUntilValid().id != .LParen)
+            {
+                try self.WriteError("Expected () after nameof keyword");
+            }
+            var typeName: ast.TypeNameData = try self.ParseTypeName(true);
+            if (self.tokenizer.nextUntilValid().id != .RParen)
+            {
+                try self.WriteError("Expected ) after nameof(type");
+            }
+
+            return ExpressionData
+            {
+                .sizeOf = typeName
+            };
+        }
         else if (token.id == .Identifier)
         {
             self.tokenizer.index = self.tokenizer.prevIndex;
@@ -1438,7 +1494,6 @@ pub const Parser = struct {
         {
             self.tokenizer.index = token.start;
             var nextTypeName = try self.ParseTypeName(true);
-            //primitive type identifier can't be anything but typecast
             var result = ExpressionData
             {
                 .TypeCast = ast.TypeCastData

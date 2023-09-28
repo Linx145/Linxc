@@ -1,14 +1,27 @@
 #include <Vector2.linxc>
 #include <Type.linxc>
+#include <Array.linxc>
 #include <stdlib.h>
 
 i32 main()
 {
-    Type<Numerics::Vector2>::ID = 1;
-    Type<i32>::ID = 2;
+    Array<float> floatArray;
+    floatArray.length = 3;
+    floatArray.ptr = (float*)malloc(sizeof(float) * 3);
+    floatArray.ptr[0] = 0.0f;
+    floatArray.ptr[1] = 0.5f;
+    floatArray.ptr[2] = 0.9f;
 
-    Type<Numerics::Vector2>::PrintID();
-    Type<i32>::PrintID();
+    printf("%f\n", floatArray.ptr[2]);
+
+    Numerics::Vector2 globalInstance;
+    globalInstance.x = 3.0f;
+    globalInstance.y = 2.5f;
+    Type<Numerics::Vector2>::globalInstance = globalInstance;
+
+    printf("%f\n", Type<Numerics::Vector2>::globalInstance.x);
+
+    //am lazy to free
     //printf("%u\n", Type<Numerics::Vector2>::ID);
     //printf("%u\n", Type<i32>::ID);
 

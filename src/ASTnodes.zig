@@ -317,7 +317,10 @@ pub const ExpressionDataTag = enum
     Op,
     FunctionCall,
     IndexedAccessor,
-    TypeCast
+    TypeCast,
+    sizeOf,
+    nameOf,
+    typeOf
 };
 pub const ExpressionData = union(ExpressionDataTag)
 {
@@ -328,6 +331,9 @@ pub const ExpressionData = union(ExpressionDataTag)
     FunctionCall: *FunctionCallData,
     IndexedAccessor: *FunctionCallData,
     TypeCast: TypeCastData,
+    sizeOf: TypeNameData,
+    nameOf: TypeNameData,
+    typeOf: TypeNameData,
 
     pub inline fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
     {
@@ -360,6 +366,18 @@ pub const ExpressionData = union(ExpressionDataTag)
             .TypeCast => |*typeCast|
             {
                 try typeCast.*.ToOwned(allocator);
+            },
+            .sizeOf => |*sizeOf|
+            {
+                try sizeOf.*.ToOwned(allocator);
+            },
+            .nameOf => |*nameOf|
+            {
+                try nameOf.*.ToOwned(allocator);
+            },
+            .typeOf => |*typeOf|
+            {
+                try typeOf.*.ToOwned(allocator);
             }
         }
     }
@@ -398,6 +416,18 @@ pub const ExpressionData = union(ExpressionDataTag)
             .TypeCast => |*typecast|
             {
                 typecast.*.deinit();
+            },
+            .sizeOf => |*sizeOf|
+            {
+                sizeOf.*.deinit();
+            },
+            .nameOf => |*nameOf|
+            {
+                nameOf.*.deinit();
+            },
+            .typeOf => |*typeOf|
+            {
+                typeOf.*.deinit();
             }
         }
     }
@@ -435,6 +465,18 @@ pub const ExpressionData = union(ExpressionDataTag)
             .TypeCast => |*typeCast|
             {
                 return typeCast.ToString(allocator);
+            },
+            .sizeOf => |*sizeOf|
+            {
+                try sizeOf.ToString(allocator);
+            },
+            .nameOf => |*nameOf|
+            {
+                try nameOf.ToString(allocator);
+            },
+            .typeOf => |*typeOf|
+            {
+                try typeOf.ToString(allocator);
             }
         }
     }

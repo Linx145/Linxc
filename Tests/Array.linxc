@@ -1,0 +1,8 @@
+#include <Linxc.h>
+
+template<typename T>
+struct Array
+{
+    T *ptr;
+    u32 length;
+};

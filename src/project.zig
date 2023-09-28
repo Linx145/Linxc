@@ -80,6 +80,7 @@ pub const project = struct {
         //let rootPath be "C:\Users\Linus\source\repos\Linxc\Tests"
         //let outputPath be "C:\Users\Linus\source\repos\Linxc\linxc-out"
         var i: usize = 0;
+        var stopCompilation: bool = false;
         while (i < self.linxcFiles.items.len) : (i += 1)
         {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
@@ -153,6 +154,7 @@ pub const project = struct {
                 {
                     std.debug.print("{s}\n", .{errorStatement.str()});
                 }
+                stopCompilation = true;
                 break;
             };
 
@@ -162,7 +164,7 @@ pub const project = struct {
             _ = try cppWriter.write("#include <");
             _ = try cppWriter.write(headerName.str());
             _ = try cppWriter.write(">\n");
-            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "", &database);
+            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "", &database, null);
             cppFile.close();
 
 
@@ -176,21 +178,24 @@ pub const project = struct {
 
             ast.ClearCompoundStatement(&result);
         }
-        //go through files one more time and append to them the instantiated structs
-        for (database.templatedStructs.items) |*templatedStruct|
+        if (!stopCompilation)
         {
-            var cppFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputC.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
-            try cppFile.seekFromEnd(0);
-            var cppWriter = cppFile.writer();
-            
-            var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
-            try hFile.seekFromEnd(0);
-            var hWriter = hFile.writer();
+            //go through files one more time and append to them the instantiated structs
+            for (database.templatedStructs.items) |*templatedStruct|
+            {
+                var cppFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputC.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+                try cppFile.seekFromEnd(0);
+                var cppWriter = cppFile.writer();
+                
+                var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+                try hFile.seekFromEnd(0);
+                var hWriter = hFile.writer();
 
-            try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
+                try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
 
-            cppFile.close();
-            hFile.close();
+                cppFile.close();
+                hFile.close();
+            }
         }
 
         parser.deinit();

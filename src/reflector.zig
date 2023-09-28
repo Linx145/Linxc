@@ -245,6 +245,18 @@ pub const ReflectionDatabase = struct
             .TypeCast => |*typeCast|
             {
                 try self.CheckTypeName(&typeCast.*.typeName);
+            },
+            .sizeOf => |*sizeOf|
+            {
+                try self.CheckTypeName(sizeOf);
+            },
+            .nameOf => |*nameOf|
+            {
+                try self.CheckTypeName(nameOf);
+            },
+            .typeOf => |*typeOf|
+            {
+                try self.CheckTypeName(typeOf);
             }
         }
     }
