@@ -497,6 +497,15 @@ pub const Parser = struct {
                             .body = body,
                             .templateTypes = templateTypesSlice
                         };
+
+                        var tempStatement = StatementData
+                        {
+                            .structDeclaration = structData
+                        };
+                        //call PostParseStatement on the struct even though we ain't adding it to the compound statement
+                        //necessary to invoke type generation/finalisation and other methods
+                        try self.database.PostParseStatement(&tempStatement, state);
+
                         const outputC = try string.init_with_contents(self.database.allocator, state.outputC);
                         const outputH = try string.init_with_contents(self.database.allocator, state.outputHeader);
                         const linxcFile = try string.init_with_contents(self.database.allocator, state.filename.str());
@@ -973,6 +982,7 @@ pub const Parser = struct {
                 {
                     //detect variable type
                     variableType = try self.ParseTypeName(true);
+                    try self.database.CheckTypeName(&variableType.?);
                     //var typeNameEnd: usize = self.GetFullIdentifier(true) orelse token.end;
                     //variableType = self.SourceSlice(token.start, typeNameEnd);
                 }
@@ -1136,19 +1146,12 @@ pub const Parser = struct {
                 var primary = try self.ParseExpression_Primary();
                 var expr = try self.ParseExpression(primary, 0);
                 
-                params.append(expr)
-                catch
-                {
-                    return Errors.OutOfMemoryError;
-                };
+                try params.append(expr);
+
             }
             token = self.tokenizer.nextUntilValid();
         }
-        var ownedSlice = params.toOwnedSlice()
-        catch
-        {
-            return Errors.OutOfMemoryError;
-        };
+        var ownedSlice = try params.toOwnedSlice();
         return ownedSlice;
     }
 

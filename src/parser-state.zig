@@ -14,6 +14,7 @@ pub const ParserState = struct
 {
     filename: string,
     outputHeader: []const u8,
+    outputHeaderIncludePath: []const u8,
     outputC: []const u8,
     context: ParseContext,
     namespaces: std.ArrayList([]const u8),
@@ -69,6 +70,7 @@ pub const ParserState = struct
 
         return ParserState
         {
+            .outputHeaderIncludePath = self.outputHeaderIncludePath,
             .outputHeader = self.outputHeader,
             .outputC = self.outputC,
             .filename = filename,

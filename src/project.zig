@@ -135,6 +135,7 @@ pub const project = struct {
             const parserStateFilename = try string.init_with_contents(alloc, originalFilePath.str());
             var parserState = ParserState
             {
+                .outputHeaderIncludePath = headerName.str(),
                 .outputC = cppFilePath.str(),
                 .outputHeader = hFilePath.str(),
                 .filename = parserStateFilename,
@@ -187,26 +188,57 @@ pub const project = struct {
                 try cppFile.seekFromEnd(0);
                 var cppWriter = cppFile.writer();
                 
-                var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
-                try hFile.seekFromEnd(0);
+                //issue: header definitions needs to be appended at the start of the file instead of at the back
+                //in case there is a mention of the templated struct in the original linxc file,
+                //it will depend on the template specializations to be in front of it
+                //however, we also can't just append to the start of the file as we will require the original file's
+                //include directories in case those mentions of the specialized templates depend on the headers.
+                
+                var oldHFile = try io.ReadFile(templatedStruct.outputH.str(), self.allocator);
+                defer self.allocator.free(oldHFile);
+
+                var miniLexer = lexer.Tokenizer
+                {
+                    .buffer = oldHFile
+                };
+                while (true)
+                {
+                    var next = miniLexer.peekNextUntilValid();
+                    if (next.id == .Hash)
+                    {
+                        while (true)
+                        {
+                            next = miniLexer.next();
+                            miniLexer.index = next.end;
+                            if (next.id == .Nl or next.id == .Eof)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                const includes = oldHFile[0..miniLexer.index];
+                const restOfFile = oldHFile[miniLexer.index..oldHFile.len];
+                //var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+                
+                //var hWriter = hFile.writer();
+                var hFile: std.fs.File = try std.fs.createFileAbsolute(templatedStruct.outputH.str(), .{.truncate = true});
                 var hWriter = hFile.writer();
-
+                _ = try hWriter.write(includes);
+                _ = try hWriter.write("\n");
                 try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
-
+                _ = try hWriter.write("\n");
+                _ = try hWriter.write(restOfFile);
                 cppFile.close();
                 hFile.close();
             }
         }
 
         parser.deinit();
-        //test that memory has been correctly transferred
-        // for (database.templatedStructs.items) |*templatedStruct|
-        // {
-        //     const structData: *ast.StructData = &templatedStruct.structData;
-        //     var str = try ast.CompoundStatementToString(&structData.*.body, std.heap.c_allocator);
-        //     defer str.deinit();
-        //     std.debug.print("{s}\n", .{str.str()});
-        // }
         database.deinit();
     }
     // pub fn Reflect(self: *Self, outputFile: []const u8) !void

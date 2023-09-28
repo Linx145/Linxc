@@ -91,6 +91,7 @@ pub const ReflectionDatabase = struct
         {
             .ID = self.currentID,
             .name = nameStr,
+            .headerFile = null,
             .functions = std.ArrayList(LinxcFunc).init(self.allocator),
             .variables = std.ArrayList(LinxcVariable).init(self.allocator),
             .isPrimitiveType = true,
@@ -112,6 +113,7 @@ pub const ReflectionDatabase = struct
             {
                 .name = nameStr,
                 .ID = self.currentID,
+                .headerFile = null,
                 .functions = std.ArrayList(LinxcFunc).init(self.allocator),
                 .variables = std.ArrayList(LinxcVariable).init(self.allocator),
                 .isPrimitiveType = false,
@@ -204,8 +206,9 @@ pub const ReflectionDatabase = struct
                 //edit: turns out we can't
                 //anyways, we really should be mangling these into non-english
                 var templateType = try self.GetTypeFromDataSafe(templateTypeName);
-                //try self.TypenameToUseableString(templateType, self.allocator);
                 
+                //also need to append the file that templateType is defined in, in case
+                //we need to #include it during the specialized template transpilation
                 try baseType.templateSpecializations.append(templateType);
             }
             //dont check next as if there exists a next, it must be a static variable
@@ -280,6 +283,8 @@ pub const ReflectionDatabase = struct
                 try fullName.concat(structDeclaration.name.str());
 
                 var structType = try self.GetTypeSafe(fullName.str());
+                structType.headerFile = try string.init_with_contents(self.allocator, state.outputHeaderIncludePath);
+                
                 if (structDeclaration.templateTypes != null)
                 {
                     for (structDeclaration.templateTypes.?) |templateType|
@@ -415,6 +420,7 @@ pub const LinxcType = struct
 {
     name: string,
     ID: usize,
+    headerFile: ?string,
     functions: std.ArrayList(LinxcFunc),
     variables: std.ArrayList(LinxcVariable),
     isPrimitiveType: bool,
@@ -458,6 +464,8 @@ pub const LinxcType = struct
     {
         self.implsTraits.deinit();
         self.implementedBy.deinit();
+        if (self.headerFile != null)
+            self.headerFile.?.deinit();
 
         self.name.deinit();
         for (self.functions.items) |*function|

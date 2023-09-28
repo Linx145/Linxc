@@ -6,3 +6,7 @@ struct Array
     T *ptr;
     u32 length;
 };
+
+void ArrayLengthPrinter(Array<double> floatArray)
+{
+}

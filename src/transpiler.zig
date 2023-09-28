@@ -496,6 +496,28 @@ pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.Fil
         var genericMap = std.StringHashMap([]const u8).init(allocator);
 
         var j: usize = 0;
+        var alreadyIncludedHeaders = std.StringHashMap(void).init(allocator);
+        if (genericType.headerFile != null)
+        {
+            std.debug.print("generic type {s} implemented in header {s}\n", .{genericTypeName.str(), genericType.headerFile.?.str()});
+            try alreadyIncludedHeaders.put(genericType.headerFile.?.str(), {});
+        }
+        while (j < genericType.templateSpecializations.items.len) : (j += 1)
+        {
+            if (genericType.templateSpecializations.items[j].headerFile != null and 
+            !alreadyIncludedHeaders.contains(genericType.templateSpecializations.items[j].headerFile.?.str()))
+            {
+                const headerFileStr = genericType.templateSpecializations.items[j].headerFile.?.str();
+                _ = try hwriter.write("#include <");
+                _ = try hwriter.write(headerFileStr);
+                _ = try hwriter.write(">\n");
+                try alreadyIncludedHeaders.put(headerFileStr, {});
+            }
+        }
+
+        alreadyIncludedHeaders.deinit();
+
+        j = 0;
         const genericTypeArgsCount: usize = templatedStruct.structData.templateTypes.?.len;
         //collect (generic type arguments count) specializations from genericType.templateSpecializations
         while (j < genericType.templateSpecializations.items.len)
