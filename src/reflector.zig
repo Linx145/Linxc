@@ -99,7 +99,7 @@ pub const ReflectionDatabase = struct
             .implementedBy = std.ArrayList(*LinxcType).init(self.allocator),
             .genericTypes = std.ArrayList(string).init(self.allocator),
             .pointerCount = 0,
-            .templateSpecializations = std.ArrayList(string).init(self.allocator)
+            .templateSpecializations = std.ArrayList(*LinxcType).init(self.allocator)
         });
         self.currentID += 1;
     }
@@ -120,11 +120,36 @@ pub const ReflectionDatabase = struct
                 .implementedBy = std.ArrayList(*LinxcType).init(self.allocator),
                 .genericTypes = std.ArrayList(string).init(self.allocator),
                 .pointerCount = 0,
-                .templateSpecializations = std.ArrayList(string).init(self.allocator)
+                .templateSpecializations = std.ArrayList(*LinxcType).init(self.allocator)
             });
             self.currentID += 1;
         }
         return self.GetType(name);
+    }
+    pub fn GetTypeFromDataSafe(self: *@This(), typename: *ast.TypeNameData) anyerror!*LinxcType
+    {
+        var name = string.init(self.allocator);
+        defer name.deinit();
+        if (typename.namespace.str().len > 0)
+        {
+            try name.concat(typename.namespace.str());
+            try name.concat("::");
+        }
+        try name.concat(typename.name.str());
+        if (typename.templateTypes != null)
+        {
+            var i: usize = 0;
+            while (i < typename.templateTypes.?.items.len) : (i += 1)
+            {
+                const templateTypeName: *ast.TypeNameData = &typename.templateTypes.?.items[i];
+                const templateType = try self.GetTypeFromDataSafe(templateTypeName);
+                try name.concat("_");
+                var tempStr: []u8 = try std.fmt.allocPrint(self.allocator, "{d}", .{templateType.ID});
+                defer self.allocator.free(tempStr);
+                try name.concat(tempStr);
+            }
+        }
+        return self.GetTypeSafe(name.str());
     }
     pub inline fn AddType(self: *@This(), newType: LinxcType) anyerror!void
     {
@@ -167,18 +192,21 @@ pub const ReflectionDatabase = struct
             }
             try baseName.concat(typeName.name.str());
 
-            var linxcType = try self.GetTypeSafe(baseName.str());
+            var baseType = try self.GetTypeSafe(baseName.str());
             var i: usize = 0;
             while (i < typeName.templateTypes.?.items.len) : (i += 1)
             {
-                const templateType: *ast.TypeNameData = &typeName.templateTypes.?.items[i];
+                const templateTypeName: *ast.TypeNameData = &typeName.templateTypes.?.items[i];
                 //parse child as well, in case it is another templated type
-                try self.CheckTypeName(templateType);
+                try self.CheckTypeName(templateTypeName);
 
                 //can use fullname here
                 //edit: turns out we can't
-                const templateTypeNameStr = try string.init_with_contents(self.allocator, templateType.fullName.str());
-                try linxcType.templateSpecializations.append(templateTypeNameStr);
+                //anyways, we really should be mangling these into non-english
+                var templateType = try self.GetTypeFromDataSafe(templateTypeName);
+                //try self.TypenameToUseableString(templateType, self.allocator);
+                
+                try baseType.templateSpecializations.append(templateType);
             }
             //dont check next as if there exists a next, it must be a static variable
             //namespace::type<spec>::namespace::var
@@ -262,6 +290,42 @@ pub const ReflectionDatabase = struct
                 
             }
         }
+    }
+    pub fn TypenameToUseableString(db: *@This(), self: *ast.TypeNameData, allocator: std.mem.Allocator) anyerror!string
+    {
+        var result: string = string.init(allocator);
+        if (self.namespace.str().len > 0)
+        {
+            try result.concat(self.namespace.str());
+            try result.concat("::");
+        }
+        try result.concat(self.name.str());
+        if (self.templateTypes != null)
+        {
+            var i: usize = 0;
+            while (i < self.templateTypes.?.items.len) : (i += 1)
+            {
+                try result.concat("_");
+                const templateType = try db.GetTypeFromDataSafe(&self.templateTypes.?.items[i]);
+                var templateTypeStr = try std.fmt.allocPrint(allocator, "{d}", .{templateType.ID});
+                defer allocator.free(templateTypeStr);
+                //var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator);
+                try result.concat(templateTypeStr);
+            }
+            //try result.concat("_");
+        }
+        var j: i32 = 0;
+        while (j < self.pointerCount) : (j += 1)
+        {
+            try result.concat("*");
+        }
+        if (self.next != null)
+        {
+            try result.concat("::");
+            var nextStr = try db.TypenameToUseableString(self.next.?, allocator);//self.next.?.ToUseableString(allocator);
+            try result.concat_deinit(&nextStr);
+        }
+        return result;
     }
 };
 
@@ -348,7 +412,7 @@ pub const LinxcType = struct
     //eg: <K, V>
     genericTypes: std.ArrayList(string),
     //eg: (std::string, int), (std::string, double) etc (len always multiple of len of genericTypes)
-    templateSpecializations: std.ArrayList(string),
+    templateSpecializations: std.ArrayList(*LinxcType),
     pointerCount: i32,
 
     pub fn ToString(self: *@This()) !string

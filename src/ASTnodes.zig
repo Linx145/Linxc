@@ -254,43 +254,6 @@ pub const TypeNameData = struct
             self.allocator.destroy(self.next.?);
         }
     }
-    pub fn ToUseableString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
-    {
-        var result: string = string.init(allocator);
-        if (self.namespace.str().len > 0)
-        {
-            try result.concat(self.namespace.str());
-            try result.concat("::");
-        }
-        try result.concat(self.name.str());
-        if (self.templateTypes != null)
-        {
-            try result.concat("_");
-            var i: usize = 0;
-            while (i < self.templateTypes.?.items.len) : (i += 1)
-            {
-                var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator, true);
-                try result.concat_deinit(&templateTypeStr);
-                if (i < self.templateTypes.?.items.len - 1)
-                {
-                    try result.concat("_");
-                }
-            }
-            //try result.concat("_");
-        }
-        var j: i32 = 0;
-        while (j < self.pointerCount) : (j += 1)
-        {
-            try result.concat("*");
-        }
-        if (self.next != null)
-        {
-            try result.concat("::");
-            var nextStr = try self.next.?.ToUseableString(allocator);
-            try result.concat_deinit(&nextStr);
-        }
-        return result;
-    }
     pub fn ToString(self: *@This(), allocator: std.mem.Allocator) anyerror!string
     {
         var result: string = string.init(allocator);

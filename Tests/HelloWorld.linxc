@@ -4,16 +4,11 @@
 
 i32 main()
 {
-    // Numerics::Vector2 *vector2 = (Numerics::Vector2*)malloc(sizeof(Numerics::Vector2));
-
-    // vector2->x = 1;
-    // vector2->y = 2;
-
-    // vector2->Print();
-
-    // free(vector2);
-
     Type<Numerics::Vector2>::ID = 1;
+    Type<i32>::ID = 2;
+
+    printf("%u\n", Type<Numerics::Vector2>::ID);
+    printf("%u\n", Type<i32>::ID);
 
     return 0;
 }

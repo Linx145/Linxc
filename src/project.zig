@@ -162,7 +162,7 @@ pub const project = struct {
             _ = try cppWriter.write("#include <");
             _ = try cppWriter.write(headerName.str());
             _ = try cppWriter.write(">\n");
-            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "");
+            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "", &database);
             cppFile.close();
 
 
