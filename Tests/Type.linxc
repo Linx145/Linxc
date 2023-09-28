@@ -1,7 +1,13 @@
 #include <Linxc.h>
+#include <stdio.h>
 
 template<typename T>
 struct Type
 {
     static u32 ID = 0;
+
+    static void PrintID()
+    {
+        printf("%u\n", ID);
+    }
 };

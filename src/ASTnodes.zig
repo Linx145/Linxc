@@ -124,6 +124,7 @@ pub const FunctionData = struct
     returnType: TypeNameData,
     args: []VarData,
     statement: CompoundStatementData,
+    isStatic: bool,
 
     pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
     {
@@ -140,6 +141,10 @@ pub const FunctionData = struct
         var compoundStatementString = try CompoundStatementToString(&self.statement, allocator);
 
         var str = string.init(allocator);
+        if (self.isStatic)
+        {
+            try str.concat("static ");
+        }
         var returnTypeStr = try self.returnType.ToString(allocator);
         try str.concat_deinit(&returnTypeStr);
         try str.concat(" ");

@@ -7,8 +7,10 @@ i32 main()
     Type<Numerics::Vector2>::ID = 1;
     Type<i32>::ID = 2;
 
-    printf("%u\n", Type<Numerics::Vector2>::ID);
-    printf("%u\n", Type<i32>::ID);
+    Type<Numerics::Vector2>::PrintID();
+    Type<i32>::PrintID();
+    //printf("%u\n", Type<Numerics::Vector2>::ID);
+    //printf("%u\n", Type<i32>::ID);
 
     return 0;
 }

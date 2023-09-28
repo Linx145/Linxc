@@ -88,6 +88,10 @@ pub fn TranspileStatementH(allocator: std.mem.Allocator, writer: std.fs.File.Wri
             {
                 var returnTypeStr = try database.TypenameToUseableString(&functionDeclaration.*.returnType, allocator);
                 defer returnTypeStr.deinit();
+                if (functionDeclaration.isStatic)
+                {
+                    _ = try writer.write("static ");
+                }
                 _ = try writer.write(returnTypeStr.str());
                 _ = try writer.write(" ");
                 _ = try writer.write(functionDeclaration.name.str());
@@ -193,7 +197,7 @@ pub fn TranspileExpression(allocator: std.mem.Allocator, writer: std.fs.File.Wri
         .FunctionCall => |FunctionCall|
         {
             //TODO: change?
-            var functionCallName = try FunctionCall.name.ToString(allocator);
+            var functionCallName = try database.TypenameToUseableString(&FunctionCall.name, allocator);//try FunctionCall.name.ToString(allocator);
             defer functionCallName.deinit();
             _ = try writer.write(functionCallName.str());
             _ = try writer.write("(");
@@ -386,6 +390,7 @@ pub fn TranspileStatementCpp(allocator: std.mem.Allocator, writer: std.fs.File.W
             },
             .variableDeclaration => |*variableDeclaration|
             {
+                //dont declare variable again, that's the header file's job
                 if (parent == null)
                 {
                     if (variableDeclaration.isConst)
@@ -505,7 +510,6 @@ pub fn TranspileStatementCpp(allocator: std.mem.Allocator, writer: std.fs.File.W
 
 pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.File.Writer, database: *refl.ReflectionDatabase, templatedStruct: *refl.TemplatedStruct) anyerror!void
 {
-    _ = cwriter;
     const allocator = templatedStruct.allocator;
 
     var genericTypeName: string = string.init(allocator);
@@ -548,6 +552,11 @@ pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.Fil
         try TranspileStatementH(allocator, hwriter, templatedStruct.structData.body, database, genericMap);
         _ = try hwriter.write("};\n");
 
+        if (templatedStruct.namespace.str().len > 0)
+        {
+            _ = try hwriter.write("}\n");
+        }
+
         for (templatedStruct.structData.body.items) |*structBodyStmt|
         {
             if (structBodyStmt.* == .variableDeclaration)
@@ -557,31 +566,41 @@ pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.Fil
                 {
                     var typeNameStr: string = try variableDeclaration.*.typeName.ToString(allocator);
                     defer typeNameStr.deinit();
-                    _ = try hwriter.write(typeNameStr.str());
-                    _ = try hwriter.write(" ");
-                    _ = try hwriter.write(templatedStruct.structData.name.str());
+                    _ = try cwriter.write(typeNameStr.str());
+                    _ = try cwriter.write(" ");
+                    _ = try cwriter.write(templatedStruct.structData.name.str());
                     i = 0;
                     while (i < genericTypeArgsCount) : (i += 1)
                     {
-                        _ = try hwriter.write("_");
-                        try hwriter.print("{d}", .{genericType.templateSpecializations.items[j + i].ID});
+                        _ = try cwriter.write("_");
+                        try cwriter.print("{d}", .{genericType.templateSpecializations.items[j + i].ID});
                     }
-                    _ = try hwriter.write("::");
-                    _ = try hwriter.write(variableDeclaration.*.name.str());
+                    _ = try cwriter.write("::");
+                    _ = try cwriter.write(variableDeclaration.*.name.str());
                     if (variableDeclaration.*.defaultValue != null)
                     {
-                        _ = try hwriter.write(" = ");
-                        try TranspileExpression(allocator, hwriter, &variableDeclaration.defaultValue.?, database);
+                        _ = try cwriter.write(" = ");
+                        try TranspileExpression(allocator, cwriter, &variableDeclaration.defaultValue.?, database);
                     }
-                    _ = try hwriter.write(";\n");
+                    _ = try cwriter.write(";\n");
                 }
             }
         }
 
-        if (templatedStruct.namespace.str().len > 0)
+        //cpp file
+        var structName = string.init(allocator);
+        defer structName.deinit();
+        try structName.concat(templatedStruct.structData.name.str());
+        i = 0;
+        while (i < genericTypeArgsCount) : (i += 1)
         {
-            _ = try hwriter.write("}\n");
+            try structName.concat("_");
+            var typeIDStr = try std.fmt.allocPrint(allocator, "{d}", .{genericType.templateSpecializations.items[j + i].ID});
+            try structName.concat(typeIDStr);
+            allocator.free(typeIDStr);
         }
+
+        try TranspileStatementCpp(allocator, cwriter, templatedStruct.structData.body, false, structName.str(), database);
 
         genericMap.clearRetainingCapacity();
         j += genericTypeArgsCount;

@@ -656,12 +656,14 @@ pub const Parser = struct {
                                     .name = OptString.init(name),
                                     .args = args,
                                     .returnType = typeName,
-                                    .statement = body
+                                    .statement = body,
+                                    .isStatic = nextIsStatic
                                 };
                                 try self.AppendToCompoundStatement(&result, StatementData
                                 {
                                     .functionDeclaration = functionDeclaration
                                 }, state);
+                                nextIsStatic = false;
                             }
                             else if (immediateNext.id == .Semicolon and state.context == ParseContext.traitDeclaration)
                             {
@@ -670,12 +672,14 @@ pub const Parser = struct {
                                     .name = OptString.init(name),
                                     .args = args,
                                     .returnType = typeName,
-                                    .statement = CompoundStatementData.init(self.allocator)
+                                    .statement = CompoundStatementData.init(self.allocator),
+                                    .isStatic = nextIsStatic
                                 };
                                 try self.AppendToCompoundStatement(&result, StatementData
                                 {
                                     .functionDeclaration = functionDeclaration
                                 }, state);
+                                nextIsStatic = false;
                             }
                             else
                             {
