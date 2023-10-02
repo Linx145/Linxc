@@ -124,6 +124,7 @@ pub const FunctionData = struct
     returnType: TypeNameData,
     args: []VarData,
     statement: CompoundStatementData,
+    templateTypes: ?[]OptString,
     isStatic: bool,
 
     pub fn ToOwned(self: *@This(), allocator: std.mem.Allocator) anyerror!void
@@ -133,6 +134,13 @@ pub const FunctionData = struct
         for (self.args) |*arg|
         {
             try arg.ToOwned(allocator);
+        }
+        if (self.templateTypes != null)
+        {
+            for (self.templateTypes.?) |*templateType|
+            {
+                templateType.ToOwned(allocator);
+            }
         }
         try CompoundStatementToOwned(&self.statement, allocator);
     }
@@ -180,6 +188,14 @@ pub const FunctionData = struct
             statement.deinit(allocator);
         }
         self.statement.deinit();
+        if (self.templateTypes != null)
+        {
+            for (self.templateTypes.?) |*templateType|
+            {
+                templateType.deinit();
+            }
+            allocator.free(self.templateTypes.?);
+        }
     }
 };
 pub const ModifiedVariableData = struct
@@ -765,6 +781,10 @@ pub const StructData = struct
         }
         if (self.templateTypes != null)
         {
+            for (self.templateTypes.?) |*templateType|
+            {
+                templateType.deinit();
+            }
             allocator.free(self.templateTypes.?);
         }
         self.body.deinit();

@@ -433,6 +433,7 @@ pub const Parser = struct {
                     try newState.structNames.append(structName);
                     newState.braceCount += 1;
 
+
                     if (nextTemplateTypes.items.len == 0)
                     {
                         const body = try self.Parse(&newState);
@@ -654,49 +655,143 @@ pub const Parser = struct {
 
                         if (tokenAfterName.id == .LParen) //function declaration
                         {
-                            var args = try self.ParseArgs();
-                            var immediateNext = self.tokenizer.nextUntilValid();
-                            if (immediateNext.id == .LBrace)
+                            if (nextTemplateTypes.items.len > 0)
                             {
-                                var newState = try state.*.clone();
-                                defer newState.deinit();
-                                try newState.funcNames.append(name);
-                                newState.braceCount += 1;
-                                const body = try self.Parse(&newState);
+                                var oldAllocator = self.allocator;
+                                self.allocator = self.database.allocator;
 
-                                const functionDeclaration = ast.FunctionData
+                                var args = try self.ParseArgs();
+                                var immediateNext = self.tokenizer.nextUntilValid();
+                                if (immediateNext.id == .LBrace)
                                 {
-                                    .name = OptString.init(name),
-                                    .args = args,
-                                    .returnType = typeName,
-                                    .statement = body,
-                                    .isStatic = nextIsStatic
-                                };
-                                try self.AppendToCompoundStatement(&result, StatementData
+                                    var newState = try state.*.clone();
+                                    defer newState.deinit();
+                                    try newState.funcNames.append(name);
+                                    newState.braceCount += 1;
+                                    const body = try self.Parse(&newState);
+
+                                    // var tagsSlice: ?[]ExpressionData = null;
+                                    // if (nextTags.items.len > 0)
+                                    // {
+                                    //     tagsSlice = try self.database.allocator.alloc(ExpressionData, nextTags.items.len);
+                                    //     var i: usize = 0;
+                                    //     while (i < nextTags.items.len) : (i += 1)
+                                    //     {
+                                    //         tagsSlice.?[i] = nextTags.items[i];
+                                    //         try tagsSlice.?[i].ToOwned(self.database.allocator);
+                                    //     }
+                                    //     nextTags.clearAndFree();
+                                    // }
+                                    var templateTypesSlice: ?[]OptString = null;
+                                    if (nextTemplateTypes.items.len > 0)
+                                    {
+                                        templateTypesSlice = try self.database.allocator.alloc(OptString, nextTemplateTypes.items.len);
+                                        var i: usize = 0;
+                                        while (i < nextTemplateTypes.items.len) : (i += 1)
+                                        {
+                                            templateTypesSlice.?[i] = nextTemplateTypes.items[i];
+                                            try templateTypesSlice.?[i].ToOwned(self.database.allocator);
+                                        }
+                                        nextTemplateTypes.clearAndFree();
+                                    }
+
+                                    const functionDeclaration = ast.FunctionData
+                                    {
+                                        .name = OptString.init(name),
+                                        .args = args,
+                                        .returnType = typeName,
+                                        .statement = body,
+                                        .isStatic = nextIsStatic,
+                                        .templateTypes = templateTypesSlice
+                                    };
+
+                                    var tempStatement = ast.StatementData
+                                    {
+                                        .functionDeclaration = functionDeclaration
+                                    };
+                                    try self.database.PostParseStatement(&tempStatement, state);
+                                    
+                                    const outputC = try string.init_with_contents(self.database.allocator, state.outputC);
+                                    const outputH = try string.init_with_contents(self.database.allocator, state.outputHeader);
+                                    const linxcFile = try string.init_with_contents(self.database.allocator, state.filename.str());
+                                    var currentNamespace = string.init(self.database.allocator);
+                                    try state.ConcatNamespaces(&currentNamespace);
+
+                                    if (state.structNames.items.len == 0) //not nested template
+                                    {
+                                        try self.database.templatedFuncs.append(refl.TemplatedFunc
+                                        {
+                                            .allocator = self.database.allocator,
+                                            .funcData = functionDeclaration,
+                                            .linxcFile = linxcFile,
+                                            .outputC = outputC,
+                                            .outputH = outputH,
+                                            .namespace = currentNamespace
+                                        });
+                                    }
+                                    else
+                                    {
+                                        return Errors.NotImplemented;
+                                    }
+                                    
+                                    nextIsStatic = false;
+                                }
+                                //todo: templated traits, etc
+                                else
                                 {
-                                    .functionDeclaration = functionDeclaration
-                                }, state);
-                                nextIsStatic = false;
-                            }
-                            else if (immediateNext.id == .Semicolon and state.context == ParseContext.traitDeclaration)
-                            {
-                                const functionDeclaration = ast.FunctionData
-                                {
-                                    .name = OptString.init(name),
-                                    .args = args,
-                                    .returnType = typeName,
-                                    .statement = CompoundStatementData.init(self.allocator),
-                                    .isStatic = nextIsStatic
-                                };
-                                try self.AppendToCompoundStatement(&result, StatementData
-                                {
-                                    .functionDeclaration = functionDeclaration
-                                }, state);
-                                nextIsStatic = false;
+                                    try self.WriteError("Expected { after function arguments list () unless it is in a trait");
+                                }
+
+                                self.allocator = oldAllocator;
                             }
                             else
                             {
-                                try self.WriteError("Expected { after function arguments list () unless it is in a trait");
+                                var args = try self.ParseArgs();
+                                var immediateNext = self.tokenizer.nextUntilValid();
+                                if (immediateNext.id == .LBrace)
+                                {
+                                    var newState = try state.*.clone();
+                                    defer newState.deinit();
+                                    try newState.funcNames.append(name);
+                                    newState.braceCount += 1;
+                                    const body = try self.Parse(&newState);
+
+                                    const functionDeclaration = ast.FunctionData
+                                    {
+                                        .name = OptString.init(name),
+                                        .args = args,
+                                        .returnType = typeName,
+                                        .statement = body,
+                                        .isStatic = nextIsStatic,
+                                        .templateTypes = null
+                                    };
+                                    try self.AppendToCompoundStatement(&result, StatementData
+                                    {
+                                        .functionDeclaration = functionDeclaration
+                                    }, state);
+                                    nextIsStatic = false;
+                                }
+                                else if (immediateNext.id == .Semicolon and state.context == ParseContext.traitDeclaration)
+                                {
+                                    const functionDeclaration = ast.FunctionData
+                                    {
+                                        .name = OptString.init(name),
+                                        .args = args,
+                                        .returnType = typeName,
+                                        .statement = CompoundStatementData.init(self.allocator),
+                                        .isStatic = nextIsStatic,
+                                        .templateTypes = null
+                                    };
+                                    try self.AppendToCompoundStatement(&result, StatementData
+                                    {
+                                        .functionDeclaration = functionDeclaration
+                                    }, state);
+                                    nextIsStatic = false;
+                                }
+                                else
+                                {
+                                    try self.WriteError("Expected { after function arguments list () unless it is in a trait");
+                                }
                             }
                         }
                         else if (tokenAfterName.id == .Equal) //variable creation and assignment
@@ -732,6 +827,10 @@ pub const Parser = struct {
                                 }
                             }, state);
                             nextIsStatic = false;
+                        }
+                        else
+                        {
+                            try self.WriteError("Unrecognised token after identifier");
                         }
                     }
                     else

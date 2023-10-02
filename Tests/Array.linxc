@@ -1,4 +1,5 @@
 #include <Linxc.h>
+#include <stdio.h>
 
 template<typename T>
 struct Array
@@ -7,6 +8,8 @@ struct Array
     u32 length;
 };
 
-void ArrayLengthPrinter(Array<double> floatArray)
+template<typename T>
+void PrintArrayLength(Array<T> array)
 {
+    printf("%u\n", array.length);
 }

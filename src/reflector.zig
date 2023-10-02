@@ -9,6 +9,24 @@ const parsing = @import("parser-state.zig");
 const StatementDataTag = ast.StatementDataTag;
 const StatementData = ast.StatementData;
 
+pub const TemplatedFunc = struct
+{
+    allocator: std.mem.Allocator,
+    funcData: ast.FunctionData,
+    linxcFile: string,
+    outputC: string,
+    outputH: string,
+    namespace: string,
+
+    pub inline fn deinit(self: *@This()) void
+    {
+        self.funcData.deinit(self.allocator);
+        self.linxcFile.deinit();
+        self.outputC.deinit();
+        self.outputH.deinit();
+        self.namespace.deinit();
+    }
+};
 pub const TemplatedStruct = struct
 {
     allocator: std.mem.Allocator,
@@ -30,6 +48,7 @@ pub const TemplatedStruct = struct
 pub const ReflectionDatabase = struct
 {
     templatedStructs: std.ArrayList(TemplatedStruct),
+    templatedFuncs: std.ArrayList(TemplatedFunc),
     types: std.ArrayList(LinxcType),
     nameToType: std.StringHashMap(usize),
     allocator: std.mem.Allocator,
@@ -41,6 +60,7 @@ pub const ReflectionDatabase = struct
             .allocator = allocator,
             .nameToType = std.StringHashMap(usize).init(allocator),
             .templatedStructs = std.ArrayList(TemplatedStruct).init(allocator),
+            .templatedFuncs = std.ArrayList(TemplatedFunc).init(allocator),
             .types = std.ArrayList(LinxcType).init(allocator),
             .currentID = 1
         };
@@ -71,6 +91,11 @@ pub const ReflectionDatabase = struct
             templatedStruct.deinit();
         }
         self.templatedStructs.deinit();
+        for (self.templatedFuncs.items) |*templatedFunc|
+        {
+            templatedFunc.deinit();
+        }
+        self.templatedFuncs.deinit();
     }
     pub inline fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
     {
@@ -167,17 +192,38 @@ pub const ReflectionDatabase = struct
         self.types.swapRemove(index);
         self.nameToType.remove(name);
     }
-    pub inline fn GetVariable(self: *@This(), variableTypeName: ast.TypeNameData, variableName: []const u8) anyerror!LinxcVariable
+    pub fn GetFuncSafe(self: *@This(), owner: *LinxcType, name: []const u8) anyerror!*LinxcFunc
     {
-        const variableType: *LinxcType = try self.GetTypeSafe(variableTypeName.fullName.str());
-
-        const variableNameStr = try string.init_with_contents(self.allocator, variableName);
-
-        return LinxcVariable
+        var result: ?*LinxcFunc = owner.nameToFunction.getPtr(name);
+        if (result != null)
         {
-            .name = variableNameStr,
-            .variableType = variableType
-        };
+            return result;
+        }
+        const nameStr = try string.init_with_contents(self.allocator, name);
+        try owner.nameToFunction.put(name, LinxcFunc
+        {
+            .name = nameStr,
+            .returnType = null,
+            .args = null,
+            .genericTypes = std.ArrayList(string).init(self.allocator)
+        });
+        return owner.nameToFunction.getPtr(name).?;
+    }
+    ///Checks a function call for any potential template specializations
+    pub fn CheckFunctionName(self: *@This(), funcName: *ast.TypeNameData) anyerror!void
+    {
+        if (funcName.templateTypes != null)
+        {
+            //cannot use fullname here as it would contain the templates
+            var baseName: string = string.init(self.allocator);
+            defer baseName.deinit();
+            if (funcName.namespace.str().len > 0)
+            {
+                try baseName.concat(funcName.namespace.str());
+                try baseName.concat("::");
+            }
+            try baseName.concat(funcName.name.str());
+        }
     }
     ///checks a type name for any potential template specializations
     pub fn CheckTypeName(self: *@This(), typeName: *ast.TypeNameData) anyerror!void
@@ -237,8 +283,9 @@ pub const ReflectionDatabase = struct
                 try self.PostParseExpression(&operator.*.leftExpression);
                 try self.PostParseExpression(&operator.*.rightExpression);
             },
-            .FunctionCall =>// |*funcCall|
+            .FunctionCall => |*funcCall|
             {
+                try self.CheckFunctionName(&funcCall.*.name);
                 //self.checkFunctionName
             },
             .IndexedAccessor =>// |*indexedAccessor|
@@ -267,6 +314,64 @@ pub const ReflectionDatabase = struct
     {
         switch (statement.*)
         {
+            .functionDeclaration => |*funcDeclaration|
+            {
+                //method is so dang humungous because
+                //there is a LOT of things to fill up, unlike a struct, which has just templated types
+                if (state.structNames.items.len > 0)
+                {
+                    var encapsulatingTypeName = string.init(self.allocator);
+                    defer encapsulatingTypeName.deinit();
+                    try state.ConcatNamespaces(&encapsulatingTypeName);
+                    for (state.structNames.items) |structName|
+                    {
+                        try encapsulatingTypeName.concat("::");
+                        try encapsulatingTypeName.concat(structName);
+                    }
+                    var structType = try self.GetTypeSafe(encapsulatingTypeName.str());
+                    //parse function name
+                    var func = try self.GetFuncSafe(structType, funcDeclaration.name.str());
+                    
+                    //parse return type
+                    var returnType: ?*LinxcType = null;
+                    if (!std.mem.Eql(funcDeclaration.returnType.fullName.str(), "void"))
+                    {
+                        try self.CheckTypeName(&funcDeclaration.*.returnType);
+                        returnType = try self.GetTypeFromDataSafe(&funcDeclaration.*.returnType);
+                    }
+                    func.returnType = returnType;
+
+                    //variables
+                    var variables = std.ArrayList(LinxcVariable).init(self.allocator);
+                    for (funcDeclaration.args) |arg|
+                    {
+                        const argNameStr = try string.init_with_contents(self.allocator, arg.name.str());
+                        try self.CheckTypeName(&arg.typeName);
+                        const argType = try self.GetTypeFromDataSafe(&arg.typeName);
+                        try variables.append(LinxcVariable
+                        {
+                            .name = argNameStr,
+                            .variableType = argType
+                        });
+                    }
+                    const variablesSlice: ?[]LinxcVariable = null;
+                    if (variables.items.len > 0)
+                    {
+                        variablesSlice = try variables.toOwnedSlice();
+                    }
+                    func.args = variablesSlice;
+
+                    //generic types
+                    if (funcDeclaration.templateTypes != null)
+                    {
+                        for (funcDeclaration.templateTypes.?) |templateType|
+                        {
+                            const templateTypeName = try string.init_with_contents(self.allocator, templateType.str());
+                            try func.genericTypes.append(templateTypeName);
+                        }
+                    }
+                }
+            },
             .structDeclaration => |*structDeclaration|
             {
                 var namespaceName = string.init(self.allocator);
@@ -350,7 +455,7 @@ pub const LinxcVariable = struct
 {
     name: string,
     variableType: *LinxcType,
-    isPointer: bool,
+    //dont care about default value - its useless to the reflector anyways
 
     pub fn ToString(self: *@This()) anyerror!string
     {
@@ -375,15 +480,23 @@ pub const LinxcVariable = struct
 pub const LinxcFunc = struct
 {
     name: string,
-    returnType: *LinxcType,
+    returnType: ?*LinxcType,
     args: ?[]LinxcVariable,
+    genericTypes: std.ArrayList(string),
     
     pub fn ToString(self: *@This()) anyerror!string
     {
         var result = string.init(self.name.allocator);
 
-        try result.concat(self.returnType.name.str());
-        try result.concat(" ");
+        if (self.returnType == null)
+        {
+            try result.concat("void ");
+        }
+        else
+        {
+            try result.concat(self.returnType.?.name.str());
+            try result.concat(" ");
+        }
         try result.concat(self.name.str());
         try result.concat("(");
         if (self.args != null)
@@ -421,7 +534,7 @@ pub const LinxcType = struct
     name: string,
     ID: usize,
     headerFile: ?string,
-    functions: std.ArrayList(LinxcFunc),
+    nameToFunction: std.StringHashMap(LinxcFunc),
     variables: std.ArrayList(LinxcVariable),
     isPrimitiveType: bool,
     isTrait: bool,
@@ -483,5 +596,17 @@ pub const LinxcType = struct
             genericType.deinit();
         }
         self.genericTypes.deinit();
+
+        var nameToFunctionIterator = self.nameToFunction.iterator();
+        while (true)
+        {
+            const next = nameToFunctionIterator.next();
+            if (next == null)
+            {
+                break;
+            }
+            next.?.value_ptr.deinit();
+        }
+        self.nameToFunction.deinit();
     }
 };
