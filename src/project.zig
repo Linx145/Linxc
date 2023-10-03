@@ -160,125 +160,94 @@ pub const project = struct {
             };
 
 
-            var cppFile: std.fs.File = try std.fs.createFileAbsolute(cppFilePath.str(), .{.truncate = true});
-            var cppWriter = cppFile.writer();
-            _ = try cppWriter.write("#include <");
-            _ = try cppWriter.write(headerName.str());
-            _ = try cppWriter.write(">\n");
-            try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "", &database, null);
-            cppFile.close();
+            // var cppFile: std.fs.File = try std.fs.createFileAbsolute(cppFilePath.str(), .{.truncate = true});
+            // var cppWriter = cppFile.writer();
+            // _ = try cppWriter.write("#include <");
+            // _ = try cppWriter.write(headerName.str());
+            // _ = try cppWriter.write(">\n");
+            // try transpiler.TranspileStatementCpp(alloc, cppWriter, result, true, "", &database, null);
+            // cppFile.close();
 
 
 
             var hFile: std.fs.File = try std.fs.createFileAbsolute(hFilePath.str(), .{.truncate = true});
             var hWriter = hFile.writer();
             _ = try hWriter.write("#pragma once\n");
-            try transpiler.TranspileStatementH(alloc, hWriter, result, &database, null);
+            var state = transpiler.TranspilerState
+            {
+                .allocator = alloc,
+                .database = &database,
+                .specializationMap = null,
+                .namespaces = std.ArrayList(string).init(alloc),
+                .structNames = std.ArrayList(string).init(alloc)
+            };
+            defer state.deinit();
+            try transpiler.TranspileStatementH(alloc, hWriter, result, &state);
             hFile.close();
 
 
             ast.ClearCompoundStatement(&result);
         }
-        if (!stopCompilation)
-        {
-            //go through files one more time and append to them the instantiated structs
-            for (database.templatedStructs.items) |*templatedStruct|
-            {
-                var cppFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputC.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
-                try cppFile.seekFromEnd(0);
-                var cppWriter = cppFile.writer();
+        // if (!stopCompilation)
+        // {
+        //     //go through files one more time and append to them the instantiated structs
+        //     for (database.templatedStructs.items) |*templatedStruct|
+        //     {
+        //         var cppFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputC.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+        //         try cppFile.seekFromEnd(0);
+        //         var cppWriter = cppFile.writer();
                 
-                //issue: header definitions needs to be appended at the start of the file instead of at the back
-                //in case there is a mention of the templated struct in the original linxc file,
-                //it will depend on the template specializations to be in front of it
-                //however, we also can't just append to the start of the file as we will require the original file's
-                //include directories in case those mentions of the specialized templates depend on the headers.
+        //         //issue: header definitions needs to be appended at the start of the file instead of at the back
+        //         //in case there is a mention of the templated struct in the original linxc file,
+        //         //it will depend on the template specializations to be in front of it
+        //         //however, we also can't just append to the start of the file as we will require the original file's
+        //         //include directories in case those mentions of the specialized templates depend on the headers.
                 
-                var oldHFile = try io.ReadFile(templatedStruct.outputH.str(), self.allocator);
-                defer self.allocator.free(oldHFile);
+        //         var oldHFile = try io.ReadFile(templatedStruct.outputH.str(), self.allocator);
+        //         defer self.allocator.free(oldHFile);
 
-                var miniLexer = lexer.Tokenizer
-                {
-                    .buffer = oldHFile
-                };
-                while (true)
-                {
-                    var next = miniLexer.peekNextUntilValid();
-                    if (next.id == .Hash)
-                    {
-                        while (true)
-                        {
-                            next = miniLexer.next();
-                            miniLexer.index = next.end;
-                            if (next.id == .Nl or next.id == .Eof)
-                            {
-                                break;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-                const includes = oldHFile[0..miniLexer.index];
-                const restOfFile = oldHFile[miniLexer.index..oldHFile.len];
-                //var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
+        //         var miniLexer = lexer.Tokenizer
+        //         {
+        //             .buffer = oldHFile
+        //         };
+        //         while (true)
+        //         {
+        //             var next = miniLexer.peekNextUntilValid();
+        //             if (next.id == .Hash)
+        //             {
+        //                 while (true)
+        //                 {
+        //                     next = miniLexer.next();
+        //                     miniLexer.index = next.end;
+        //                     if (next.id == .Nl or next.id == .Eof)
+        //                     {
+        //                         break;
+        //                     }
+        //                 }
+        //             }
+        //             else
+        //             {
+        //                 break;
+        //             }
+        //         }
+        //         const includes = oldHFile[0..miniLexer.index];
+        //         const restOfFile = oldHFile[miniLexer.index..oldHFile.len];
+        //         //var hFile: std.fs.File = try std.fs.openFileAbsolute(templatedStruct.outputH.str(), std.fs.File.OpenFlags{.mode = std.fs.File.OpenMode.read_write});
                 
-                //var hWriter = hFile.writer();
-                var hFile: std.fs.File = try std.fs.createFileAbsolute(templatedStruct.outputH.str(), .{.truncate = true});
-                var hWriter = hFile.writer();
-                _ = try hWriter.write(includes);
-                _ = try hWriter.write("\n");
-                try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
-                _ = try hWriter.write("\n");
-                _ = try hWriter.write(restOfFile);
-                cppFile.close();
-                hFile.close();
-            }
-        }
+        //         //var hWriter = hFile.writer();
+        //         var hFile: std.fs.File = try std.fs.createFileAbsolute(templatedStruct.outputH.str(), .{.truncate = true});
+        //         var hWriter = hFile.writer();
+        //         _ = try hWriter.write(includes);
+        //         _ = try hWriter.write("\n");
+        //         try transpiler.TranspileTemplatedStruct(hWriter, cppWriter, &database, templatedStruct);
+        //         _ = try hWriter.write("\n");
+        //         _ = try hWriter.write(restOfFile);
+        //         cppFile.close();
+        //         hFile.close();
+        //     }
+        // }
 
         parser.deinit();
         database.deinit();
     }
-    // pub fn Reflect(self: *Self, outputFile: []const u8) !void
-    // {
-    //     var i: usize = 0;
-    //     std.debug.print("Writing to {s}\n", .{outputFile});
-    //     var lastTypeID: usize = 0;
-
-    //     var cppFile: std.fs.File = try std.fs.createFileAbsolute(outputFile, .{.truncate = true});
-    //     var writer = cppFile.writer();
-
-    //     _ = try writer.write("#include <Reflection.h>\n");
-
-    //     while (i < self.compiledFiles.items.len) : (i += 1)
-    //     {
-    //         const compiled: *data.FileData = &self.compiledFiles.items[i];
-    //         try writer.print("#include <{s}>\n", .{compiled.headerName.?.str()});
-    //     }
-
-    //     _ = try writer.write("\n");
-    //     _ = try writer.write("namespace Reflection\n");
-    //     _ = try writer.write("{\n\n");
-    //     _ = try writer.write("void initReflection()\n");
-    //     _ = try writer.write("{\n");
-
-    //     i = 0;
-    //     while (i < self.compiledFiles.items.len) : (i += 1)
-    //     {
-    //         const compiled: *data.FileData = &self.compiledFiles.items[i];
-
-    //         var j: usize = 0;
-    //         while (j < compiled.structs.items.len) : (j += 1)
-    //         {
-    //             const structData: *data.StructData = &compiled.structs.items[j];
-    //             try structData.OutputReflection(&writer, &lastTypeID);
-    //         }
-    //     }
-
-    //     _ = try writer.write("}\n");
-    //     _ = try writer.write("}\n");
-    //     cppFile.close();
-    // }
 };

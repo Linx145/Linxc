@@ -33,6 +33,7 @@ pub const ReflectionDatabase = struct
     types: std.ArrayList(LinxcType),
     nameToType: std.StringHashMap(usize),
     nameToFunc: std.StringHashMap(LinxcFunc),
+    namespaceToDefinedTypes: std.StringHashMap(std.AutoHashMap(*LinxcType, void)),
     allocator: std.mem.Allocator,
     currentID: usize,
 
@@ -44,7 +45,8 @@ pub const ReflectionDatabase = struct
             .templatedStructs = std.ArrayList(TemplatedStruct).init(allocator),
             .types = std.ArrayList(LinxcType).init(allocator),
             .nameToFunc = std.StringHashMap(LinxcFunc).init(allocator),
-            .currentID = 1
+            .currentID = 1,
+            .namespaceToDefinedTypes = std.StringHashMap(std.AutoHashMap(*LinxcType, void)).init(allocator)
         };
         try result.AddPrimitiveType("i8");
         try result.AddPrimitiveType("i16");
@@ -74,17 +76,32 @@ pub const ReflectionDatabase = struct
         }
         self.templatedStructs.deinit();
 
-        var iter = self.nameToFunc.iterator();
-        while (true)
         {
-            var next = iter.next();
-            if (next != null)
+            var iter = self.nameToFunc.iterator();
+            while (true)
             {
-                next.?.value_ptr.*.deinit();
+                var next = iter.next();
+                if (next != null)
+                {
+                    next.?.value_ptr.*.deinit();
+                }
+                else break;
             }
-            else break;
+            self.nameToFunc.deinit();
         }
-        self.nameToFunc.deinit();
+        {
+            var iter = self.namespaceToDefinedTypes.iterator();
+            while (true)
+            {
+                var next = iter.next();
+                if (next != null)
+                {
+                    next.?.value_ptr.*.deinit();
+                }
+                else break;
+            }
+            self.namespaceToDefinedTypes.deinit();
+        }
     }
     pub inline fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
     {
@@ -419,6 +436,13 @@ pub const ReflectionDatabase = struct
                         try structType.genericTypes.append(templateTypeName);
                     }
                 }
+
+                if (self.namespaceToDefinedTypes.get(namespaceName.str()) == null)
+                {
+                    try self.namespaceToDefinedTypes.put(namespaceName.str(), std.AutoHashMap(*LinxcType, void).init(self.allocator));
+                }
+                var hashset = self.namespaceToDefinedTypes.getPtr(namespaceName.str()).?;
+                try hashset.put(structDeclaration.name.str(), .{});
             },
             .variableDeclaration => |*varDecl|
             {
