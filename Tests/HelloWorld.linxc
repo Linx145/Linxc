@@ -21,6 +21,8 @@ i32 main()
 
     printf("%f\n", Type<Numerics::Vector2>::globalInstance.x);
 
+    //PrintArrayLength<float>(floatArray);
+
     //am lazy to free
     //printf("%u\n", Type<Numerics::Vector2>::ID);
     //printf("%u\n", Type<i32>::ID);

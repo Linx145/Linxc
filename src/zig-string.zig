@@ -147,7 +147,7 @@ pub const String = struct {
     }
 
     /// Returns the String as a string literal
-    pub fn str(self: String) []const u8 {
+    pub inline fn str(self: String) []const u8 {
         if (self.buffer) |buffer| return buffer[0..self.size];
         return "";
     }

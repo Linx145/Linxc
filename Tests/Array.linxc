@@ -8,8 +8,8 @@ struct Array
     u32 length;
 };
 
-template<typename T>
-void PrintArrayLength(Array<T> array)
-{
-    printf("%u\n", array.length);
-}
+// template<typename T>
+// void PrintArrayLength(Array<T> array)
+// {
+//     printf("%u\n", array.length);
+// }

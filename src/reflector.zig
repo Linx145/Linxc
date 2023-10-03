@@ -9,24 +9,6 @@ const parsing = @import("parser-state.zig");
 const StatementDataTag = ast.StatementDataTag;
 const StatementData = ast.StatementData;
 
-pub const TemplatedFunc = struct
-{
-    allocator: std.mem.Allocator,
-    funcData: ast.FunctionData,
-    linxcFile: string,
-    outputC: string,
-    outputH: string,
-    namespace: string,
-
-    pub inline fn deinit(self: *@This()) void
-    {
-        self.funcData.deinit(self.allocator);
-        self.linxcFile.deinit();
-        self.outputC.deinit();
-        self.outputH.deinit();
-        self.namespace.deinit();
-    }
-};
 pub const TemplatedStruct = struct
 {
     allocator: std.mem.Allocator,
@@ -48,9 +30,9 @@ pub const TemplatedStruct = struct
 pub const ReflectionDatabase = struct
 {
     templatedStructs: std.ArrayList(TemplatedStruct),
-    templatedFuncs: std.ArrayList(TemplatedFunc),
     types: std.ArrayList(LinxcType),
     nameToType: std.StringHashMap(usize),
+    nameToFunc: std.StringHashMap(LinxcFunc),
     allocator: std.mem.Allocator,
     currentID: usize,
 
@@ -60,8 +42,8 @@ pub const ReflectionDatabase = struct
             .allocator = allocator,
             .nameToType = std.StringHashMap(usize).init(allocator),
             .templatedStructs = std.ArrayList(TemplatedStruct).init(allocator),
-            .templatedFuncs = std.ArrayList(TemplatedFunc).init(allocator),
             .types = std.ArrayList(LinxcType).init(allocator),
+            .nameToFunc = std.StringHashMap(LinxcFunc).init(allocator),
             .currentID = 1
         };
         try result.AddPrimitiveType("i8");
@@ -91,11 +73,18 @@ pub const ReflectionDatabase = struct
             templatedStruct.deinit();
         }
         self.templatedStructs.deinit();
-        for (self.templatedFuncs.items) |*templatedFunc|
+
+        var iter = self.nameToFunc.iterator();
+        while (true)
         {
-            templatedFunc.deinit();
+            var next = iter.next();
+            if (next != null)
+            {
+                next.?.value_ptr.*.deinit();
+            }
+            else break;
         }
-        self.templatedFuncs.deinit();
+        self.nameToFunc.deinit();
     }
     pub inline fn GetType(self: *@This(), name: []const u8) Errors!*LinxcType
     {
@@ -117,7 +106,7 @@ pub const ReflectionDatabase = struct
             .ID = self.currentID,
             .name = nameStr,
             .headerFile = null,
-            .functions = std.ArrayList(LinxcFunc).init(self.allocator),
+            .nameToFunction = std.StringHashMap(LinxcFunc).init(self.allocator),
             .variables = std.ArrayList(LinxcVariable).init(self.allocator),
             .isPrimitiveType = true,
             .isTrait = false,
@@ -139,7 +128,7 @@ pub const ReflectionDatabase = struct
                 .name = nameStr,
                 .ID = self.currentID,
                 .headerFile = null,
-                .functions = std.ArrayList(LinxcFunc).init(self.allocator),
+                .nameToFunction = std.StringHashMap(LinxcFunc).init(self.allocator),
                 .variables = std.ArrayList(LinxcVariable).init(self.allocator),
                 .isPrimitiveType = false,
                 .isTrait = false,
@@ -192,12 +181,30 @@ pub const ReflectionDatabase = struct
         self.types.swapRemove(index);
         self.nameToType.remove(name);
     }
+    pub fn GetGlobalFuncSafe(self: *@This(), nameAndNamespace: []const u8) anyerror!*LinxcFunc
+    {
+        var result = self.nameToFunc.getPtr(nameAndNamespace);
+        if (result != null)
+        {
+            return result.?;
+        }
+        const nameStr = try string.init_with_contents(self.allocator, nameAndNamespace);
+        const func = LinxcFunc
+        {
+            .name = nameStr,
+            .returnType = null,
+            .args = null,
+            .genericTypes = std.ArrayList(string).init(self.allocator)
+        };
+        try self.nameToFunc.put(nameAndNamespace, func);
+        return self.nameToFunc.getPtr(nameAndNamespace).?;
+    }
     pub fn GetFuncSafe(self: *@This(), owner: *LinxcType, name: []const u8) anyerror!*LinxcFunc
     {
         var result: ?*LinxcFunc = owner.nameToFunction.getPtr(name);
         if (result != null)
         {
-            return result;
+            return result.?;
         }
         const nameStr = try string.init_with_contents(self.allocator, name);
         try owner.nameToFunction.put(name, LinxcFunc
@@ -318,6 +325,8 @@ pub const ReflectionDatabase = struct
             {
                 //method is so dang humungous because
                 //there is a LOT of things to fill up, unlike a struct, which has just templated types
+
+                var func: *LinxcFunc = undefined;
                 if (state.structNames.items.len > 0)
                 {
                     var encapsulatingTypeName = string.init(self.allocator);
@@ -329,46 +338,58 @@ pub const ReflectionDatabase = struct
                         try encapsulatingTypeName.concat(structName);
                     }
                     var structType = try self.GetTypeSafe(encapsulatingTypeName.str());
-                    //parse function name
-                    var func = try self.GetFuncSafe(structType, funcDeclaration.name.str());
-                    
-                    //parse return type
-                    var returnType: ?*LinxcType = null;
-                    if (!std.mem.Eql(funcDeclaration.returnType.fullName.str(), "void"))
+                    func = try self.GetFuncSafe(structType, funcDeclaration.name.str());
+                    //std.debug.print("Found function {s} in struct {s}\n", .{funcDeclaration.name.str(), encapsulatingTypeName.str()});
+                }
+                else
+                {
+                    var nameAndNamespace = string.init(self.allocator);
+                    defer nameAndNamespace.deinit();
+                    if (state.namespaces.items.len > 0)
                     {
-                        try self.CheckTypeName(&funcDeclaration.*.returnType);
-                        returnType = try self.GetTypeFromDataSafe(&funcDeclaration.*.returnType);
+                        try state.ConcatNamespaces(&nameAndNamespace);
+                        try nameAndNamespace.concat("::");
                     }
-                    func.returnType = returnType;
+                    try nameAndNamespace.concat(funcDeclaration.name.str());
+                    func = try self.GetGlobalFuncSafe(nameAndNamespace.str());
+                    //std.debug.print("Found global function {s}\n", .{nameAndNamespace.str()});
+                }
+                //parse return type
+                var returnType: ?*LinxcType = null;
+                if (!std.mem.eql(u8, funcDeclaration.returnType.fullName.str(), "void"))
+                {
+                    try self.CheckTypeName(&funcDeclaration.*.returnType);
+                    returnType = try self.GetTypeFromDataSafe(&funcDeclaration.*.returnType);
+                }
+                func.returnType = returnType;
 
-                    //variables
-                    var variables = std.ArrayList(LinxcVariable).init(self.allocator);
-                    for (funcDeclaration.args) |arg|
+                //variables
+                var variables = std.ArrayList(LinxcVariable).init(self.allocator);
+                for (funcDeclaration.args) |*arg|
+                {
+                    const argNameStr = try string.init_with_contents(self.allocator, arg.name.str());
+                    try self.CheckTypeName(&arg.*.typeName);
+                    const argType = try self.GetTypeFromDataSafe(&arg.*.typeName);
+                    try variables.append(LinxcVariable
                     {
-                        const argNameStr = try string.init_with_contents(self.allocator, arg.name.str());
-                        try self.CheckTypeName(&arg.typeName);
-                        const argType = try self.GetTypeFromDataSafe(&arg.typeName);
-                        try variables.append(LinxcVariable
-                        {
-                            .name = argNameStr,
-                            .variableType = argType
-                        });
-                    }
-                    const variablesSlice: ?[]LinxcVariable = null;
-                    if (variables.items.len > 0)
-                    {
-                        variablesSlice = try variables.toOwnedSlice();
-                    }
-                    func.args = variablesSlice;
+                        .name = argNameStr,
+                        .variableType = argType
+                    });
+                }
+                var variablesSlice: ?[]LinxcVariable = null;
+                if (variables.items.len > 0)
+                {
+                    variablesSlice = try variables.toOwnedSlice();
+                }
+                func.args = variablesSlice;
 
-                    //generic types
-                    if (funcDeclaration.templateTypes != null)
+                //generic types
+                if (funcDeclaration.templateTypes != null)
+                {
+                    for (funcDeclaration.templateTypes.?) |templateType|
                     {
-                        for (funcDeclaration.templateTypes.?) |templateType|
-                        {
-                            const templateTypeName = try string.init_with_contents(self.allocator, templateType.str());
-                            try func.genericTypes.append(templateTypeName);
-                        }
+                        const templateTypeName = try string.init_with_contents(self.allocator, templateType.str());
+                        try func.genericTypes.append(templateTypeName);
                     }
                 }
             },
@@ -413,7 +434,7 @@ pub const ReflectionDatabase = struct
             }
         }
     }
-    pub fn TypenameToUseableString(db: *@This(), self: *ast.TypeNameData, allocator: std.mem.Allocator) anyerror!string
+    pub fn TypenameToUseableString(db: *@This(), self: *ast.TypeNameData, allocator: std.mem.Allocator, specializeTemplates: bool) anyerror!string
     {
         var result: string = string.init(allocator);
         if (self.namespace.str().len > 0)
@@ -424,15 +445,34 @@ pub const ReflectionDatabase = struct
         try result.concat(self.name.str());
         if (self.templateTypes != null)
         {
-            var i: usize = 0;
-            while (i < self.templateTypes.?.items.len) : (i += 1)
+            if (specializeTemplates)
             {
-                try result.concat("_");
-                const templateType = try db.GetTypeFromDataSafe(&self.templateTypes.?.items[i]);
-                var templateTypeStr = try std.fmt.allocPrint(allocator, "{d}", .{templateType.ID});
-                defer allocator.free(templateTypeStr);
-                //var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator);
-                try result.concat(templateTypeStr);
+                var i: usize = 0;
+                while (i < self.templateTypes.?.items.len) : (i += 1)
+                {
+                    try result.concat("_");
+                    const templateType = try db.GetTypeFromDataSafe(&self.templateTypes.?.items[i]);
+                    var templateTypeStr = try std.fmt.allocPrint(allocator, "{d}", .{templateType.ID});
+                    defer allocator.free(templateTypeStr);
+                    //var templateTypeStr = try self.templateTypes.?.items[i].ToUseableString(allocator);
+                    try result.concat(templateTypeStr);
+                }
+            }
+            else
+            {
+                var i: usize = 0;
+                try result.concat("<");
+                while (i < self.templateTypes.?.items.len) : (i += 1)
+                {
+                    var templateTypeNameStr = try db.TypenameToUseableString(&self.templateTypes.?.items[i], allocator, specializeTemplates);
+                    try result.concat_deinit(&templateTypeNameStr);
+
+                    if (i < self.templateTypes.?.items.len - 1)
+                    {
+                        try result.concat(", ");
+                    }
+                }
+                try result.concat(">");
             }
             //try result.concat("_");
         }
@@ -444,7 +484,7 @@ pub const ReflectionDatabase = struct
         if (self.next != null)
         {
             try result.concat("::");
-            var nextStr = try db.TypenameToUseableString(self.next.?, allocator);//self.next.?.ToUseableString(allocator);
+            var nextStr = try db.TypenameToUseableString(self.next.?, allocator, specializeTemplates);//self.next.?.ToUseableString(allocator);
             try result.concat_deinit(&nextStr);
         }
         return result;
@@ -546,33 +586,33 @@ pub const LinxcType = struct
     templateSpecializations: std.ArrayList(*LinxcType),
     pointerCount: i32,
 
-    pub fn ToString(self: *@This()) !string
-    {
-        var result = string.init(self.name.allocator);
-        try result.concat("Type ");
-        try result.concat(self.name.str());
-        var i: i32 = 0;
-        while (i < self.pointerCount) : (i += 1)
-        {
-            try result.concat("*");
-        }
-        try result.concat(": \n");
-        for (self.variables.items) |*variable|
-        {
-            try result.concat("   ");
-            var varString = try variable.ToString();
-            try result.concat_deinit(&varString);
-            try result.concat("\n");
-        }
-        for (self.functions.items) |*func|
-        {
-            try result.concat("   ");
-            var funcString = try func.ToString();
-            try result.concat_deinit(&funcString);
-            try result.concat("\n");
-        }
-        return result;
-    }
+    // pub fn ToString(self: *@This()) !string
+    // {
+    //     var result = string.init(self.name.allocator);
+    //     try result.concat("Type ");
+    //     try result.concat(self.name.str());
+    //     var i: i32 = 0;
+    //     while (i < self.pointerCount) : (i += 1)
+    //     {
+    //         try result.concat("*");
+    //     }
+    //     try result.concat(": \n");
+    //     for (self.variables.items) |*variable|
+    //     {
+    //         try result.concat("   ");
+    //         var varString = try variable.ToString();
+    //         try result.concat_deinit(&varString);
+    //         try result.concat("\n");
+    //     }
+    //     for (self.functions.items) |*func|
+    //     {
+    //         try result.concat("   ");
+    //         var funcString = try func.ToString();
+    //         try result.concat_deinit(&funcString);
+    //         try result.concat("\n");
+    //     }
+    //     return result;
+    // }
     pub fn deinit(self: *@This()) void
     {
         self.implsTraits.deinit();
@@ -581,11 +621,6 @@ pub const LinxcType = struct
             self.headerFile.?.deinit();
 
         self.name.deinit();
-        for (self.functions.items) |*function|
-        {
-            function.deinit();
-        }
-        self.functions.deinit();
         for (self.variables.items) |*variable|
         {
             variable.deinit();

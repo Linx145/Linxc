@@ -139,7 +139,7 @@ pub const FunctionData = struct
         {
             for (self.templateTypes.?) |*templateType|
             {
-                templateType.ToOwned(allocator);
+                try templateType.ToOwned(allocator);
             }
         }
         try CompoundStatementToOwned(&self.statement, allocator);

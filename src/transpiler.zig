@@ -26,7 +26,7 @@ pub fn TranspileTypeName(allocator: std.mem.Allocator, writer: std.fs.File.Write
     //if not template args type, transpile as per normal
     if (!isTemplateType)
     {
-        var typeNameStr: string = try database.TypenameToUseableString(typeName, allocator);//variableDeclaration.*.typeName.ToString(allocator);
+        var typeNameStr: string = try database.TypenameToUseableString(typeName, allocator, true);//variableDeclaration.*.typeName.ToString(allocator);
         defer typeNameStr.deinit();
         _ = try writer.write(typeNameStr.str());
     }
@@ -228,7 +228,11 @@ pub fn TranspileExpression(allocator: std.mem.Allocator, writer: std.fs.File.Wri
         .FunctionCall => |FunctionCall|
         {
             //TODO: change?
-            try TranspileTypeName(allocator, writer, &FunctionCall.name, database, specializationMap);
+            var funcNameStr: string = try database.TypenameToUseableString(&FunctionCall.name, allocator, false);
+            _ = try writer.write(funcNameStr.str());
+            funcNameStr.deinit();
+
+            //try TranspileTypeName(allocator, writer, &FunctionCall.name, database, specializationMap);
             _ = try writer.write("(");
             var j: usize = 0;
             while (j < FunctionCall.inputParams.len) : (j += 1)
@@ -499,7 +503,7 @@ pub fn TranspileTemplatedStruct(hwriter: std.fs.File.Writer, cwriter: std.fs.Fil
         var alreadyIncludedHeaders = std.StringHashMap(void).init(allocator);
         if (genericType.headerFile != null)
         {
-            std.debug.print("generic type {s} implemented in header {s}\n", .{genericTypeName.str(), genericType.headerFile.?.str()});
+            //std.debug.print("generic type {s} implemented in header {s}\n", .{genericTypeName.str(), genericType.headerFile.?.str()});
             try alreadyIncludedHeaders.put(genericType.headerFile.?.str(), {});
         }
         while (j < genericType.templateSpecializations.items.len) : (j += 1)
