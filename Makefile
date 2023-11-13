@@ -9,17 +9,25 @@ ifndef verbose
 endif
 
 ifeq ($(config),debug)
+  Linxcc_config = debug
   Test_config = debug
 endif
 ifeq ($(config),release)
+  Linxcc_config = release
   Test_config = release
 endif
 
-PROJECTS := Test
+PROJECTS := Linxcc Test
 
 .PHONY: all clean help $(PROJECTS) 
 
 all: $(PROJECTS)
+
+Linxcc:
+ifneq (,$(Linxcc_config))
+	@echo "==== Building Linxcc ($(Linxcc_config)) ===="
+	@${MAKE} --no-print-directory -C src -f Makefile config=$(Linxcc_config)
+endif
 
 Test:
 ifneq (,$(Test_config))
@@ -28,6 +36,7 @@ ifneq (,$(Test_config))
 endif
 
 clean:
+	@${MAKE} --no-print-directory -C src -f Makefile clean
 	@${MAKE} --no-print-directory -C linxc-out -f Makefile clean
 
 help:
@@ -40,6 +49,7 @@ help:
 	@echo "TARGETS:"
 	@echo "   all (default)"
 	@echo "   clean"
+	@echo "   Linxcc"
 	@echo "   Test"
 	@echo ""
 	@echo "For more information, see https://github.com/premake/premake-core/wiki"

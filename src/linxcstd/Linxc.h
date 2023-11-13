@@ -1,6 +1,5 @@
 #ifndef linxch
 #define linxch
-#include "Reflection.h"
 
 #define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
 #define trait struct
@@ -16,12 +15,6 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
 
-struct Object
-{
-    void *ptr;
-    Reflection::Type *type;
-};
-
-/// All calls are replaced by the transpiler to point to the self variable when used in a trait function
-#define trait_self() Object{}
+// All calls are replaced by the transpiler to point to the self variable when used in a trait function
+//#define trait_self() Object{}
 #endif

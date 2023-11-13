@@ -6,6 +6,10 @@
         "xhash": "cpp",
         "xstring": "cpp",
         "list": "cpp",
-        "xmemory": "cpp"
+        "xmemory": "cpp",
+        "stdbool.h": "c",
+        "linxc.h": "c",
+        "thread": "c",
+        "ctype.h": "c"
     }
 }

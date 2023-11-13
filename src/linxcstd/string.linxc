@@ -1,0 +1,12 @@
+#ifndef linxcstring
+#define linxcstring
+
+#include "Linxc.h"
+
+struct string
+{
+    char *buffer;
+    usize length;
+};
+
+#endif

@@ -2,6 +2,23 @@ workspace "LinxcTest"
     configurations { "Debug", "Release" }
     architecture "x64"
 
+project "Linxcc"
+    kind "ConsoleApp"
+    language "C"
+    targetdir "bin/linxcc/%{cfg.buildcfg}"
+    includedirs {"src/include", "src/linxcstd"}
+    location "src"
+
+    files { "src/**.h", "src/**.c" }
+
+    filter "configurations:Debug"
+        defines { "DEBUG" }
+        symbols "On"
+
+    filter "configurations:Release"
+        defines { "NDEBUG" }
+        optimize "On"
+
 project "Test"
     kind "ConsoleApp"
     language "C++"

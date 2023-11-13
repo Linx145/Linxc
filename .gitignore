@@ -6,3 +6,5 @@ zig-out/
 /build-*/
 /docgen_tmp/
 linxc-out
+bin
+src/obj
