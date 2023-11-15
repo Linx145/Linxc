@@ -1,6 +1,7 @@
 #include <lexer.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.linxc>
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID)
@@ -28,19 +29,17 @@ bool LinxcIsPrimitiveType(LinxcTokenID ID)
 LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
 {
     self->prevIndex = self->index;
-    LinxcToken result = 
-    {
-        .tokenizer = self,
-        .end = 0,
-        .start = 0,
-        .ID = Linxc_Invalid
-    };
+    LinxcToken result;
+    result.tokenizer = self;
+    result.end = 0;
+    result.start = self->index;
+    result.ID = Linxc_Eof;
     LinxcTokenizerState state = Linxc_State_Start;
 
     bool isString = false;
     i32 counter = 0;
 
-    for (usize i = 0; i < self->bufferLength; i++)
+    for (; self->index < self->bufferLength; self->index++)
     {
         bool toBreak = false;
         const char c = self->buffer[self->index];
@@ -186,14 +185,18 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
                         case '\x0B':
                         case '\x0C':
                         case ' ':
-                            self->index += 1;
+                            //self->index += 1;
+                            result.start = self->index + 1;
+                            break;
+                        case '\0':
+                            toBreak = true;
                             break;
                         default:
                             if (c >= '1' && c <= '9')
                             {
                                 state = Linxc_State_IntegerLiteral;
                             }
-                            else if (isalpha(c) > 0)
+                            else if (isalpha(c) != 0)
                             {
                                 state = Linxc_State_Identifier;
                             }
@@ -346,7 +349,7 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
                     break;
 
                     default:
-                    state = Linxc_CharLiteral;
+                    state = Linxc_State_CharLiteralStart;
                     break;
                 }
                 break;
@@ -484,9 +487,15 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
                 }
                 else
                 {
+                    result.ID = Linxc_Identifier;
+                    if (self->prevTokenID == Linxc_Hash)
+                    {
+                        self->preprocessorDirective = true;
+                    }
                     // result.ID = TokenID.getKeyword(self.buffer[result.start..self.index], self.prev_tok_id == .Hash and !self.pp_directive) orelse .Identifier;
                     // if (self.prev_tok_id == .Hash)
                     //     self.pp_directive = true;
+                    toBreak = true;
                 }
                 break;
             case Linxc_State_Colon:
@@ -1000,7 +1009,7 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
         }
         if (toBreak)
         {
-                break;
+            break;
         }
     }
     if (self->index == self->bufferLength)
@@ -1081,7 +1090,7 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
             case Linxc_State_LineComment: result.ID = Linxc_LineComment; break;
         }
     }
-
+    //printf("%u\n", result.start);
     self->prevTokenID = result.ID;
     result.end = self->index;
     return result;

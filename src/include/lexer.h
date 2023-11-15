@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <string.linxc>
 
-typedef enum
+enum LinxcTokenID
 {
     Linxc_Invalid,
     Linxc_Eof,
@@ -141,9 +141,9 @@ typedef enum
     Linxc_Keyword_ifndef,
     Linxc_Keyword_error,
     Linxc_Keyword_pragma
-} LinxcTokenID;
+};
 
-typedef enum
+enum LinxcTokenizerState
 {
     Linxc_State_Start,
     Linxc_State_Cr,
@@ -203,9 +203,9 @@ typedef enum
     Linxc_State_FloatExponent,
     Linxc_State_FloatExponentDigits,
     Linxc_State_FloatSuffix,
-} LinxcTokenizerState;
+};
 
-typedef struct LinxcTokenizer
+struct LinxcTokenizer
 {
     char *buffer;
     i32 bufferLength;
@@ -215,15 +215,15 @@ typedef struct LinxcTokenizer
     bool preprocessorDirective;
     usize currentLine;
     usize charsParsed;
-} LinxcTokenizer;
+};
 
-typedef struct LinxcToken
+struct LinxcToken
 {
     LinxcTokenizer *tokenizer;
     LinxcTokenID ID;
     u32 start;
     u32 end;
-} LinxcToken;
+};
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID);
 

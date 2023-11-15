@@ -4,12 +4,12 @@ workspace "LinxcTest"
 
 project "Linxcc"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "bin/linxcc/%{cfg.buildcfg}"
     includedirs {"src/include", "src/linxcstd"}
     location "src"
 
-    files { "src/**.h", "src/**.c" }
+    files { "src/**.h", "src/**.c", "src/**.hpp", "src/**.cpp", "src/**.linxc" }
 
     filter "configurations:Debug"
         defines { "DEBUG" }

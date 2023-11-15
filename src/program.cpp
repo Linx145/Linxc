@@ -1,5 +1,6 @@
 #include <lexer.h>
 #include <stdio.h>
+#include <string.linxc>
 
 i32 main()
 {
@@ -10,7 +11,21 @@ i32 main()
     while (true)
     {
         LinxcToken next = LinxcTokenizerNext(&tokenizer);
-        
+
+
+        if (next.ID != Linxc_Nl)
+        {
+            string str = string(tokenizer.buffer, next.start, next.end - next.start);
+
+            printf("%s\n", str.buffer);
+
+            str.deinit();
+        }
+
+        if (next.ID == Linxc_Eof || next.ID == Linxc_Invalid)
+        {
+            break;
+        }
     }
 
     printf("Test passed");

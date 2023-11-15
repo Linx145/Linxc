@@ -2,11 +2,36 @@
 #define linxcstring
 
 #include "Linxc.h"
+#include "stdlib.h"
+#include "string.h"
 
 struct string
 {
     char *buffer;
     usize length;
+
+    string(char* source, usize length)
+    {
+        buffer = (char *)malloc(length + 1);
+        buffer[length] = '\0';
+        this->length = length;
+        memcpy(buffer, (void*)source, length);
+    }
+    string(char* source, usize offset, usize length)
+    {
+        buffer = (char*)malloc(length + 1);
+        buffer[length] = '\0';
+        this->length = length;
+        memcpy(buffer, (void*)(source + offset), length);
+    }
+    void deinit()
+    {
+        free(buffer);
+    }
+    bool eql(const char *other)
+    {
+        return strcmp(buffer, other) == 0;
+    }
 };
 
 #endif
