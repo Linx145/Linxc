@@ -67,6 +67,7 @@ endif
 OBJECTS := \
 	$(OBJDIR)/lexer.o \
 	$(OBJDIR)/program.o \
+	$(OBJDIR)/string.o \
 
 RESOURCES := \
 
@@ -129,6 +130,9 @@ $(OBJDIR)/lexer.o: lexer.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
 $(OBJDIR)/program.o: program.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
+$(OBJDIR)/string.o: string.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
 

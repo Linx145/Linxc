@@ -1,37 +1,58 @@
-#ifndef linxcstring
-#define linxcstring
+// #ifndef linxcstring
+// #define linxcstring
 
-#include "Linxc.h"
-#include "stdlib.h"
-#include "string.h"
+// #include "Linxc.h"
+// #include "stdlib.h"
+// #include "string.h"
+// #include "slice.linxc"
+// #include "hash.linxc"
 
-struct string
-{
-    char *buffer;
-    usize length;
+// struct string
+// {
+//     char *buffer;
+//     usize length;
 
-    string(char* source, usize length)
-    {
-        buffer = (char *)malloc(length + 1);
-        buffer[length] = '\0';
-        this->length = length;
-        memcpy(buffer, (void*)source, length);
-    }
-    string(char* source, usize offset, usize length)
-    {
-        buffer = (char*)malloc(length + 1);
-        buffer[length] = '\0';
-        this->length = length;
-        memcpy(buffer, (void*)(source + offset), length);
-    }
-    void deinit()
-    {
-        free(buffer);
-    }
-    bool eql(const char *other)
-    {
-        return strcmp(buffer, other) == 0;
-    }
-};
+//     string(const char* source)
+//     {
+//         this->length = strlen(source) + 1;
+//         this->buffer = (char *)malloc(this->length);
+//         strcpy(this->buffer, source);
+//     }
+//     string(const char* source, usize offset, usize length)
+//     {
+//         buffer = (char*)malloc(length + 1);
+//         buffer[length] = '\0';
+//         this->length = length;
+//         memcpy(buffer, (void*)(source + offset), length);
+//     }
 
-#endif
+//     inline Slice ToSlice()
+//     {
+//         return Slice(buffer, length);
+//     }
+
+//     inline Slice ToSlice(usize start, usize len)
+//     {
+//         return Slice((void*)(buffer + start), len);
+//     }
+    
+//     void deinit()
+//     {
+//         free(buffer);
+//     }
+//     bool eql(const char *other)
+//     {
+//         return strcmp(buffer, other) == 0;
+//     }
+// };
+
+// bool stringEql(string A, string B)
+// {
+//     return A.eql(B.buffer);
+// }
+// i32 stringHash(string A)
+// {
+//     return GetHash(A.buffer);
+// }
+
+// #endif

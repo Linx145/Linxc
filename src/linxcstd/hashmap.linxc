@@ -1,0 +1,188 @@
+#ifndef linxchashmap
+#define linxchashmap
+
+#define HASHMAP_MAX_WEIGHT 0.8f
+
+#include "Linxc.h"
+#include "vector.linxc"
+
+namespace collections
+{
+    template <typename K, typename V>
+    struct hashmap
+    {
+        struct Entry
+        {
+            K key;
+            V value;
+        };
+        struct Bucket
+        {
+            bool initialized;
+            i32 keyHash;
+            collections::vector<Entry> entries;
+        };
+        def_delegate(HashFunc, i32, K);
+        def_delegate(EqlFunc, bool, K, K);
+
+        HashFunc hashFunc;
+        EqlFunc eqlFunc;
+
+        Bucket *buckets;
+        usize bucketsCount;
+        usize filledBuckets;
+        usize Count;
+
+        hashmap(HashFunc hashFunction, EqlFunc eqlFunc)
+        {
+            this->hashFunc = hashFunction;
+            this->eqlFunc = eqlFunc;
+            this->Count = 0;
+            this->filledBuckets = 0;
+            this->bucketsCount = 32;
+            this->buckets = (Bucket*)malloc(this->bucketsCount * sizeof(Bucket));
+            for (usize i = 0; i < this->bucketsCount; i++)
+            {
+                this->buckets[i].initialized = false;
+            }
+        }
+        void deinit()
+        {
+            for (usize i = 0; i < bucketsCount; i++)
+            {
+                buckets[i].entries.deinit();
+                //buckets[i].entries.~();
+            }
+            free(buckets);
+        }
+
+        void EnsureCapacity()
+        {
+            //in all likelihood, we may have to fill an additional bucket
+            //on adding a new item. Thus, we may have to resize the underlying buffer if the weight
+            //is more than 0.75
+            if (filledBuckets + 1.0f >= bucketsCount * HASHMAP_MAX_WEIGHT)
+            {
+                usize newSize = bucketsCount * 2;
+
+                Bucket *newBuckets = (Bucket*)malloc(newSize * sizeof(Bucket));
+
+                for (usize i = 0; i < newSize; i++)
+                {
+                    newBuckets[i].initialized = false;
+                }
+                for (usize i = 0; i < bucketsCount; i++)
+                {
+                    usize newIndex = buckets[i].keyHash % newSize;
+                    newBuckets[newIndex] = buckets[i];
+                }
+
+                free(buckets);
+                buckets = newBuckets;
+                bucketsCount = newSize;
+            }
+        }
+
+        void Add(K key, V value)
+        {
+            EnsureCapacity();
+            i32 hash = hashFunc(key);
+            usize index = hash % bucketsCount;
+
+            if (!buckets[index].initialized)
+            {
+                buckets[index].initialized = true;
+                buckets[index].keyHash = hash;
+                buckets[index].entries = collections::vector<Entry>();
+
+                filledBuckets++;
+            }
+            Count++;
+            for (usize i = 0; i < buckets[index].entries.count; i++)
+            {
+                if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                {
+                    buckets[index].entries.Get(i)->value = value;
+                    return;
+                }
+            }
+
+            Entry newEntry;
+            newEntry.key = key;
+            newEntry.value = value;
+
+            buckets[index].entries.Add(newEntry);
+        }
+
+        bool Remove(K key)
+        {
+            i32 hash = hashFunc(key);
+            usize index = hash % bucketsCount;
+
+            if (buckets[index].initialized)
+            {
+                for (usize i = 0; i < buckets[index].entries.count; i++)
+                {
+                    if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                    {
+                        //buckets[index].entries.Get(i)->value.V~();
+                        buckets[index].entries.RemoveAt_Swap(i);
+
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        V *Get(K key)
+        {
+            i32 hash = hashFunc(key);
+            usize index = hash % bucketsCount;
+
+            if (buckets[index].initialized)
+            {
+                if (buckets[index].entries.count > 1)
+                {
+                    for (usize i = 0; i < buckets[index].entries.count; i++)
+                    {
+                        if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                        {
+                            return &buckets[index].entries.Get(i)->value;
+                        }
+                    }
+                }
+                else
+                {
+                    return &buckets[index].entries.Get(0)->value;
+                }
+            }
+            return (V*)0;
+        }
+
+        bool Contains(K key)
+        {
+            i32 hash = hashFunc(key);
+            i32 index = hash % bucketsCount;
+
+            if (!buckets[index].initialized)
+            {
+                return false;
+            }
+
+            if (buckets[index].entries.count > 0)
+            {
+                for (i32 i = 0; i < buckets[index].entries.count; i++)
+                {
+                    if (eqlFunc(key, buckets[index].entries.Get(i)->key))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+    };
+}
+
+#endif

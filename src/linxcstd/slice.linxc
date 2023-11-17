@@ -1,0 +1,20 @@
+#ifndef linxcslice
+#define linxcslice
+
+#include "Linxc.h"
+
+/// A slice is a length and a pointer to memory that it does not own.
+impl_trait(ToHash)
+struct Slice
+{
+    void *ptr;
+    usize len;
+
+    Slice(void *ptr, usize len)
+    {
+        this->ptr = ptr;
+        this->len = len;
+    }
+};
+
+#endif

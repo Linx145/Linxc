@@ -1,8 +1,10 @@
-#include <lexer.h>
+#include <lexer.hpp>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <string.linxc>
+#include <string.hpp>
+
+collections::hashmap<string, LinxcTokenID> nameToToken = collections::hashmap<string, LinxcTokenID>(&stringHash, &stringEql);
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID)
 {
@@ -487,7 +489,11 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
                 }
                 else
                 {
-                    result.ID = Linxc_Identifier;
+                    result.ID = LinxcGetKeyword(self->buffer + result.start, self->index - result.start, self->prevTokenID == Linxc_Hash && !self->preprocessorDirective);
+                    if (result.ID == Linxc_Invalid)
+                    {
+                        result.ID = Linxc_Identifier;
+                    }
                     if (self->prevTokenID == Linxc_Hash)
                     {
                         self->preprocessorDirective = true;
@@ -593,6 +599,7 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
                 {
                     result.ID = Linxc_MacroString;
                     self->index += 1;
+                    toBreak = true;
                 }
                 break;
             case Linxc_State_AngleBracketLeft:
@@ -1110,4 +1117,37 @@ LinxcTokenizer LinxcCreateTokenizer(char *buffer, i32 bufferLength)
     result.prevTokenID = Linxc_Invalid;
 
     return result;
+};
+
+LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocessorDirective)
+{
+    string str = string(chars, 0, strlen);
+
+    if (nameToToken.Count == 0)
+    {
+        //string str2 = string("include");
+        //printf("include hash: %i, length: %llu\n", nameToToken.hashFunc(str2), str2.length);
+        //str2.deinit();
+
+        nameToToken.Add(string("include"), Linxc_Keyword_include);
+
+        //printf("my hash: %i, length: %llu\n", nameToToken.hashFunc(str), str.length);
+    }
+    LinxcTokenID *tokenIDPtr = nameToToken.Get(str);
+
+    str.deinit();
+
+    if (tokenIDPtr != NULL)
+    {
+        LinxcTokenID tokenID = *tokenIDPtr;
+        if (tokenID == Linxc_Keyword_include || tokenID == Linxc_Keyword_define || tokenID == Linxc_Keyword_ifdef || tokenID == Linxc_Keyword_ifndef || tokenID == Linxc_Keyword_error || tokenID == Linxc_Keyword_pragma)
+        {
+            if (!isPreprocessorDirective)
+            {
+                return Linxc_Invalid;
+            }
+        }
+        return tokenID;
+    }
+    return Linxc_Invalid;
 };

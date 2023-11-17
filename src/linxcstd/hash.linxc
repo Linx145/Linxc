@@ -1,0 +1,35 @@
+#ifndef linxchash
+#define linxchash
+
+#include "Linxc.h"
+
+inline i32 GetHash(u8* buffer, usize len)
+{
+    i32 hash = 7;
+    for (usize i = 0; i < len; i++)
+    {
+        hash = hash * 31 + buffer[i];
+    }
+    return hash;
+};
+
+inline i32 GetHash(const char* ptr)
+{
+    i32 hash = 7;
+    usize i = 0;
+    while (true)
+    {
+        if (ptr[i] == '\0')
+        {
+            break;
+        }
+        else
+        {
+            hash = hash * 31 + ptr[i];
+        }
+        i += 1;
+    }
+    return hash;
+};
+
+#endif

@@ -1,7 +1,7 @@
 #ifndef linxch
 #define linxch
 
-#define delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
+#define def_delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
 #define trait struct
 #define impl_trait(name)
 

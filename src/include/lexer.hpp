@@ -3,7 +3,8 @@
 
 #include <Linxc.h>
 #include <stdbool.h>
-#include <string.linxc>
+#include <string.hpp>
+#include <hashmap.linxc>
 
 enum LinxcTokenID
 {
@@ -143,6 +144,8 @@ enum LinxcTokenID
     Linxc_Keyword_pragma
 };
 
+extern collections::hashmap<string, LinxcTokenID> nameToToken;
+
 enum LinxcTokenizerState
 {
     Linxc_State_Start,
@@ -238,5 +241,8 @@ LinxcToken LinxcTokenizerPeekNext(LinxcTokenizer *self);
 LinxcToken LinxcTokenizerNextUntilValid(LinxcTokenizer *self);
 
 LinxcToken LinxcTokenizerPeekNextUntilValid(LinxcTokenizer *self);
+
+LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective);
+
 
 #endif

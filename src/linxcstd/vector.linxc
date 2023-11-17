@@ -1,66 +1,87 @@
+#ifndef linxcvector
+#define linxcvector
+
 #include <Linxc.h>
 #include <stdlib.h>
 
-template <typename T>
-struct vector
+namespace collections
 {
-    T *ptr;
-    usize capacity;
-    usize count;
-
-    vector()
+    template <typename T>
+    struct vector
     {
-        ptr = NULL;
-        capacity = 0;
-    }
+        T *ptr;
+        usize capacity;
+        usize count;
 
-    void EnsureArrayCapacity(usize minCapacity)
-    {
-        if (capacity < minCapacity)
+        vector()
         {
-            i32 newCapacity = capacity;
-            if (newCapacity == 0)
+            ptr = NULL;
+            capacity = 0;
+            count = 0;
+        }
+        void deinit()
+        {
+            free(ptr);
+        }
+
+        void EnsureArrayCapacity(usize minCapacity)
+        {
+            if (capacity < minCapacity)
             {
-                newCapacity = 4;
+                i32 newCapacity = capacity;
+                if (newCapacity == 0)
+                {
+                    newCapacity = 4;
+                }
+                while (newCapacity < minCapacity)
+                {
+                    newCapacity *= 2;
+                }
+                T *newPtr = (T*)malloc(sizeof(T) * newCapacity);
+                for (usize i = 0; i < capacity; i += 1)
+                {
+                    newPtr[i] = ptr[i];
+                }
+                free(ptr);
+                ptr = newPtr;
+                capacity = newCapacity;
             }
-            while (newCapacity < minCapacity)
+        }
+        void Add(T item)
+        {
+            if (count >= capacity)
             {
-                newCapacity *= 2;
+                usize minCapacity = count;
+                if (capacity + 1 > count)
+                {
+                    minCapacity = capacity + 1;
+                }
+                EnsureArrayCapacity(minCapacity);
             }
-            T *newPtr = malloc(sizeof(T) * newCapacity);
+            ptr[count] = item;
+            count += 1;
+        }
+        void Clear()
+        {
             for (usize i = 0; i < capacity; i += 1)
             {
-                newPtr[i] = ptr[i];
+                ptr[i].~();
             }
-            free(ptr);
-            ptr = newPtr;
-            capacity = newCapacity;
+            count = 0;
         }
-    }
-    void Add(T item)
-    {
-        if (count >= capacity)
+        T *Get(usize index)
         {
-            usize minCapacity = count;
-            if (capacity + 1 > count)
+            return &ptr[index];
+        }
+        void RemoveAt_Swap(usize index)
+        {
+            //ptr[index].~();
+            if (index < count - 1)
             {
-                minCapacity = capacity + 1;
+                ptr[index] = ptr[count - 1];
             }
-            EnsureArrayCapacity(minCapacity);
+            count -= 1;
         }
-        ptr[count] = item;
-        count += 1;
-    }
-    void Clear()
-    {
-        for (usize i = 0; i < capacity; i += 1)
-        {
-            ptr[i].destroy();
-        }
-        count = 0;
-    }
-    void RemoveAt_Swap(usize index)
-    {
-        ptr[index] = ptr[count - 1];
-    }
-};
+    };
+}
+#endif
