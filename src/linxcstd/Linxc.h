@@ -1,6 +1,10 @@
 #ifndef linxch
 #define linxch
 
+#ifndef NULL
+#define NULL 0
+#endif
+
 #define def_delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
 #define trait struct
 #define impl_trait(name)
@@ -15,6 +19,5 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
 
-// All calls are replaced by the transpiler to point to the self variable when used in a trait function
-//#define trait_self() Object{}
+void print(const char *fmt, ...);
 #endif

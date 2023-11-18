@@ -1,12 +1,13 @@
 #include <lexer.hpp>
 #include <stdio.h>
 #include <string.hpp>
+#include <io.hpp>
 
 i32 main()
 {
-    char chars[] = "#include <Linxc.h>\ni32 main() { printf(\"Hello World!\"); }";
+    string input = io::ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
 
-    LinxcTokenizer tokenizer = LinxcCreateTokenizer(chars, sizeof(chars) / sizeof(char));
+    LinxcTokenizer tokenizer = LinxcCreateTokenizer(input.buffer, input.length);
 
     while (true)
     {
@@ -30,5 +31,6 @@ i32 main()
     }
 
     printf("Test passed\n");
+    input.deinit();
     return 0;
 }

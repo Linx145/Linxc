@@ -1,5 +1,5 @@
-#ifndef lexer
-#define lexer
+#ifndef linxcclexer
+#define linxcclexer
 
 #include <Linxc.h>
 #include <stdbool.h>

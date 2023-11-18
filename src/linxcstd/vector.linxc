@@ -19,9 +19,16 @@ namespace collections
             capacity = 0;
             count = 0;
         }
+        vector(usize minCapacity)
+        {
+            ptr = malloc(sizeof(T) * minCapacity);
+            capacity = minCapacity;
+            count = 0;
+        }
         void deinit()
         {
             free(ptr);
+            ptr = NULL;
         }
 
         void EnsureArrayCapacity(usize minCapacity)
