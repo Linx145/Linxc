@@ -44,7 +44,7 @@ def macro
 
 begin
 
-foreach linxc file
+foreach linxc file in directories of project
     if file not parsed
         add file name to list of parsing files
 
@@ -56,6 +56,7 @@ foreach linxc file
                     if include statement <file>
                         if <file> is under list of parsing files, that means we are already parsing that file in the tree, throw error
                         if <file> is under list of parsed files, ignore
+                        else search for existence of <file> under directory of files in project, parse file first
 
                     if #define <name>; add <name> to list of defines
                     if #define <name>(<args>) <code>; add <name> to list of defines and add <code> under it with <args>

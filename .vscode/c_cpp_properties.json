@@ -1,11 +1,13 @@
 {
     "configurations": [
         {
+            "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/src/include/",
                 "${workspaceFolder}/Tests/",
                 "${workspaceFolder}/src/linxcstd/"
             ],
+            "defines": ["WINDOWS"],
             "intelliSenseMode": "windows-msvc-x64",
             "compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.35.32215\\bin\\Hostx64\\x64\\cl.exe",
             "cStandard": "c17",

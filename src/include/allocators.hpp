@@ -2,7 +2,6 @@
 #define linxccallocators
 
 #include <Linxc.h>
-#include <vector.linxc>
 #include <stdlib.h>
 
 def_delegate(allocFunc, void *, usize);
@@ -12,22 +11,26 @@ struct IAllocator
 {
     allocFunc Allocate;
     freeFunc Free;
+    IAllocator();
+    IAllocator(allocFunc AllocateFunc, freeFunc freeFunc);
 };
+
+extern IAllocator defaultAllocator;
 
 IAllocator CAllocator();
 
-struct ArenaAllocator
-{
-    collections::vector<void *> ptrs;
-    IAllocator baseAllocator;
+// struct ArenaAllocator
+// {
+//     collections::vector<void *> ptrs;
+//     IAllocator baseAllocator;
 
-    ArenaAllocator();
+//     ArenaAllocator();
 
-    void *Allocate(usize bytes);
+//     void *Allocate(usize bytes);
 
-    void Free(void *ptr);
+//     void Free(void *ptr);
 
-    void deinit();
-};
+//     void deinit();
+// };
 
 #endif

@@ -29,8 +29,64 @@ bool LinxcIsPrimitiveType(LinxcTokenID ID)
     }
 }
 
-LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
+LinxcToken LinxcTokenizer::PeekNextUntilValid()
 {
+    bool isPreprocessorDirective = this->preprocessorDirective;
+    usize charsParsed = this->charsParsed;
+    usize line = this->currentLine;
+    usize index = this->index;
+    usize prevIndex = this->prevIndex;
+    LinxcTokenID prevTokenID = this->prevTokenID;
+
+    LinxcToken result = NextUntilValid();
+
+    this->preprocessorDirective = isPreprocessorDirective;
+    this->charsParsed = charsParsed;
+    this->currentLine = line;
+    this->index = index;
+    this->prevIndex = prevIndex;
+    this->prevTokenID = prevTokenID;
+
+    return result;
+}
+
+LinxcToken LinxcTokenizer::NextUntilValid()
+{
+    while (true)
+    {
+        LinxcToken nextToken = Next();
+
+        if (nextToken.ID != Linxc_Nl)
+        {
+            return nextToken;
+        }
+    }
+}
+
+LinxcToken LinxcTokenizer::PeekNext()
+{
+    bool isPreprocessorDirective = this->preprocessorDirective;
+    usize charsParsed = this->charsParsed;
+    usize line = this->currentLine;
+    usize index = this->index;
+    usize prevIndex = this->prevIndex;
+    LinxcTokenID prevTokenID = this->prevTokenID;
+
+    LinxcToken result = this->Next();
+
+    this->preprocessorDirective = isPreprocessorDirective;
+    this->charsParsed = charsParsed;
+    this->currentLine = line;
+    this->index = index;
+    this->prevIndex = prevIndex;
+    this->prevTokenID = prevTokenID;
+
+    return result;
+}
+
+LinxcToken LinxcTokenizer::Next()
+{
+    LinxcTokenizer *self = this;
     self->prevIndex = self->index;
     LinxcToken result;
     result.tokenizer = self;
@@ -1111,25 +1167,33 @@ LinxcToken LinxcTokenizerNext(LinxcTokenizer *self)
     return result;
 };
 
-LinxcTokenizer LinxcCreateTokenizer(char *buffer, i32 bufferLength)
+LinxcTokenizer::LinxcTokenizer()
 {
-    LinxcTokenizer result;
+    this->buffer = NULL;
+    this->bufferLength = 0;
+    this->charsParsed = 0;
+    this->currentLine = 0;
+    this->index = 0;
+    this->preprocessorDirective = false;
+    this->prevIndex = 0;
+    this->prevTokenID = Linxc_Invalid;
+}
 
-    result.buffer = buffer;
-    result.bufferLength = bufferLength;
-    result.charsParsed = 0;
-    result.currentLine = 0;
-    result.index = 0;
-    result.preprocessorDirective = false;
-    result.prevIndex = 0;
-    result.prevTokenID = Linxc_Invalid;
-
-    return result;
+LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength)
+{
+    this->buffer = buffer;
+    this->bufferLength = bufferLength;
+    this->charsParsed = 0;
+    this->currentLine = 0;
+    this->index = 0;
+    this->preprocessorDirective = false;
+    this->prevIndex = 0;
+    this->prevTokenID = Linxc_Invalid;
 };
 
 LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocessorDirective)
 {
-    string str = string(chars, 0, strlen);
+    string str = string(chars, strlen);
 
     if (nameToToken.Count == 0)
     {

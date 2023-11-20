@@ -1,29 +1,24 @@
-#ifndef linxchashmap
-#define linxchashmap
+#ifndef linxchashset
+#define linxchashset
 
-#define HASHMAP_MAX_WEIGHT 0.8f
+#define HASHSET_MAX_WEIGHT 0.8f
 
 #include "Linxc.h"
 #include "vector.linxc"
 
 namespace collections
 {
-    template <typename K, typename V>
-    struct hashmap
+    template <typename T>
+    struct hashset
     {
-        struct Entry
-        {
-            K key;
-            V value;
-        };
         struct Bucket
         {
             bool initialized;
             i32 keyHash;
-            collections::vector<Entry> entries;
+            collections::vector<T> entries;
         };
-        def_delegate(HashFunc, i32, K);
-        def_delegate(EqlFunc, bool, K, K);
+        def_delegate(HashFunc, i32, T);
+        def_delegate(EqlFunc, bool, T, T);
 
         HashFunc hashFunc;
         EqlFunc eqlFunc;
@@ -33,7 +28,7 @@ namespace collections
         usize filledBuckets;
         usize Count;
 
-        hashmap()
+        hashset()
         {
             this->hashFunc = NULL;
             this->eqlFunc = NULL;
@@ -42,7 +37,7 @@ namespace collections
             this->bucketsCount = 32;
             this->buckets = NULL;
         }
-        hashmap(HashFunc hashFunction, EqlFunc eqlFunc)
+        hashset(HashFunc hashFunction, EqlFunc eqlFunc)
         {
             this->hashFunc = hashFunction;
             this->eqlFunc = eqlFunc;
@@ -60,11 +55,9 @@ namespace collections
             for (usize i = 0; i < bucketsCount; i++)
             {
                 buckets[i].entries.deinit();
-                //buckets[i].entries.~();
             }
             free(buckets);
         }
-
         void EnsureCapacity()
         {
             //in all likelihood, we may have to fill an additional bucket
@@ -91,48 +84,41 @@ namespace collections
                 bucketsCount = newSize;
             }
         }
-
-        void Add(K key, V value)
+        void Add(T value)
         {
             EnsureCapacity();
-            i32 hash = hashFunc(key);
+            i32 hash = hashFunc(value);
             usize index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
             {
                 buckets[index].initialized = true;
                 buckets[index].keyHash = hash;
-                buckets[index].entries = collections::vector<Entry>();
+                buckets[index].entries = collections::vector<T>();
 
                 filledBuckets++;
             }
+
             for (usize i = 0; i < buckets[index].entries.count; i++)
             {
-                if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                if (eqlFunc(*buckets[index].entries.Get(i), value))
                 {
-                    buckets[index].entries.Get(i)->value = value;
                     return;
                 }
             }
             Count++;
-
-            Entry newEntry;
-            newEntry.key = key;
-            newEntry.value = value;
-
-            buckets[index].entries.Add(newEntry);
+            buckets[index].entries.Add(value);
         }
-
-        bool Remove(K key)
+        bool Remove(T value)
         {
-            i32 hash = hashFunc(key);
+            i32 hash = hashFunc(value);
             usize index = hash % bucketsCount;
 
             if (buckets[index].initialized)
             {
                 for (usize i = 0; i < buckets[index].entries.count; i++)
                 {
-                    if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                    if (*eqlFunc(buckets[index].entries.Get(i), value))
                     {
                         //buckets[index].entries.Get(i)->value.V~();
                         buckets[index].entries.RemoveAt_Swap(i);
@@ -143,35 +129,9 @@ namespace collections
             }
             return false;
         }
-
-        V *Get(K key)
+        bool Contains(T value)
         {
-            i32 hash = hashFunc(key);
-            usize index = hash % bucketsCount;
-
-            if (buckets[index].initialized)
-            {
-                if (buckets[index].entries.count > 1)
-                {
-                    for (usize i = 0; i < buckets[index].entries.count; i++)
-                    {
-                        if (eqlFunc(buckets[index].entries.Get(i)->key, key))
-                        {
-                            return &buckets[index].entries.Get(i)->value;
-                        }
-                    }
-                }
-                else
-                {
-                    return &buckets[index].entries.Get(0)->value;
-                }
-            }
-            return (V*)0;
-        }
-
-        bool Contains(K key)
-        {
-            i32 hash = hashFunc(key);
+            i32 hash = hashFunc(value);
             i32 index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
@@ -183,7 +143,7 @@ namespace collections
             {
                 for (i32 i = 0; i < buckets[index].entries.count; i++)
                 {
-                    if (eqlFunc(key, buckets[index].entries.Get(i)->key))
+                    if (eqlFunc(value, *buckets[index].entries.Get(i)))
                     {
                         return true;
                     }

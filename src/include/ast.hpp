@@ -13,7 +13,8 @@ typedef struct LinxcNamespace LinxcNamespace;
 /// Represents a type (struct) in Linxc.
 struct LinxcType
 {
-    string namespaces;
+    LinxcNamespace *typeNamespace;
+    LinxcType *parentType;
     string name;
     collections::vector<LinxcVar> variables;
     collections::vector<LinxcFunc> functions;
@@ -24,6 +25,7 @@ struct LinxcType
 /// Represents a function in Linxc, including the character in it's file where it starts and ends.
 struct LinxcFunc
 {
+    LinxcNamespace *funcNamespace;
     usize startIndex;
     usize endIndex;
     string name;
@@ -55,6 +57,7 @@ struct LinxcNamespace
     collections::hashmap<string, LinxcType> types;
     collections::hashmap<string, LinxcNamespace> subNamespaces; //dont need pointer here as internal is pointer already
 
+    LinxcNamespace();
     LinxcNamespace(string name);
 };
 

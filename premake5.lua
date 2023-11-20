@@ -1,6 +1,19 @@
 workspace "LinxcTest"
     configurations { "Debug", "Release" }
+    platforms { "Windows", "MacOS", "Linux" }
     architecture "x64"
+
+filter "platforms:Windows"
+    defines { "WINDOWS" }
+    system "windows"
+
+filter "platforms:MacOS"
+    defines { "MACOS", "POSIX" }
+    system "macosx"
+
+filter "platforms:Linux"
+    defines { "LINUX", "POSIX" }
+    system "linux"
 
 project "Linxcc"
     kind "ConsoleApp"
@@ -19,20 +32,20 @@ project "Linxcc"
         defines { "NDEBUG" }
         optimize "On"
 
-project "Test"
-    kind "ConsoleApp"
-    language "C++"
-    cppdialect "C++17"
-    targetdir "linxc-out/bin/%{cfg.buildcfg}"
-    includedirs {"include", "linxc-out"}
-    location "linxc-out"
+-- project "Test"
+--     kind "ConsoleApp"
+--     language "C++"
+--     cppdialect "C++17"
+--     targetdir "linxc-out/bin/%{cfg.buildcfg}"
+--     includedirs {"include", "linxc-out"}
+--     location "linxc-out"
 
-    files { "linxc-out/**.h", "linxc-out/**.cpp" }
+--     files { "linxc-out/**.h", "linxc-out/**.cpp" }
 
-    filter "configurations:Debug"
-        defines { "DEBUG" }
-        symbols "On"
+--     filter "configurations:Debug"
+--         defines { "DEBUG" }
+--         symbols "On"
 
-    filter "configurations:Release"
-        defines { "NDEBUG" }
-        optimize "On"
+--     filter "configurations:Release"
+--         defines { "NDEBUG" }
+--         optimize "On"

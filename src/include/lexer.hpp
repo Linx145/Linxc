@@ -6,6 +6,9 @@
 #include <string.hpp>
 #include <hashmap.linxc>
 
+typedef struct LinxcToken LinxcToken;
+typedef struct LinxcTokenizer LinxcTokenizer;
+
 enum LinxcTokenID
 {
     Linxc_Invalid,
@@ -208,18 +211,6 @@ enum LinxcTokenizerState
     Linxc_State_FloatSuffix,
 };
 
-struct LinxcTokenizer
-{
-    char *buffer;
-    i32 bufferLength;
-    usize index;
-    usize prevIndex;
-    LinxcTokenID prevTokenID;
-    bool preprocessorDirective;
-    usize currentLine;
-    usize charsParsed;
-};
-
 struct LinxcToken
 {
     LinxcTokenizer *tokenizer;
@@ -228,19 +219,36 @@ struct LinxcToken
     u32 end;
 };
 
+struct LinxcTokenizer
+{
+    const char *buffer;
+    i32 bufferLength;
+    usize index;
+    usize prevIndex;
+    LinxcTokenID prevTokenID;
+    bool preprocessorDirective;
+    usize currentLine;
+    usize charsParsed;
+
+    LinxcTokenizer();
+    LinxcTokenizer(const char *buffer, i32 bufferLength);
+    LinxcToken Next();
+    LinxcToken PeekNext();
+    LinxcToken NextUntilValid();
+    LinxcToken PeekNextUntilValid();
+};
+
 bool LinxcIsPrimitiveType(LinxcTokenID ID);
 
 string LinxcTokenString(LinxcToken *self);
 
-LinxcTokenizer LinxcCreateTokenizer(char *buffer, i32 bufferLength);
+// LinxcToken LinxcTokenizerNext(LinxcTokenizer *self);
 
-LinxcToken LinxcTokenizerNext(LinxcTokenizer *self);
+// LinxcToken LinxcTokenizerPeekNext(LinxcTokenizer *self);
 
-LinxcToken LinxcTokenizerPeekNext(LinxcTokenizer *self);
+// LinxcToken LinxcTokenizerNextUntilValid(LinxcTokenizer *self);
 
-LinxcToken LinxcTokenizerNextUntilValid(LinxcTokenizer *self);
-
-LinxcToken LinxcTokenizerPeekNextUntilValid(LinxcTokenizer *self);
+// LinxcToken LinxcTokenizerPeekNextUntilValid(LinxcTokenizer *self);
 
 LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective);
 

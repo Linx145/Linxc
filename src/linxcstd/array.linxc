@@ -1,0 +1,41 @@
+#ifndef linxcarray
+#define linxcarray
+
+#include <Linxc.h>
+#include <allocators.hpp>
+
+namespace collections
+{
+    template<typename T>
+    struct Array
+    {
+        IAllocator *allocator;
+        T *data;
+        usize length;
+
+        Array()
+        {
+            this->allocator = NULL;
+            this->data = NULL;
+            this->length = 0;
+        }
+        Array(T *data, usize length)
+        {
+            this->allocator = &defaultAllocator;
+            this->data = data;
+            this->length = length;
+        }
+        Array(IAllocator *allocator, T *data, usize length)
+        {
+            this->allocator = allocator;
+            this->data = data;
+            this->length = length;
+        }
+        void deinit()
+        {
+            allocator->Free(data);
+        }
+    };
+}
+
+#endif

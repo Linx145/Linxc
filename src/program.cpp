@@ -1,36 +1,16 @@
-#include <lexer.hpp>
+//#include <lexer.hpp>
 #include <stdio.h>
-#include <string.hpp>
-#include <io.hpp>
+#include <project.hpp>
 
 i32 main()
 {
-    string input = io::ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
+    LinxcProject project = LinxcProject(&defaultAllocator);
 
-    LinxcTokenizer tokenizer = LinxcCreateTokenizer(input.buffer, input.length);
+    project.includedFiles.Add(string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc"));
+    project.includeDirectories.Add(string("C:/Users/Linus/source/repos/Linxc/Tests"));
 
-    while (true)
-    {
-        LinxcToken next = LinxcTokenizerNext(&tokenizer);
-        if (next.ID == Linxc_Eof || next.ID == Linxc_Invalid)
-        {
-            if (next.ID == Linxc_Invalid)
-            {
-                printf("INVALID!\n");
-            }
-            break;
-        }
-        if (next.ID != Linxc_Nl)
-        {
-            string str = string(tokenizer.buffer, next.start, next.end - next.start);
-
-            printf("%s\n", str.buffer);
-
-            str.deinit();
-        }
-    }
-
-    printf("Test passed\n");
-    input.deinit();
+    project.Build();
+    project.deinit();
+    // string input = io::ReadFile("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
     return 0;
 }
