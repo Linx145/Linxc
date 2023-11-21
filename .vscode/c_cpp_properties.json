@@ -7,11 +7,13 @@
                 "${workspaceFolder}/Tests/",
                 "${workspaceFolder}/src/linxcstd/"
             ],
-            "defines": ["WINDOWS"],
-            "intelliSenseMode": "windows-msvc-x64",
-            "compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.35.32215\\bin\\Hostx64\\x64\\cl.exe",
+            "defines": [
+                "WINDOWS"
+            ],
+            "compilerPath": "C:/Program Files/LLVM/bin/clang",
+            "intelliSenseMode": "windows-clang-x64",
             "cStandard": "c17",
-            "cppStandard": "c++17"
+            "cppStandard": "c++11"
         }
     ],
     "version": 4

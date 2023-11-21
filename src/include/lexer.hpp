@@ -217,6 +217,8 @@ struct LinxcToken
     LinxcTokenID ID;
     u32 start;
     u32 end;
+
+    string ToString(IAllocator *allocator);
 };
 
 struct LinxcTokenizer
@@ -239,8 +241,6 @@ struct LinxcTokenizer
 };
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID);
-
-string LinxcTokenString(LinxcToken *self);
 
 // LinxcToken LinxcTokenizerNext(LinxcTokenizer *self);
 

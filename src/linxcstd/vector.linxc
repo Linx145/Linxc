@@ -125,7 +125,7 @@ namespace collections
         {
             return collections::Array<T>(NULL, this->ptr, this->count);
         }
-        void AddAll(collections::vector<T> *from)
+        void AddAll_deinit(collections::vector<T> *from)
         {
             memcpy(this->ptr, from->ptr, from->count * sizeof(T));
             from->deinit();

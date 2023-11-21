@@ -1167,6 +1167,11 @@ LinxcToken LinxcTokenizer::Next()
     return result;
 };
 
+string LinxcToken::ToString(IAllocator *allocator)
+{
+    return string(allocator, this->tokenizer->buffer + this->start, this->end - this->start);
+}
+
 LinxcTokenizer::LinxcTokenizer()
 {
     this->buffer = NULL;

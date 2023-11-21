@@ -18,7 +18,7 @@ struct LinxcType
     string name;
     collections::vector<LinxcVar> variables;
     collections::vector<LinxcFunc> functions;
-    collections::vector<LinxcType*> subTypes;
+    collections::vector<LinxcType> subTypes;
     collections::vector<string> templateArgs;
 };
 

@@ -1,0 +1,25 @@
+considering the following advanced type reference
+using namespaceA;
+
+namespaceB::namespaceC::type::subtype
+
+where namespaceB is a sub-namespace of A
+
+
+To find subtype, we would need to:
+realise namespaceB is not in the global namespace
+find namespaceB in used namespaceA;
+find namespaceC in used namespaceB;
+find type in used namespaceC;
+find subtype in type
+
+We could use a method of recursion where namespaces that the function is in, as well as the global namespace and using'd namespaces are all appended to a vector, which is then used to check for sub-namespaces that contain the current identifier, or types that contain the current identifier.
+
+Upon finding a type that contains the current identifier, we search for subtypes that contain the next identifier.
+
+If none are found for either step, we decide that the type does not exist.
+
+One more issue is the existence of #includes. A type may be defined in a file that is not #included. We need to make sure that we do not just scan the entire namespace reflection database, but just the #included files.
+
+Another way to check is to first parse the summation of namespaceB::namespaceC::type::subtype, which is translated to the C type name, namespaceB_namespaceC_type_subtype. Then, variants of the C typename are created, one for each using'd namespace or namespace the code itself is in.
+Then, we query a database of types from Linxc header files included in this file, which is built up with each #include. If it contains the C type name, we return it, otherwise, we throw an error.
