@@ -50,19 +50,37 @@ void string::deinit()
 }
 bool string::eql(const char *other)
 {
+    if (this->buffer == NULL)
+    {
+        return false;
+    }
     return strcmp(buffer, other) == 0;
 }
 void string::Append(const char *other)
 {
     usize otherLen = strlen(other);
     usize newLength = otherLen + this->length;
+    if (this->length == 0)
+    {
+        newLength += 1;
+    }
     char *newBuffer = (char*)this->allocator->Allocate(newLength);
 
-    memcpy(newBuffer, this->buffer, this->length - 1);
-    memcpy(newBuffer + this->length - 1, other, otherLen);
+    if (this->buffer != NULL)
+    {
+        memcpy(newBuffer, this->buffer, this->length - 1);
+        memcpy(newBuffer + this->length - 1, other, otherLen);
+    }
+    else
+    {
+        memcpy(newBuffer, other, otherLen);
+    }
     newBuffer[newLength - 1] = '\0';
 
-    this->allocator->Free(this->buffer);
+    if (this->buffer != NULL)
+    {
+        this->allocator->Free(this->buffer);
+    }
     this->buffer = newBuffer;
     this->length = newLength;
 }
@@ -70,23 +88,53 @@ void string::Prepend(const char *other)
 {
     usize otherLen = strlen(other);
     usize newLength = otherLen + this->length;
+    if (this->length == 0)
+    {
+        newLength += 1;
+    }
     char *newBuffer = (char*)this->allocator->Allocate(newLength);
 
-    memcpy(newBuffer, other, otherLen);
-    memcpy(newBuffer + otherLen, this->buffer, this->length - 1);
+    if (this->buffer != NULL)
+    {
+        memcpy(newBuffer, other, otherLen);
+        memcpy(newBuffer + otherLen, this->buffer, this->length - 1);
+    }
+    else
+    {
+        memcpy(newBuffer, other, otherLen);
+    }
     newBuffer[newLength - 1] = '\0';
 
-    this->allocator->Free(this->buffer);
+    if (this->buffer != NULL)
+    {
+        this->allocator->Free(this->buffer);
+    }
     this->buffer = newBuffer;
     this->length = newLength;
+}
+bool string::operator==(const char* other)
+{
+    if (this->buffer == NULL)
+    {
+        return false;
+    }
+    return strcmp(this->buffer, other) == 0;
 }
 
 bool stringEql(string A, string B)
 {
+    if (A.buffer == NULL && B.buffer == NULL)
+    {
+        return true;
+    }
     return A.eql(B.buffer);
 }
 i32 stringHash(string A)
 {
+    if (A.buffer == NULL)
+    {
+        return 7;
+    }
     i32 hash = 7;
     for (usize i = 0; i < A.length - 1; i++)
     {
@@ -112,4 +160,35 @@ i32 charHash(const char *A)
         i += 1;
     }
     return hash;
+}
+option<usize> FindFirst(const char *buffer, char character)
+{
+    usize i = 0;
+    while (buffer[i] != '\0' || character == '\0')
+    {
+        if (buffer[i] == character)
+        {
+            return option<usize>(i);
+        }
+        i++;
+    }
+
+    return option<usize>();
+}
+option<usize> FindLast(const char *buffer, char character)
+{
+    option<usize> result = option<usize>();
+    usize i = 0;
+
+    while (buffer[i] != '\0' || character == '\0')
+    {
+        if (buffer[i] == character)
+        {
+            result.value = i;
+            result.present = true;
+        }
+        i++;
+    }
+
+    return result;
 }

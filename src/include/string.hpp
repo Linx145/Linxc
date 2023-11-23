@@ -5,6 +5,7 @@
 #include "stdlib.h"
 #include "allocators.hpp"
 #include "string.h"
+#include "option.linxc"
 
 struct string
 {
@@ -23,6 +24,8 @@ struct string
 
     void Prepend(const char *other);
     void Append(const char *other);
+
+    bool operator==(const char* other);
 };
 
 bool stringEql(string A, string B);
@@ -30,5 +33,9 @@ bool stringEql(string A, string B);
 i32 stringHash(string A);
 
 i32 charHash(const char *A);
+
+option<usize> FindFirst(const char *buffer, char character);
+
+option<usize> FindLast(const char *buffer, char character);
 
 #endif

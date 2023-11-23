@@ -232,12 +232,19 @@ struct LinxcTokenizer
     usize currentLine;
     usize charsParsed;
 
+    usize prevPrevIndex;
+    LinxcTokenID prevPrevTokenID;
+    bool prevPreprocessorDirective;
+    usize prevLine;
+    usize prevCharsParsed;
+
     LinxcTokenizer();
     LinxcTokenizer(const char *buffer, i32 bufferLength);
     LinxcToken Next();
     LinxcToken PeekNext();
     LinxcToken NextUntilValid();
     LinxcToken PeekNextUntilValid();
+    void Back();
 };
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID);

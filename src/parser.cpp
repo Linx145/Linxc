@@ -1,27 +1,32 @@
 #include <parser.hpp>
 #include <stdio.h>
 
-LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel)
+LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel)
 {
     this->tokenizer = myTokenizer;
     this->parser = myParser;
+    this->parsingFile = currentFile;
     this->endOn = endsOn;
     this->isToplevel = isTopLevel;
     this->currentNamespace = &myParser->globalNamespace;
     this->parentType = NULL;
 }
 
-LinxcParser::LinxcParser()
-{
-    allocator = &defaultAllocator;
-    globalNamespace = LinxcNamespace(string());
-    parsedFiles = collections::hashmap<string, LinxcParsedFile>(&stringHash, &stringEql);
-}
 LinxcParser::LinxcParser(IAllocator *allocator)
 {
     this->allocator = allocator;
-    globalNamespace = LinxcNamespace(string());
-    parsedFiles = collections::hashmap<string, LinxcParsedFile>(&stringHash, &stringEql);
+    this->globalNamespace = LinxcNamespace(allocator, string());
+
+    const char *primitiveTypes[13] = {"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "float", "double", "bool", "char", "void"};
+    for (i32 i = 0; i < 13; i++)
+    {
+        string str = string(allocator, primitiveTypes[i]);
+        this->globalNamespace.types.Add(str, LinxcType(allocator, str, &this->globalNamespace, NULL));
+        this->fullNameToType.Add(str, this->globalNamespace.types.Get(str));
+    }
+
+    this->fullNameToType = collections::hashmap<string, LinxcType *>(allocator, &stringHash, &stringEql);
+    this->parsedFiles = collections::hashmap<string, LinxcParsedFile>(allocator, &stringHash, &stringEql);
 }
 collections::vector<ERR_MSG> LinxcParser::ParseFileH(collections::Array<string> includeDirs, string filePath, string fileContents)
 {
@@ -31,8 +36,10 @@ collections::vector<ERR_MSG> LinxcParser::ParseFileH(collections::Array<string> 
         return errors;
     }
 
+    LinxcParsedFile file = LinxcParsedFile();
+
     LinxcTokenizer tokenizer = LinxcTokenizer(fileContents.buffer, fileContents.length);
-    LinxcParserState parserState = LinxcParserState(this, &tokenizer, LinxcEndOn_Eof, true);
+    LinxcParserState parserState = LinxcParserState(this, &file, &tokenizer, LinxcEndOn_Eof, true);
     this->ParseCompoundStmtH(&parserState);
 
     //this->parsedFiles.Add(filePath);
@@ -42,6 +49,7 @@ collections::vector<ERR_MSG> LinxcParser::ParseFileH(collections::Array<string> 
 
 LinxcTypeReference LinxcParser::ParseTypeReference(LinxcParserState *state, collections::vector<ERR_MSG>* errors)
 {
+    //see: notes - type reference parsing.txt
     LinxcTypeReference result;
     result.rawText = string();
     result.lastType = NULL;
@@ -49,102 +57,119 @@ LinxcTypeReference LinxcParser::ParseTypeReference(LinxcParserState *state, coll
 
     LinxcTokenizer *tokenizer = state->tokenizer;
 
-    LinxcNamespace *parentNamespace = state->currentNamespace;
-    LinxcType *parentType = state->parentType;
-
-    //after a identifier, expectDoubleColon becomes true.
-    //At that point, encountering another identifier terminates the statement. (Eg: mynamespace::type varName) -> varName terminates it
-    //Encountering a double colon continues it
-    //Encountering < calls ParseTypeReference recursively until either , or >, and expectDoubleColon remains true.
-    //Encountering a * increases the pointer count by one and expectDoubleColon remains true.
-    bool expectDoubleColon = false;
-
     usize refStart = tokenizer->index;
+    usize nameEnd = tokenizer->index;
+
+    LinxcParseTypeState parseTypeState = LinxcParseType_ExpectIdentifier;
 
     while (true)
     {
-        LinxcToken peekNext = tokenizer->PeekNextUntilValid();
-
-        bool isPrimitiveType = LinxcIsPrimitiveType(peekNext.ID);
-
-        //we parse up until the point we hit a * or a < or end
-        if (isPrimitiveType || peekNext.ID == Linxc_Identifier)
+        if (parseTypeState == LinxcParseType_ExpectIdentifier)
         {
-            if (expectDoubleColon)
+            LinxcToken token = tokenizer->NextUntilValid();
+            if (LinxcIsPrimitiveType(token.ID))
+            {
+                string nextStr = token.ToString(&defaultAllocator);
+                result.lastType = state->parser->globalNamespace.types.Get(nextStr);
+                nextStr.deinit();
+                break;
+            }
+            if (token.ID != Linxc_Identifier)
+            {
+                errors->Add(ERR_MSG("Expected identifier"));
+                return result;
+            }
+            parseTypeState = LinxcParseType_ExpectColon;
+            nameEnd = token.end;
+        }
+        else if (parseTypeState == LinxcParseType_ExpectColon)
+        {
+            LinxcToken token = tokenizer->NextUntilValid();
+            if (token.ID == Linxc_ColonColon)
+            {
+                parseTypeState = LinxcParseType_ExpectIdentifier;
+                continue;
+            }
+            else if (token.ID == Linxc_Asterisk)
+            {
+                parseTypeState = LinxcParseType_ExpectOnlyPointer;
+                result.pointerCount += 1;
+            }
+            else if (token.ID == Linxc_AngleBracketLeft)
+            {
+
+            }
+        }
+        else if (parseTypeState == LinxcParseType_ExpectOnlyPointer)
+        {
+            LinxcToken peekNext = tokenizer->PeekNextUntilValid();
+            if (peekNext.ID == Linxc_Asterisk)
+            {
+                result.pointerCount += 1;
+                tokenizer->NextUntilValid();
+            }
+            else
             {
                 break;
             }
-            else
-            {
-                if (isPrimitiveType)
-                {
-                    result.lastType = NULL; //type of primitive
-                }
-
-                string identifierString = peekNext.ToString(&defaultAllocator);
-
-                //at this point, we need to find the type that it is referencing, or failing that, the namespace.
-                //there are two potential ways to find the reference at this point.
-                
-                //the first, the type they are referring to is declared in the same namespace, or using namespace is utilised, so no namespaceName:: is required.
-                //the second, either the type is not in the same namespace, or the user writes namespaceName:: anyways.
-                
-                //any combination of the two can occur, including nested namespaces or nested structs in both regular and templated structs.
-                //as we are parsing type by type or namespace by namespace, we don't bother with too much at this point.
-                //However, if the user tries to do namespace::type::namespace, we must throw an error as it is not valid syntax.
-    
-                //start the first route, checking with parent namespace first
-                if (parentType != NULL)
-                {
-
-                }
-                else //check with parent type for subtypes
-                {
-                    
-
-                    //parentNamespace should never be NULL
-                    if (parentNamespace->subNamespaces.Contains(identifierString))
-                    {
-                        parentNamespace = parentNamespace->subNamespaces.Get(identifierString);
-                    }
-                    else if (parentNamespace->types.Contains(identifierString))
-                    {
-                        parentType = parentNamespace->types.Get(identifierString);
-                    }
-                    //else, we may be in some other namespace tree, or even in a namespaceless-type.
-                    else
-                    {
-                        //thus, check from parser root namespace
-                    }
-                    
-                }
-
-                identifierString.deinit();
-                tokenizer->NextUntilValid();
-                expectDoubleColon = true;
-            }
-        }
-        else if (peekNext.ID == Linxc_ColonColon)
-        {
-            if (expectDoubleColon)
-            {
-                expectDoubleColon = false;
-                tokenizer->NextUntilValid();
-            }
-            else
-            {
-                errors->Add(ERR_MSG("Expected identifier or type name, not :: !"));
-                //no point continuing
-                return result;
-            }
         }
     }
+    if (result.lastType == NULL)
+    {
+        string baseString = string(tokenizer->buffer + refStart, nameEnd - refStart);
 
-    usize refEnd = tokenizer->index;
+        result.lastType = *this->fullNameToType.Get(baseString);
 
-    result.rawText = string(this->allocator, tokenizer->buffer + refStart, refEnd - refStart);
+        baseString.deinit();
+    }
+
+    result.rawText = string(this->allocator, tokenizer->buffer + refStart, tokenizer->index - refStart);
 
     return result;
+}
+
+collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *state, collections::vector<ERR_MSG> *errors)
+{
+    collections::vector<LinxcVar> variables = collections::vector<LinxcVar>(this->allocator);
+
+    LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
+    if (peekNext.ID == Linxc_RParen)
+    {
+        return variables.ToOwnedArray();
+    }
+
+    while (true)
+    {
+        usize errorsCount = errors->count;
+        LinxcTypeReference varType = this->ParseTypeReference(state, errors);
+        if (errors->count > errorsCount)
+        {
+            break;
+        }
+
+        LinxcToken varNameToken = state->tokenizer->NextUntilValid();
+        if (varNameToken.ID != Linxc_Identifier)
+        {
+            errors->Add(ERR_MSG("Expected identifier after variable type name!"));
+            break;
+        }
+        string varName = varNameToken.ToString(this->allocator);
+        variables.Add(LinxcVar(varName, varType));
+
+        LinxcToken next = state->tokenizer->NextUntilValid();
+        if (next.ID == Linxc_Comma)
+        {
+        }
+        else if (next.ID == Linxc_Equal)
+        {
+            //TODO: variable default values, to be impl'd when expression parsing becomes a thing again
+        }
+        else if (next.ID == Linxc_RParen)
+        {
+            break;
+        }
+    }
+    return variables.ToOwnedArray();
 }
 
 collections::vector<ERR_MSG> LinxcParser::ParseCompoundStmtH(LinxcParserState *state)
@@ -198,15 +223,13 @@ collections::vector<ERR_MSG> LinxcParser::ParseCompoundStmtH(LinxcParserState *s
                     else
                     {
                         //declare new struct
-                        LinxcType type = LinxcType();
-                        type.name = structName.ToString(this->allocator);
-                        type.parentType = state->parentType;
-                        state->currentNamespace->types.Add(type.name, type);
+                        LinxcType type = LinxcType(allocator, structName.ToString(allocator), state->currentNamespace, state->parentType);
+                        string fullName = type.GetFullName(allocator);
 
                         LinxcToken next = tokenizer->NextUntilValid();
                         if (next.ID == Linxc_LBrace)
                         {
-                            LinxcParserState nextState = LinxcParserState(state->parser, state->tokenizer, LinxcEndOn_RBrace, false);
+                            LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
                             nextState.parentType = &type;
                             nextState.currentNamespace = state->currentNamespace;
 
@@ -217,10 +240,14 @@ collections::vector<ERR_MSG> LinxcParser::ParseCompoundStmtH(LinxcParserState *s
                             if (state->parentType != NULL)
                             {
                                 state->parentType->subTypes.Add(type);
+                                //as type is now owned by parentType->subTypes, we need to add the pointer to that instead of types directly
+                                this->fullNameToType.Add(fullName, state->parentType->subTypes.Get(state->parentType->subTypes.count - 1));
                             }
                             else
                             {
                                 state->currentNamespace->types.Add(type.name, type);
+                                //as type is now owned by currentNamespace->types, we need to add the pointer to that instead of types directly
+                                this->fullNameToType.Add(fullName, state->currentNamespace->types.Get(type.name));
                             }
                         }
                         else
@@ -253,11 +280,58 @@ collections::vector<ERR_MSG> LinxcParser::ParseCompoundStmtH(LinxcParserState *s
                     // need to account for both
 
                     //move backwards
-                    tokenizer->index = token.start;
-                    tokenizer->prevIndex = prevIndex;
-                    tokenizer->prevTokenID = prevTokenID;
+                    tokenizer->Back();
 
-                    
+                    usize errorsCount = errors.count;
+                    LinxcTypeReference type = ParseTypeReference(state, &errors);
+                    if (errors.count > errorsCount)
+                    {
+                        return errors;
+                    }
+
+                    LinxcToken next = tokenizer->NextUntilValid();
+                    if (next.ID == Linxc_Identifier) //either variable or function
+                    {
+                        string name = next.ToString(this->allocator);
+
+                        next = tokenizer->NextUntilValid();
+                        if (next.ID == Linxc_LParen)
+                        {
+                            //function
+                            collections::Array<LinxcVar> functionArgs = this->ParseFunctionArgs(state, &errors);
+
+                            LinxcFunc func = LinxcFunc(name, type);
+                            func.arguments = functionArgs;
+
+                            if (state->parentType != NULL)
+                            {
+                                state->parentType->functions.Add(func);
+                            }
+                            else
+                            {
+                                state->currentNamespace->functions.Add(func.name, func);
+                            }
+                            
+                            
+                        }
+                        else if (next.ID == Linxc_Semicolon)
+                        {
+                            LinxcVar var = LinxcVar(name, type);
+
+                            if (state->parentType != NULL)
+                            {
+                                state->parentType->variables.Add(var);
+                            }
+                            else
+                            {
+                                state->currentNamespace->variables.Add(var.name, var);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        errors.Add(ERR_MSG("Expected identifier after type name"));
+                    }
                 }
                 break;
             case Linxc_Eof:

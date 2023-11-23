@@ -21,5 +21,28 @@ If none are found for either step, we decide that the type does not exist.
 
 One more issue is the existence of #includes. A type may be defined in a file that is not #included. We need to make sure that we do not just scan the entire namespace reflection database, but just the #included files.
 
-Another way to check is to first parse the summation of namespaceB::namespaceC::type::subtype, which is translated to the C type name, namespaceB_namespaceC_type_subtype. Then, variants of the C typename are created, one for each using'd namespace or namespace the code itself is in.
-Then, we query a database of types from Linxc header files included in this file, which is built up with each #include. If it contains the C type name, we return it, otherwise, we throw an error.
+Another way to check is to first parse the summation of namespaceB::namespaceC::type::subtype, 
+which is translated to the C type name, namespaceB_namespaceC_type_subtype. Then, 
+variants of the C typename are created, one for each using'd namespace or namespace 
+the code itself is in.
+
+Then, we query a database of types from Linxc header files included in this file, 
+which is built up with each #include. If it contains the C type name, we return it, 
+otherwise, we throw an error.
+
+Alternatively, we can do the opposite. Checking each name variant from the global parser database of c type name to linxctype, then seeing which file the type is defined in.
+
+while true
+    Parse identifier, if not identifier, throw error
+    set nameEnd to index
+    Parse ::, if not :: then
+        if <, parse template
+        if *, parse pointer
+        if identifier, break
+get string from start to nameEnd
+create variants of string:
+    foreach using namespace <name> declaration, prepend <name>::, create new
+    foreach current namespace <name> scope, prepend <name>::, create new, loop
+check global hashmap for presence of type of name string
+    if type declared in file contained within state's #include list, return type
+return empty type, throw type not found error

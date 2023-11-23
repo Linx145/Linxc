@@ -22,6 +22,13 @@ enum LinxcEndOn
     LinxcEndOn_Eof
 };
 
+enum LinxcParseTypeState
+{
+    LinxcParseType_ExpectColon,
+    LinxcParseType_ExpectIdentifier,
+    LinxcParseType_ExpectOnlyPointer
+};
+
 struct LinxcParsedFile
 {
     /// The path of the file name relative to whatever include directories are in the project
@@ -46,28 +53,15 @@ struct LinxcParsedFile
 struct LinxcParserState
 {
     LinxcParser *parser;
-    /// We keep a pointer to tokenizer for each parser state in case multiple files are parsed at once or in a call stack
+    /// We keep a pointer to a tokenizer for each parser state in case multiple files are parsed at once or in a call stack
     LinxcTokenizer *tokenizer;
     LinxcNamespace *currentNamespace;
+    LinxcParsedFile *parsingFile;
     LinxcType *parentType;
     bool isToplevel;
     LinxcEndOn endOn;
 
-    LinxcParserState(LinxcParser *myParser, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel);
-};
-
-// A type reference consists of (chain of namespace to parent type to type)<template args, each another typereference> (pointers)
-struct LinxcTypeReference
-{
-    //eg: collections::hashmap<i32, collections::Array<string>>
-    string rawText;
-
-    //We only need to store 1 LinxcType as it is a linked list that leads to parent types if any, and the namespace chain.
-    LinxcType *lastType;
-
-    collections::Array<LinxcTypeReference> templateArgs;
-
-    u32 pointerCount;
+    LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel);
 };
 
 struct LinxcParser
@@ -75,13 +69,15 @@ struct LinxcParser
     IAllocator *allocator;
     /// Maps includeName to parsed file and data.
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
+    collections::hashmap<string, LinxcType *> fullNameToType;
     LinxcNamespace globalNamespace;
 
-    LinxcParser();
     LinxcParser(IAllocator *allocator);
     collections::vector<ERR_MSG> ParseFileH(collections::Array<string> includeDirs, string filePath, string fileContents);
     collections::vector<ERR_MSG> ParseCompoundStmtH(LinxcParserState *state);
 
+    //Call after parsing the opening ( of the function declaration, ends after parsing the closing )
+    collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state, collections::vector<ERR_MSG> *errors);
     LinxcTypeReference ParseTypeReference(LinxcParserState *state, collections::vector<ERR_MSG>* errors);
 };
 

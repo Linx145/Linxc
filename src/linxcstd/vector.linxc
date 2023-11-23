@@ -112,6 +112,10 @@ namespace collections
         }
         collections::Array<T> ToOwnedArray()
         {
+            if (this->ptr == NULL)
+            {
+                return collections::Array<T>();
+            }
             T *slice = (T*)allocator->Allocate(sizeof(T) * this->count);
             for (usize i = 0; i < this->count; i++)
             {
