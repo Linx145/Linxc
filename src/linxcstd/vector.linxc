@@ -11,6 +11,8 @@ namespace collections
     template <typename T>
     struct vector
     {
+        def_delegate(EqlFunc, bool, T, T);
+
         IAllocator *allocator;
         T *ptr;
         usize capacity;
@@ -124,6 +126,17 @@ namespace collections
             collections::Array<T> result = collections::Array<T>(this->allocator, slice, this->count);
             deinit();
             return result;
+        }
+        option<usize> Contains(T value, EqlFunc eqlFunc)
+        {
+            for (usize i = 0; i < count; i++)
+            {
+                if (eqlFunc(this->ptr[i], value))
+                {
+                    option<usize>(i);
+                }
+            }
+            return option<usize>();
         }
         collections::Array<T> ToRefArray()
         {

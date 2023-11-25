@@ -1,12 +1,78 @@
-def type
+The Linxc ast should be a list, similar to as follows:
+______
+include directive
+include directive
+struct declaration
+    var declaration
+    var declaration
+    func declaration
+        var declaration = literal
+        expression operator(var addeql literal)
+        expression operator(var set var)
+func declaration
+    var declaration = literal
+    expression funccall(literal, operator(var add literal))
+    return expression var
+______
+statements
+struct declaration
     -namespace
     -name
     -variables
     -functions
     -template args list
-
     -list of implemented traits
     -list of tags
+
+var declaration
+    -type
+    -name
+    -default value (expression)
+
+function declaration
+    -body (compound statement)
+    -name
+    -return type
+    -args list (variables)
+    -template args list
+
+namespace scope
+    -name
+
+operator
+    Left Expression
+    Right Expression
+    operator
+
+ternary operator
+    Conditional Expression
+    True Expression
+    False Expression
+
+function call
+    function declaration pointer
+    next expression
+
+increment operator, decrement operator
+    variable expression
+    next expression
+
+pointer dereference
+    contained expression
+    next expression
+
+variable expression
+    variable name
+    next expression
+
+literal expression
+    literal value
+    next expression
+
+sizeof, nameof, typeof call
+    type reference
+    next expression
+______
 
 def function
     -start index

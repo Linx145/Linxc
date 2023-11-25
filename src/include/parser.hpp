@@ -8,11 +8,10 @@
 #include <string.hpp>
 #include <lexer.hpp>
 #include <array.linxc>
+#include <io.hpp>
 
 typedef struct LinxcParserState LinxcParserState;
 typedef struct LinxcParser LinxcParser;
-
-#define ERR_MSG string
 
 enum LinxcEndOn
 {
@@ -24,30 +23,34 @@ enum LinxcEndOn
 
 enum LinxcParseTypeState
 {
-    LinxcParseType_ExpectColon,
+    LinxcParseType_NextOrEnd,
     LinxcParseType_ExpectIdentifier,
     LinxcParseType_ExpectOnlyPointer
 };
 
-struct LinxcParsedFile
+enum LinxcParseIdentifierResultID
 {
-    /// The path of the file name relative to whatever include directories are in the project
-    /// (Eg: with a included directory of 'include,' containing 'include/hashset.linxc', includeName would be 'hashset.linxc')
-    string includeName;
-    /// The full name and path of the file.
-    string fullPath;
-    /// A list of all defined macros in the file. Does not count macros #undef'd before the end of the file. 
-    /// Macros within are owned by LinxcParsedFile instance itself. (Makes no sense for it to be under namespaces)
-    collections::vector<LinxcMacro> definedMacros;
+    LinxcParseIdentifierResult_None,
+    LinxcParseIdentifierResult_Variable,
+    LinxcParseIdentifierResult_Type,
+    LinxcParseIdentifierResult_Func,
+    LinxcParseIdentifierResult_Namespace
+};
+union LinxcParseIdentifierResultData
+{
+    LinxcVar *variableReference;
+    LinxcTypeReference typeReference;
+    LinxcFunc *functionReference;
+    LinxcNamespace *namespaceReference;
 
-    /// A list of all defined or included types in this file. Points to actual type storage location within a namespace.
-    collections::vector<LinxcType *> definedTypes;
+    LinxcParseIdentifierResultData();
+};
+struct LinxcParseIdentifierResult
+{
+    LinxcParseIdentifierResultData value;
+    LinxcParseIdentifierResultID ID;
 
-    /// A list of all defined or included functions in this file. Points to actual function storage location within a namespace.
-    collections::vector<LinxcFunc *> definedFuncs;
-
-    /// A list of all defined or included global variables in this file. Points to actual variable storage location within a namespace.
-    collections::vector<LinxcVar *> definedVars;
+    LinxcParseIdentifierResult();
 };
 
 struct LinxcParserState
@@ -60,25 +63,39 @@ struct LinxcParserState
     LinxcType *parentType;
     bool isToplevel;
     LinxcEndOn endOn;
+    collections::hashmap<string, LinxcVar *> varsInScope;
 
+    void deinit();
     LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel);
 };
 
 struct LinxcParser
 {
     IAllocator *allocator;
+    /// The root directories for #include statements. 
+    ///In pure-linxc projects, normally is your project's
+    ///src folder. May consist of include folders for C .h files as well
+    ///or .linxch static libraries
+    collections::vector<string> includeDirectories;
+    ///The actual .linxc files to be included in the compilation.
+    collections::vector<string> includedFiles;
     /// Maps includeName to parsed file and data.
+    collections::hashset<string> parsingFiles;
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
     collections::hashmap<string, LinxcType *> fullNameToType;
     LinxcNamespace globalNamespace;
 
     LinxcParser(IAllocator *allocator);
-    collections::vector<ERR_MSG> ParseFileH(collections::Array<string> includeDirs, string filePath, string fileContents);
-    collections::vector<ERR_MSG> ParseCompoundStmtH(LinxcParserState *state);
+    LinxcParsedFile *ParseFile(collections::Array<string> includeDirs, string fileFullPath, string includeName, string fileContents);
+    option<LinxcCompoundStmt> ParseCompoundStmt(LinxcParserState *state);
 
+    void deinit();
+    void AddAllFilesFromDirectory(string directoryPath);
+    option<string> FullPathFromIncludeName(string includeName);
     //Call after parsing the opening ( of the function declaration, ends after parsing the closing )
-    collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state, collections::vector<ERR_MSG> *errors);
-    LinxcTypeReference ParseTypeReference(LinxcParserState *state, collections::vector<ERR_MSG>* errors);
+    collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state);
+    //Parses an identifier or primitive type token. Can return either a LinxcTypeReference, or a variable reference.
+    LinxcParseIdentifierResult ParseIdentifier(LinxcParserState *state);
 };
 
 #endif

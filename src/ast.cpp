@@ -1,5 +1,29 @@
 #include <ast.hpp>
 
+LinxcParsedFile::LinxcParsedFile(IAllocator *allocator, string fullPath, string includeName)
+{
+    this->definedFuncs = collections::vector<LinxcFunc *>(allocator);
+    this->definedMacros = collections::vector<LinxcMacro>(allocator);
+    this->definedTypes = collections::vector<LinxcType *>(allocator);
+    this->definedVars = collections::vector<LinxcVar *>(allocator);
+    this->errors = collections::vector<ERR_MSG>(allocator);
+    this->fullPath = fullPath;
+    this->includeName = includeName;
+}
+
+LinxcTypeReference::LinxcTypeReference()
+{
+    this->lastType = NULL;
+    this->pointerCount = 0;
+    this->templateArgs = collections::Array<LinxcTypeReference>();
+}
+LinxcTypeReference::LinxcTypeReference(LinxcType *type)
+{
+    this->lastType = type;
+    this->pointerCount = 0;
+    this->templateArgs = collections::Array<LinxcTypeReference>();
+}
+
 LinxcNamespace::LinxcNamespace()
 {
     this->parentNamespace;
@@ -51,7 +75,45 @@ string LinxcType::GetFullName(IAllocator *allocator)
     
     return result;
 }
+LinxcFunc *LinxcType::FindFunction(string name)
+{
+    for (usize i = 0; i < this->functions.count; i++)
+    {
+        if (this->functions.Get(i)->name.eql(name.buffer))
+        {
+            return this->functions.Get(i);
+        }
+    }
+    return NULL;
+}
+LinxcType *LinxcType::FindSubtype(string name)
+{
+    for (usize i = 0; i < this->subTypes.count; i++)
+    {
+        if (this->subTypes.Get(i)->name.eql(name.buffer))
+        {
+            return this->subTypes.Get(i);
+        }
+    }
+    return NULL;
+}
+LinxcVar *LinxcType::FindVar(string name)
+{
+    for (usize i = 0; i < this->variables.count; i++)
+    {
+        if (this->variables.Get(i)->name.eql(name.buffer))
+        {
+            return this->variables.Get(i);
+        }
+    }
+    return NULL;
+}
 
+LinxcVar::LinxcVar()
+{
+    this->name = string();
+    this->type = LinxcTypeReference();
+}
 LinxcVar::LinxcVar(string varName, LinxcTypeReference varType)
 {
     this->name = varName;

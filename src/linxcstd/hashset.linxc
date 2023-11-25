@@ -20,6 +20,7 @@ namespace collections
         def_delegate(HashFunc, i32, T);
         def_delegate(EqlFunc, bool, T, T);
 
+        IAllocator *allocator;
         HashFunc hashFunc;
         EqlFunc eqlFunc;
 
@@ -30,6 +31,7 @@ namespace collections
 
         hashset()
         {
+            this->allocator = &defaultAllocator;
             this->hashFunc = NULL;
             this->eqlFunc = NULL;
             this->Count = 0;
@@ -39,12 +41,27 @@ namespace collections
         }
         hashset(HashFunc hashFunction, EqlFunc eqlFunc)
         {
+            this->allocator = &defaultAllocator;
             this->hashFunc = hashFunction;
             this->eqlFunc = eqlFunc;
             this->Count = 0;
             this->filledBuckets = 0;
             this->bucketsCount = 32;
-            this->buckets = (Bucket*)malloc(this->bucketsCount * sizeof(Bucket));
+            this->buckets = (Bucket*)this->allocator->Allocate(this->bucketsCount * sizeof(Bucket));
+            for (usize i = 0; i < this->bucketsCount; i++)
+            {
+                this->buckets[i].initialized = false;
+            }
+        }
+        hashset(IAllocator *allocator, HashFunc hashFunction, EqlFunc eqlFunc)
+        {
+            this->allocator = allocator;
+            this->hashFunc = hashFunction;
+            this->eqlFunc = eqlFunc;
+            this->Count = 0;
+            this->filledBuckets = 0;
+            this->bucketsCount = 32;
+            this->buckets = (Bucket*)allocator->Allocate(this->bucketsCount * sizeof(Bucket));
             for (usize i = 0; i < this->bucketsCount; i++)
             {
                 this->buckets[i].initialized = false;
@@ -56,7 +73,7 @@ namespace collections
             {
                 buckets[i].entries.deinit();
             }
-            free(buckets);
+            this->allocator->Free(buckets);
         }
         void EnsureCapacity()
         {
@@ -67,7 +84,7 @@ namespace collections
             {
                 usize newSize = bucketsCount * 2;
 
-                Bucket *newBuckets = (Bucket*)malloc(newSize * sizeof(Bucket));
+                Bucket *newBuckets = (Bucket*)this->allocator->Allocate(newSize * sizeof(Bucket));
 
                 for (usize i = 0; i < newSize; i++)
                 {
@@ -79,7 +96,7 @@ namespace collections
                     newBuckets[newIndex] = buckets[i];
                 }
 
-                free(buckets);
+                this->allocator->free(buckets);
                 buckets = newBuckets;
                 bucketsCount = newSize;
             }
