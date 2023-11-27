@@ -4,6 +4,7 @@
 #include <string.hpp>
 #include <vector.linxc>
 #include <hashmap.linxc>
+#include <lexer.hpp>
 
 #define ERR_MSG string
 
@@ -64,6 +65,7 @@ struct LinxcTypeReference
 
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
+    string ToString(IAllocator *allocator);
 };
 
 /// Represents a variable in Linxc, including it's type, name and optionally default value.
@@ -74,6 +76,8 @@ struct LinxcVar
 
     LinxcVar();
     LinxcVar(string varName, LinxcTypeReference varType);
+
+    string ToString(IAllocator *allocator);
 };
 
 struct LinxcMacro
@@ -126,8 +130,17 @@ struct LinxcFunctionCall
     LinxcFunc *func;
     collections::Array<LinxcExpression> inputParams;
     collections::Array<LinxcTypeReference> templateSpecializations;
-};
 
+    string ToString(IAllocator *allocator);
+};
+//A modified expression is an expression that is either a dereferenced pointer, a type to pointer conversion or an inverted/NOT/negative expression
+struct LinxcModifiedExpression
+{
+    LinxcExpression expression;
+    //either *, -, !, ~, &
+    LinxcTokenID modification;
+};
+//An operator is an expression containing two sub-expressions connected with a token, normally an operator
 struct LinxcOperator
 {
     LinxcExpression leftExpr;
@@ -141,7 +154,10 @@ enum LinxcExpressionID
     LinxcExpr_DecrementVar, 
     LinxcExpr_Literal,
     LinxcExpr_Variable,
-    LinxcExpr_PointerDeref,
+    LinxcExpr_FunctionRef,
+    LinxcExpr_TypeRef,
+    LinxcExpr_TypeCast,
+    LinxcExpr_Modified,
     LinxcExpr_Indexer,
     LinxcExpr_FuncCall,
     LinxcExpr_Sizeof,
@@ -151,21 +167,28 @@ enum LinxcExpressionID
 union LinxcExpressionData
 {
     LinxcOperator *operatorCall; //Eg: X + Y
-    string incrementVariable; //Eg: varName++
-    string decrementVariable; //Eg: varName--
+    LinxcVar *incrementVariable; //Eg: varName++
+    LinxcVar *decrementVariable; //Eg: varName--
     string literal; //Eg: "Hello World"
-    string variable; //Eg: varName
-    LinxcExpression *pointerDereference; //Eg: *varName
+    LinxcVar *variable; //Eg: varName
+    LinxcFunc *functionRef; //Eg: funcName <- is incomplete
+    LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
+    LinxcTypeReference typeCast; //Eg: (typeName)
+    LinxcModifiedExpression *modifiedExpression; //Eg: *varName
     LinxcExpression *indexerCall; //Eg: varName[expression]
     LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
     LinxcTypeReference sizeofCall; //Eg: sizeof(type reference)
     LinxcTypeReference nameofCall; //Eg: nameof(type reference)
     LinxcTypeReference typeofCall; //Eg: typeof(type reference)
+
+    LinxcExpressionData();
 };
 struct LinxcExpression
 {
     LinxcExpressionData data;
     LinxcExpressionID ID;
+
+    string ToString(IAllocator *allocator);
 };
 
 enum LinxcStatementID

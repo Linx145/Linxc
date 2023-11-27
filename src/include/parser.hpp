@@ -53,6 +53,69 @@ struct LinxcParseIdentifierResult
     LinxcParseIdentifierResult();
 };
 
+//can probably make this constexpr, but linxc doesn't support it as C doesn't
+inline i8 GetAssociation(LinxcTokenID ID)
+{
+    switch (ID)
+    {
+        Linxc_Arrow:
+        Linxc_Minus:
+        Linxc_Plus:
+        Linxc_Slash:
+        Linxc_Percent:
+        Linxc_AmpersandAmpersand:
+        Linxc_PipePipe:
+        Linxc_EqualEqual:
+        Linxc_BangEqual:
+        Linxc_AngleBracketLeft:
+        Linxc_AngleBracketLeftEqual:
+        Linxc_AngleBracketRight:
+        Linxc_AngleBracketRightEqual:
+        Linxc_Period:
+            return 1; //left to right ->
+        default:
+            return -1; //<- right to left
+    }
+};
+inline i32 GetPrecedence(LinxcTokenID ID)
+{
+    switch (ID)
+    {
+        Linxc_Arrow:
+        Linxc_Period:
+            return 5;
+        //Reserved for pointer dereference (*), NOT(!), bitwise not(~) and pointer reference (&) =>
+        //  return 4;
+        Linxc_Asterisk:
+        Linxc_Slash:
+        Linxc_Percent:
+            return 3;
+        Linxc_Plus:
+        Linxc_Minus:
+        Linxc_Ampersand:
+        Linxc_Caret:
+        Linxc_Tilde:
+        Linxc_Pipe:
+        Linxc_AngleBracketLeft:
+        Linxc_AngleBracketRight:
+            return 2;
+        Linxc_PipePipe:
+        Linxc_BangEqual:
+        Linxc_EqualEqual:
+        Linxc_AmpersandAmpersand:
+            return 1;
+        Linxc_Equal:
+        Linxc_PlusEqual:
+        Linxc_MinusEqual:
+        Linxc_AsteriskEqual:
+        Linxc_PercentEqual:
+        Linxc_SlashEqual:
+            return 0;
+        default:
+            return -1;
+    }
+};
+
 struct LinxcParserState
 {
     LinxcParser *parser;
@@ -86,16 +149,23 @@ struct LinxcParser
     LinxcNamespace globalNamespace;
 
     LinxcParser(IAllocator *allocator);
-    LinxcParsedFile *ParseFile(collections::Array<string> includeDirs, string fileFullPath, string includeName, string fileContents);
-    option<LinxcCompoundStmt> ParseCompoundStmt(LinxcParserState *state);
-
     void deinit();
-    void AddAllFilesFromDirectory(string directoryPath);
-    option<string> FullPathFromIncludeName(string includeName);
+
     //Call after parsing the opening ( of the function declaration, ends after parsing the closing )
     collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state);
     //Parses an identifier or primitive type token. Can return either a LinxcTypeReference, or a variable reference.
     LinxcParseIdentifierResult ParseIdentifier(LinxcParserState *state);
+    //Parses an entire file, parsing include directives under it and their relative files if unparsed thusfar.
+    LinxcParsedFile *ParseFile(collections::Array<string> includeDirs, string fileFullPath, string includeName, string fileContents);
+    //Parses a compound statement and returns it given the state. Returns invalid if an error is encountered
+    option<LinxcCompoundStmt> ParseCompoundStmt(LinxcParserState *state);
+    option<LinxcExpression> ParseExpressionPrimary(LinxcParserState *state);
+    LinxcExpression ParseExpression(LinxcParserState *state, LinxcExpression primary, i32 startingPrecedence);
+
+    void deinit();
+    void AddAllFilesFromDirectory(string directoryPath);
+    string FullPathFromIncludeName(string includeName);
+
 };
 
 #endif

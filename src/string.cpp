@@ -26,6 +26,13 @@ string::string(const char* source, usize length)
     memcpy(this->buffer, source, length);
 }
 
+string::string(IAllocator *myAllocator)
+{
+    this->allocator = myAllocator;
+    this->buffer = NULL;
+    this->length = 0;
+}
+
 string::string(IAllocator *myAllocator, const char* source)
 {
     this->allocator = myAllocator;
@@ -111,6 +118,16 @@ void string::Prepend(const char *other)
     }
     this->buffer = newBuffer;
     this->length = newLength;
+}
+void string::AppendDeinit(string other)
+{
+    this->Append(other.buffer);
+    other.deinit();
+}
+void string::PrependDeinit(string other)
+{
+    this->Prepend(other.buffer);
+    other.deinit();
 }
 bool string::operator==(const char* other)
 {

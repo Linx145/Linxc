@@ -119,6 +119,10 @@ LinxcVar::LinxcVar(string varName, LinxcTypeReference varType)
     this->name = varName;
     this->type = varType;
 }
+string LinxcVar::ToString(IAllocator *allocator)
+{
+    return string(allocator, this->name.buffer);
+}
 
 LinxcFunc::LinxcFunc(string name, LinxcTypeReference returnType)
 {
@@ -130,4 +134,89 @@ LinxcFunc::LinxcFunc(string name, LinxcTypeReference returnType)
     this->returnType = returnType;
     this->arguments = collections::Array<LinxcVar>();
     this->templateArgs = collections::Array<string>();
+}
+
+string LinxcFunctionCall::ToString(IAllocator *allocator)
+{
+    string result = string(allocator);
+    result.Append(this->func->name.buffer);
+    result.Append("(");
+    for (int i = 0; i < this->inputParams.length; i++)
+    {
+        result.AppendDeinit(this->inputParams.data[i].ToString(&defaultAllocator));
+    }
+    result.Append(")");
+    return result;
+}
+
+string LinxcTypeReference::ToString(IAllocator *allocator)
+{
+    string result = string(allocator);
+    result.AppendDeinit(this->lastType->GetFullName(&defaultAllocator));
+    for (i32 i = 0; i < this->pointerCount; i++)
+    {
+        result.Append("*");
+    }
+    return result;
+}
+
+LinxcExpressionData::LinxcExpressionData()
+{
+    this->operatorCall = NULL;
+}
+string LinxcExpression::ToString(IAllocator *allocator)
+{
+    switch (this->ID)
+    {
+        case LinxcExpr_DecrementVar:
+            string result = string(allocator);
+            result.AppendDeinit(this->data.decrementVariable->ToString(&defaultAllocator)); // this->data.decrementVariable.ToString(allocator));
+            result.Append("--");
+            return result;
+        case LinxcExpr_IncrementVar:
+            string result = string(allocator);
+            result.AppendDeinit(this->data.incrementVariable->ToString(&defaultAllocator));
+            result.Append("++");
+            return result;
+        case LinxcExpr_FuncCall:
+            return this->data.functionCall.ToString(allocator);
+        case LinxcExpr_FunctionRef:
+            return string(allocator, this->data.functionRef->name.buffer);
+        case LinxcExpr_Literal:
+            return string(allocator, this->data.literal.buffer);
+        case LinxcExpr_Modified:
+            string result = string(allocator);
+            switch (this->data.modifiedExpression->modification)
+            {
+                case Linxc_Asterisk:
+                    result.Append("*");
+                    break;
+                case Linxc_Minus:
+                    result.Append("-");
+                    break;
+                case Linxc_Bang:
+                    result.Append("!");
+                    break;
+                case Linxc_Tilde:
+                    result.Append("~");
+                    break;
+                case Linxc_Ampersand:
+                    result.Append("&");
+                    break;
+                default:
+                    break;
+            }
+            result.AppendDeinit(this->data.modifiedExpression->expression.ToString(&defaultAllocator));
+            return result;
+        case LinxcExpr_Nameof:
+            string result = string(allocator);
+            result.Append("nameof(");
+            result.AppendDeinit(this->data.nameofCall.ToString(&defaultAllocator));
+            result.Append(")");
+            break;
+        case LinxcExpr_OperatorCall:
+            
+        default:
+            return string();
+    }
 }

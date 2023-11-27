@@ -89,6 +89,262 @@ LinxcParsedFile *LinxcParser::ParseFile(collections::Array<string> includeDirs, 
     this->parsedFiles.Add(includeName, file);
     return this->parsedFiles.Get(includeName);
 }
+string LinxcParser::FullPathFromIncludeName(string includeName)
+{
+    for (usize i = 0; i < this->includeDirectories.count; i++)
+    {
+        string potentialFullPath = string(this->includeDirectories.Get(i)->buffer);
+        potentialFullPath.Append("/");
+        potentialFullPath.Append(includeName.buffer);
+
+        if (io::FileExists(potentialFullPath.buffer))
+        {
+            return potentialFullPath;
+        }
+        else potentialFullPath.deinit();
+    }
+    return string();
+}
+
+option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *state)
+{
+    LinxcToken token = state->tokenizer->NextUntilValid();
+    switch (token.ID)
+    {
+        case Linxc_Asterisk:
+        case Linxc_Minus:
+        case Linxc_Bang:
+        case Linxc_Ampersand:
+        case Linxc_Tilde:
+            {
+                option<LinxcExpression> nextPrimaryOpt = this->ParseExpressionPrimary(state);
+                if (nextPrimaryOpt.present)
+                {
+                    LinxcExpression expression = this->ParseExpression(state, nextPrimaryOpt.value, 4);
+
+                    LinxcModifiedExpression *modified = (LinxcModifiedExpression*)this->allocator->Allocate(sizeof(LinxcModifiedExpression));
+                    modified->expression = expression;
+                    modified->modification = token.ID;
+
+                    LinxcExpression result;
+                    result.data.modifiedExpression = modified;
+                    result.ID = LinxcExpr_Modified;
+                    return option<LinxcExpression>(result);
+                }
+                break;
+            }
+        case Linxc_LParen:
+            {
+                option<LinxcExpression> nextPrimaryOpt = this->ParseExpressionPrimary(state);
+                if (nextPrimaryOpt.present)
+                {
+                    LinxcExpression expression = this->ParseExpression(state, nextPrimaryOpt.value, -1);
+                    
+                    //check if expression is a type reference. If so, then this is a cast.
+                    if (expression.ID == LinxcExpr_TypeRef)
+                    {
+                        LinxcExpression result;
+                        result.data.typeCast = expression.data.typeRef;
+                        result.ID = LinxcExpr_TypeCast;
+                        return option<LinxcExpression>(result);
+                    }
+                    else //If not, it's a nested expression
+                    {
+                        return option<LinxcExpression>(expression);
+                    }
+                }
+                else
+                    break;
+            }
+            break;
+        /*case Linxc_Keyword_sizeof:
+            {
+                if (state->tokenizer->NextUntilValid().ID != Linxc_LParen)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected ( after sizeof keyword"));
+                }
+                LinxcParseIdentifierResult identifierResult = this->ParseIdentifier(state);
+                if (identifierResult.ID != LinxcParseIdentifierResult_Type)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "sizeof() can only be used on valid types!"));
+                }
+                LinxcExpression result;
+                result.data.sizeofCall = identifierResult.value.typeReference;
+                result.ID = LinxcExpr_Sizeof;
+
+                return result;
+            }*/
+        case Linxc_Identifier:
+            {
+                LinxcParseIdentifierResult identifierResult = this->ParseIdentifier(state);
+                if (identifierResult.ID == LinxcParseIdentifierResult_Func)
+                {
+                    //if we referenced a function, it is either a function call(), a functiion call<>() or a &get function pointer
+                    //this depends if the next token is ( or <
+                    //todo: templates here
+                    //note: for templates, (&function < x) is valid, however dumb it is. Need to check immediate next variable
+                    if (state->tokenizer->PeekNextUntilValid().ID == Linxc_LParen)
+                    {
+                        state->tokenizer->NextUntilValid();
+
+                        //if so, parse function call
+                        bool errored = false;
+                        collections::vector<LinxcExpression> args = collections::vector<LinxcExpression>(&defaultAllocator);
+                        i32 argumentCount = 0;
+                        while (true)
+                        {
+                            //if we encounter a ), end the loop
+                            LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
+                            if (peekNext.ID == Linxc_RParen)
+                            {
+                                state->tokenizer->NextUntilValid();
+                                break;
+                            }
+                            else if (peekNext.ID == Linxc_Comma)
+                            {
+                                if (args.count > 0)
+                                {
+                                    state->tokenizer->NextUntilValid();
+                                }
+                                else //dont need to handle args.count > 0 but previous is comma being valid as the recursion of this call should sort that out
+                                {
+                                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Function missing arguments!"));
+                                    errored = true;
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected function argument or closure here"));
+                                errored = true;
+                                break;
+                            }
+
+                            option<LinxcExpression> argsPrimaryOpt = this->ParseExpressionPrimary(state);
+                            if (argsPrimaryOpt.present)
+                            {
+                                LinxcExpression argsWhole = this->ParseExpression(state, argsPrimaryOpt.value, -1);
+                                //todo: Typecheck against argument 'argumentCount'
+                                args.Add(argsWhole);
+                            }
+                            else
+                            {
+                                errored = true;
+                            }
+                            argumentCount += 1;
+                        }
+
+                        if (!errored)
+                        {
+                            LinxcFunctionCall funcCall;
+                            funcCall.func = identifierResult.value.functionReference;
+                            funcCall.inputParams = args.ToOwnedArrayWith(this->allocator);
+                            funcCall.templateSpecializations = collections::Array<LinxcTypeReference>();
+
+                            LinxcExpression result;
+                            result.data.functionCall = funcCall;
+                            result.ID = LinxcExpr_FuncCall;
+                            return option<LinxcExpression>(result);
+                        }
+                        else
+                            break;
+                    }
+                    else
+                    {
+                        //is function reference
+                        LinxcExpression result;
+                        result.data.functionRef = identifierResult.value.functionReference;
+                        result.ID = LinxcExpr_FunctionRef;
+                        return option<LinxcExpression>(result);
+                    }
+                }
+                else if (identifierResult.ID == LinxcParseIdentifierResult_Variable)
+                {
+                    //is a variable reference
+                    LinxcExpression result;
+                    //todo: Deal with the lifetime of this thing
+                    result.data.variable = identifierResult.value.variableReference;
+                    result.ID = LinxcExpr_Variable;
+                    return option<LinxcExpression>(result);
+                }
+                else if (identifierResult.ID == LinxcParseIdentifierResult_Type)
+                {
+                    LinxcExpression result;
+                    result.data.typeRef = identifierResult.value.typeReference;
+                    result.ID = LinxcExpr_TypeRef;
+                    return option<LinxcExpression>(result);
+                }
+                else if (identifierResult.ID == LinxcParseIdentifierResult_Namespace)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to reference namespace in expression"));
+                    return option<LinxcExpression>();
+                }
+                else
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to reference namespace in expression"));
+                    return option<LinxcExpression>();
+                }
+            }
+            break;
+        //todo: Split up and make strongly typed
+        case Linxc_IntegerLiteral:
+        case Linxc_FloatLiteral:
+            {
+                LinxcExpression result;
+                result.data.literal = token.ToString(this->allocator);
+                result.ID = LinxcExpr_Literal;
+            }
+        default:
+            break;
+    }
+    return option<LinxcExpression>();
+}
+LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpression primary, i32 startingPrecedence)
+{
+    LinxcExpression lhs = primary;
+    while (true)
+    {
+        LinxcToken op = state->tokenizer->PeekNextUntilValid();
+        i32 precedence = GetPrecedence(op.ID);
+        if (op.ID == Linxc_Eof || op.ID == Linxc_Semicolon || precedence == -1 || precedence < startingPrecedence)
+        {
+            break;
+        }
+        state->tokenizer->NextUntilValid();
+        option<LinxcExpression> rhsOpt = this->ParseExpressionPrimary(state);
+        if (!rhsOpt.present)
+        {
+            state->parsingFile->errors.Add(ERR_MSG(&defaultAllocator, "Error parsing right side of operator"));
+            break;
+        }
+
+        while (true)
+        {
+            LinxcToken next = state->tokenizer->PeekNextUntilValid();
+            i32 nextPrecedence = GetPrecedence(next.ID);
+            i8 nextAssociation = GetAssociation(next.ID);
+            if (op.ID == Linxc_Eof || op.ID == Linxc_Semicolon || nextPrecedence == -1 || !((nextPrecedence > precedence) || (nextAssociation == 1 and precedence == nextPrecedence)))
+            {
+                break;
+            }
+            i32 nextFuncPrecedence = precedence;
+            if (nextPrecedence > precedence)
+            {
+                nextFuncPrecedence += 1;
+            }
+            rhsOpt.value = this->ParseExpression(state, rhsOpt.value, nextFuncPrecedence);
+        }
+
+        LinxcOperator *operatorCall = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
+        operatorCall->leftExpr = lhs;
+        operatorCall->rightExpr = rhsOpt.value;
+        operatorCall->operatorType = op.ID;
+
+        lhs.data.operatorCall = operatorCall;
+        lhs.ID = LinxcExpr_OperatorCall;
+    }
+    return lhs;
+}
 
 LinxcParseIdentifierResult LinxcParser::ParseIdentifier(LinxcParserState *state)
 {
@@ -118,7 +374,6 @@ LinxcParseIdentifierResult LinxcParser::ParseIdentifier(LinxcParserState *state)
                 //something illegal
                 if (token.ID != Linxc_Identifier)
                 {
-                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected identifier"));
                     break;
                 }
                 // TODO: using namespace; checks
@@ -507,64 +762,11 @@ option<LinxcCompoundStmt> LinxcParser::ParseCompoundStmt(LinxcParserState *state
             case Linxc_Keyword_void:
             case Linxc_Identifier:
                 {
-                    // parse reference type
-                    // void *; is valid
-                    // collections::hashmap<i32, collections::Array<string>> is also valid
-                    // need to account for both
-
                     //move backwards
                     tokenizer->Back();
 
-                    // usize errorsCount = errors->count;
-                    // LinxcTypeReference type = ParseIdentifier(state);
-                    // if (errors->count > errorsCount)
-                    // {
-                    //     return option<LinxcCompoundStmt>();
-                    // }
-
-                    // LinxcToken next = tokenizer->NextUntilValid();
-                    // if (next.ID == Linxc_Identifier) //either variable or function
-                    // {
-                    //     string name = next.ToString(this->allocator);
-
-                    //     next = tokenizer->NextUntilValid();
-                    //     if (next.ID == Linxc_LParen)
-                    //     {
-                    //         //function
-                    //         collections::Array<LinxcVar> functionArgs = this->ParseFunctionArgs(state);
-
-                    //         LinxcFunc func = LinxcFunc(name, type);
-                    //         func.arguments = functionArgs;
-
-                    //         if (state->parentType != NULL)
-                    //         {
-                    //             state->parentType->functions.Add(func);
-                    //         }
-                    //         else
-                    //         {
-                    //             state->currentNamespace->functions.Add(func.name, func);
-                    //         }
-                            
-                            
-                    //     }
-                    //     else if (next.ID == Linxc_Semicolon)
-                    //     {
-                    //         LinxcVar var = LinxcVar(name, type);
-
-                    //         if (state->parentType != NULL)
-                    //         {
-                    //             state->parentType->variables.Add(var);
-                    //         }
-                    //         else
-                    //         {
-                    //             state->currentNamespace->variables.Add(var.name, var);
-                    //         }
-                    //     }
-                    // }
-                    // else
-                    // {
-                    //     errors->Add(ERR_MSG(this->allocator, "Expected identifier after type name"));
-                    // }
+                    LinxcParseIdentifierResult identifierParsed = this->ParseIdentifier(state);
+                    
                 }
                 break;
             case Linxc_Eof:
@@ -592,5 +794,5 @@ option<LinxcCompoundStmt> LinxcParser::ParseCompoundStmt(LinxcParserState *state
             break;
         }
     }
-    return result;
+    return option<LinxcCompoundStmt>(result);
 }

@@ -127,6 +127,21 @@ namespace collections
             deinit();
             return result;
         }
+        collections::Array<T> ToOwnedArrayWith(IAllocator *newAllocator)
+        {
+            if (this->ptr == NULL)
+            {
+                return collections::Array<T>();
+            }
+            T *slice = (T*)newAllocator->Allocate(sizeof(T) * this->count);
+            for (usize i = 0; i < this->count; i++)
+            {
+                slice[i] = this->ptr[i];
+            }
+            collections::Array<T> result = collections::Array<T>(newAllocator, slice, this->count);
+            deinit();
+            return result;
+        }
         option<usize> Contains(T value, EqlFunc eqlFunc)
         {
             for (usize i = 0; i < count; i++)
