@@ -154,8 +154,6 @@ enum LinxcTokenID
 };
 const char *TokenIDToString(LinxcTokenID ID);
 
-extern collections::hashmap<string, LinxcTokenID> nameToToken;
-
 enum LinxcTokenizerState
 {
     Linxc_State_Start,
@@ -245,8 +243,10 @@ struct LinxcTokenizer
     usize prevLine;
     usize prevCharsParsed;
 
+    collections::hashmap<string, LinxcTokenID>* nameToToken;
+
     LinxcTokenizer();
-    LinxcTokenizer(const char *buffer, i32 bufferLength);
+    LinxcTokenizer(const char *buffer, i32 bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
     LinxcToken Next();
     LinxcToken PeekNext();
     LinxcToken NextUntilValid();
@@ -264,7 +264,7 @@ bool LinxcIsPrimitiveType(LinxcTokenID ID);
 
 // LinxcToken LinxcTokenizerPeekNextUntilValid(LinxcTokenizer *self);
 
-LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective);
+LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective, collections::hashmap<string, LinxcTokenID>* nameToToken);
 
 
 #endif

@@ -217,23 +217,23 @@ string LinxcExpression::ToString(IAllocator *allocator)
             string result = string(allocator);
             switch (this->data.modifiedExpression->modification)
             {
-                case Linxc_Asterisk:
-                    result.Append("*");
-                    break;
-                case Linxc_Minus:
-                    result.Append("-");
-                    break;
-                case Linxc_Bang:
-                    result.Append("!");
-                    break;
-                case Linxc_Tilde:
-                    result.Append("~");
-                    break;
-                case Linxc_Ampersand:
-                    result.Append("&");
-                    break;
-                default:
-                    break;
+            case Linxc_Asterisk:
+                result.Append("*");
+                break;
+            case Linxc_Minus:
+                result.Append("-");
+                break;
+            case Linxc_Bang:
+                result.Append("!");
+                break;
+            case Linxc_Tilde:
+                result.Append("~");
+                break;
+            case Linxc_Ampersand:
+                result.Append("&");
+                break;
+            default:
+                break;
             }
             result.AppendDeinit(this->data.modifiedExpression->expression.ToString(&defaultAllocator));
             return result;

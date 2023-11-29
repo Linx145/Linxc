@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <string.hpp>
 
-collections::hashmap<string, LinxcTokenID> nameToToken = collections::hashmap<string, LinxcTokenID>(&stringHash, &stringEql);
-
 bool LinxcIsPrimitiveType(LinxcTokenID ID)
 {
     switch (ID)
@@ -639,7 +637,7 @@ LinxcToken LinxcTokenizer::Next()
                 }
                 else
                 {
-                    result.ID = LinxcGetKeyword(self->buffer + result.start, self->index - result.start, self->prevTokenID == Linxc_Hash && !self->preprocessorDirective);
+                    result.ID = LinxcGetKeyword(self->buffer + result.start, self->index - result.start, self->prevTokenID == Linxc_Hash && !self->preprocessorDirective, self->nameToToken);
                     if (result.ID == Linxc_Invalid)
                     {
                         result.ID = Linxc_Identifier;
@@ -1293,9 +1291,10 @@ LinxcTokenizer::LinxcTokenizer()
     this->prevPrevIndex = 0;
     this->prevPreprocessorDirective = false;
     this->prevPrevTokenID = Linxc_Invalid;
+    this->nameToToken = NULL;
 }
 
-LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength)
+LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef)
 {
     this->buffer = buffer;
     this->bufferLength = bufferLength;
@@ -1311,6 +1310,7 @@ LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength)
     this->prevPrevIndex = 0;
     this->prevPreprocessorDirective = false;
     this->prevPrevTokenID = Linxc_Invalid;
+    this->nameToToken = nameToTokenRef;
 };
 
 void LinxcTokenizer::Back()
@@ -1332,79 +1332,11 @@ void LinxcTokenizer::Back()
     }
 }
 
-LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocessorDirective)
+LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocessorDirective, collections::hashmap<string, LinxcTokenID> *nameToToken)
 {
     string str = string(chars, strlen);
 
-    if (nameToToken.Count == 0)
-    {
-        nameToToken.Add(string("include"), Linxc_Keyword_include);
-        nameToToken.Add(string("alignas"), Linxc_Keyword_alignas);
-        nameToToken.Add(string("alignof"), Linxc_Keyword_alignof);
-        nameToToken.Add(string("atomic"), Linxc_Keyword_atomic);
-        nameToToken.Add(string("auto"), Linxc_Keyword_auto);
-        nameToToken.Add(string("bool"), Linxc_Keyword_bool);
-        nameToToken.Add(string("break"), Linxc_Keyword_break);
-        nameToToken.Add(string("case"), Linxc_Keyword_case);
-        nameToToken.Add(string("char"), Linxc_Keyword_char);
-        nameToToken.Add(string("complex"), Linxc_Keyword_complex);
-        nameToToken.Add(string("const"), Linxc_Keyword_const);
-        nameToToken.Add(string("continue"), Linxc_Keyword_continue);
-        nameToToken.Add(string("default"), Linxc_Keyword_default);
-        nameToToken.Add(string("define"), Linxc_Keyword_define);
-        nameToToken.Add(string("delegate"), Linxc_Keyword_delegate);
-        nameToToken.Add(string("do"), Linxc_Keyword_do);
-        nameToToken.Add(string("double"), Linxc_Keyword_double);
-        nameToToken.Add(string("else"), Linxc_Keyword_else);
-        nameToToken.Add(string("enum"), Linxc_Keyword_enum);
-        nameToToken.Add(string("error"), Linxc_Keyword_error);
-        nameToToken.Add(string("extern"), Linxc_Keyword_extern);
-        nameToToken.Add(string("false"), Linxc_Keyword_false);
-        nameToToken.Add(string("float"), Linxc_Keyword_float);
-        nameToToken.Add(string("for"), Linxc_Keyword_for);
-        nameToToken.Add(string("goto"), Linxc_Keyword_goto);
-        nameToToken.Add(string("i16"), Linxc_Keyword_i16);
-        nameToToken.Add(string("i32"), Linxc_Keyword_i32);
-        nameToToken.Add(string("i64"), Linxc_Keyword_i64);
-        nameToToken.Add(string("i8"), Linxc_Keyword_i8);
-        nameToToken.Add(string("if"), Linxc_Keyword_if);
-        nameToToken.Add(string("ifdef"), Linxc_Keyword_ifdef);
-        nameToToken.Add(string("ifndef"), Linxc_Keyword_ifndef);
-        nameToToken.Add(string("imaginary"), Linxc_Keyword_imaginary);
-        nameToToken.Add(string("include"), Linxc_Keyword_include);
-        nameToToken.Add(string("inline"), Linxc_Keyword_inline);
-        nameToToken.Add(string("int"), Linxc_Keyword_int);
-        nameToToken.Add(string("long"), Linxc_Keyword_long);
-        nameToToken.Add(string("nameof"), Linxc_Keyword_nameof);
-        nameToToken.Add(string("namespace"), Linxc_Keyword_namespace);
-        nameToToken.Add(string("noreturn"), Linxc_Keyword_noreturn);
-        nameToToken.Add(string("pragma"), Linxc_Keyword_pragma);
-        nameToToken.Add(string("register"), Linxc_Keyword_register);
-        nameToToken.Add(string("restrict"), Linxc_Keyword_restrict);
-        nameToToken.Add(string("return"), Linxc_Keyword_return);
-        nameToToken.Add(string("short"), Linxc_Keyword_short);
-        nameToToken.Add(string("signed"), Linxc_Keyword_signed);
-        nameToToken.Add(string("sizeof"), Linxc_Keyword_sizeof);
-        nameToToken.Add(string("static"), Linxc_Keyword_static);
-        nameToToken.Add(string("struct"), Linxc_Keyword_struct);
-        nameToToken.Add(string("switch"), Linxc_Keyword_switch);
-        nameToToken.Add(string("template"), Linxc_Keyword_template);
-        nameToToken.Add(string("thread_local"), Linxc_Keyword_thread_local);
-        nameToToken.Add(string("trait"), Linxc_Keyword_trait);
-        nameToToken.Add(string("true"), Linxc_Keyword_true);
-        nameToToken.Add(string("typedef"), Linxc_Keyword_typedef);
-        nameToToken.Add(string("typename"), Linxc_Keyword_typename);
-        nameToToken.Add(string("typeof"), Linxc_Keyword_typeof);
-        nameToToken.Add(string("u16"), Linxc_Keyword_u16);
-        nameToToken.Add(string("u32"), Linxc_Keyword_u32);
-        nameToToken.Add(string("u64"), Linxc_Keyword_u64);
-        nameToToken.Add(string("u8"), Linxc_Keyword_u8);
-        nameToToken.Add(string("union"), Linxc_Keyword_union);
-        nameToToken.Add(string("void"), Linxc_Keyword_void);
-        nameToToken.Add(string("volatile"), Linxc_Keyword_volatile);
-        nameToToken.Add(string("while"), Linxc_Keyword_while);
-    }
-    LinxcTokenID *tokenIDPtr = nameToToken.Get(str);
+    LinxcTokenID *tokenIDPtr = nameToToken->Get(str);
 
     str.deinit();
 

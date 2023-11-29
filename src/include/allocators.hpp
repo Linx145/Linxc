@@ -4,33 +4,33 @@
 #include <Linxc.h>
 #include <stdlib.h>
 
-def_delegate(allocFunc, void *, usize);
-def_delegate(freeFunc, void, void *);
+//an example of why we desperately need traits in Linxc
+
+def_delegate(allocFunc, void *, void *, usize);
+def_delegate(freeFunc, void, void *, void *);
 
 struct IAllocator
 {
-    allocFunc Allocate;
-    freeFunc Free;
+    void* instance;
+    allocFunc allocFunction;
+    freeFunc freeFunction;
+
+    inline void *Allocate(usize bytes)
+    {
+        return allocFunction(instance, bytes);
+    }
+    inline void Free(void *ptr)
+    {
+        freeFunction(instance, ptr);
+    }
+
     IAllocator();
-    IAllocator(allocFunc AllocateFunc, freeFunc freeFunc);
+    IAllocator(void *instance, allocFunc AllocateFunc, freeFunc freeFunc);
 };
 
 extern IAllocator defaultAllocator;
 
-IAllocator CAllocator();
-
-// struct ArenaAllocator
-// {
-//     collections::vector<void *> ptrs;
-//     IAllocator baseAllocator;
-
-//     ArenaAllocator();
-
-//     void *Allocate(usize bytes);
-
-//     void Free(void *ptr);
-
-//     void deinit();
-// };
+void *CAllocator_Allocate(void *instance, usize bytes);
+void CAllocator_Free(void *instance, void *ptr);
 
 #endif

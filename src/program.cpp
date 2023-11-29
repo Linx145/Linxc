@@ -1,12 +1,15 @@
 //#include <lexer.hpp>
 #include <stdio.h>
 #include <parser.hpp>
+#include <ArenaAllocator.hpp>
 
 i32 main()
 {
+    ArenaAllocator arena = ArenaAllocator(&defaultAllocator);
+
     printf("Program started\n");
-    LinxcParser parser = LinxcParser(&defaultAllocator);
-    //parser.includedFiles.Add(string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc"));
+    LinxcParser parser = LinxcParser(&arena.asAllocator);
+    
     string fileFullName = string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
     string fileIncludeName = string("HelloWorld.linxc");
     string fileContents = io::ReadFile(fileFullName.buffer);
@@ -37,7 +40,8 @@ i32 main()
     fileContents.deinit();
 
     parser.deinit();
-    printf("Program finish\n");
+    printf("Program finish, freeing remainding %u allocations\n", arena.ptrs.count);
+    arena.deinit();
     getchar();
 
     return 0;

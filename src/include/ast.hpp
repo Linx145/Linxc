@@ -88,6 +88,7 @@ struct LinxcTypeReference
 
 enum LinxcExpressionID
 {
+    LinxcExpr_None,
     LinxcExpr_OperatorCall, 
     LinxcExpr_IncrementVar, 
     LinxcExpr_DecrementVar, 

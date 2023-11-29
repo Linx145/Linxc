@@ -5,6 +5,7 @@
 
 #include "Linxc.h"
 #include "vector.linxc"
+#include <stdio.h>
 
 namespace collections
 {
@@ -34,6 +35,12 @@ namespace collections
                 initialized = false;
                 keyHash = 0;
                 entries = collections::vector<Entry>();
+            }
+            Bucket(IAllocator *allocator)
+            {
+                initialized = false;
+                keyHash = 0;
+                entries = collections::vector<Entry>(allocator);
             }
         };
         def_delegate(HashFunc, i32, K);
@@ -68,7 +75,7 @@ namespace collections
             this->buckets = (Bucket*)malloc(this->bucketsCount * sizeof(Bucket));
             for (usize i = 0; i < this->bucketsCount; i++)
             {
-                this->buckets[i].initialized = false;
+                this->buckets[i] = Bucket(this->allocator);
             }
         }
         hashmap(IAllocator *myAllocator, HashFunc hashFunction, EqlFunc eqlFunc)
@@ -82,7 +89,7 @@ namespace collections
             this->buckets = (Bucket*)this->allocator->Allocate(this->bucketsCount * sizeof(Bucket));
             for (usize i = 0; i < this->bucketsCount; i++)
             {
-                this->buckets[i] = Bucket();
+                this->buckets[i] = Bucket(this->allocator);
             }
         }
         void deinit()
@@ -108,12 +115,22 @@ namespace collections
 
                 for (usize i = 0; i < newSize; i++)
                 {
-                    newBuckets[i].initialized = false;
+                    newBuckets[i] = Bucket(this->allocator);
                 }
                 for (usize i = 0; i < bucketsCount; i++)
                 {
-                    usize newIndex = buckets[i].keyHash % newSize;
-                    newBuckets[newIndex] = buckets[i];
+                    if (buckets[i].initialized)
+                    {
+                        for (usize j = 0; j < buckets[i].entries.count; j++)
+                        {
+                            i32 newKeyHash = hashFunc(buckets[i].entries.ptr[j].key);
+                            usize newIndex = newKeyHash % newSize;
+                            newBuckets[newIndex].initialized = true;
+                            newBuckets[newIndex].keyHash = newKeyHash;
+                            newBuckets[newIndex].entries.Add(Entry(buckets[i].entries.ptr[j].key, buckets[i].entries.ptr[j].value));
+                        }
+                        buckets[i].entries.deinit();
+                    }
                 }
 
                 this->allocator->Free(buckets);
@@ -132,7 +149,6 @@ namespace collections
             {
                 buckets[index].initialized = true;
                 buckets[index].keyHash = hash;
-                buckets[index].entries = collections::vector<Entry>();
 
                 filledBuckets++;
             }
@@ -162,7 +178,6 @@ namespace collections
                 {
                     if (eqlFunc(buckets[index].entries.Get(i)->key, key))
                     {
-                        //buckets[index].entries.Get(i)->value.V~();
                         buckets[index].entries.RemoveAt_Swap(i);
 
                         return true;
@@ -207,14 +222,11 @@ namespace collections
                 return false;
             }
 
-            if (buckets[index].entries.count > 0)
+            for (i32 i = 0; i < buckets[index].entries.count; i++)
             {
-                for (i32 i = 0; i < buckets[index].entries.count; i++)
+                if (eqlFunc(key, buckets[index].entries.Get(i)->key))
                 {
-                    if (eqlFunc(key, buckets[index].entries.Get(i)->key))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
             return false;

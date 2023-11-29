@@ -5,6 +5,7 @@
 #include <allocators.hpp>
 #include <stdlib.h>
 #include <array.linxc>
+#include <option.linxc>
 
 namespace collections
 {
@@ -160,9 +161,13 @@ namespace collections
         {
             return collections::Array<T>(NULL, this->ptr, this->count);
         }
-        void AddAll_deinit(collections::vector<T> *from)
+        void AddAllDeinit(collections::vector<T> *from)
         {
-            memcpy(this->ptr, from->ptr, from->count * sizeof(T));
+            for (usize i = 0; i < from->count; i++)
+            {
+                Add(from->ptr[i]);
+            }
+            //memcpy(this->ptr, from->ptr, from->count * sizeof(T));
             from->deinit();
         }
     };

@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-void main()
+struct myStructure
 {
-    i32 result = 0;
-    i32 *resultPtr = &result;
+    i32 result;
+
+    void Function()
+    {
+        i32 *ptr = &result;
+        *(ptr + 1) = 5;
+    }
 }

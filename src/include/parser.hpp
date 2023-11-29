@@ -150,6 +150,7 @@ struct LinxcParser
     collections::hashset<string> parsingFiles;
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
     collections::hashmap<string, LinxcType *> fullNameToType;
+    collections::hashmap<string, LinxcTokenID> nameToToken;
     LinxcNamespace globalNamespace;
 
     LinxcParser(IAllocator *allocator);
