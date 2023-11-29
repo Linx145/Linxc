@@ -3,7 +3,7 @@
 
 string::string()
 {
-    this->allocator = NULL;
+    this->allocator = &defaultAllocator;
     this->buffer = NULL;
     this->length = 0;
 }

@@ -28,30 +28,30 @@ enum LinxcParseTypeState
     LinxcParseType_ExpectOnlyPointer
 };
 
-enum LinxcParseIdentifierResultID
-{
-    LinxcParseIdentifierResult_None,
-    LinxcParseIdentifierResult_Variable,
-    LinxcParseIdentifierResult_Type,
-    LinxcParseIdentifierResult_Func,
-    LinxcParseIdentifierResult_Namespace
-};
-union LinxcParseIdentifierResultData
-{
-    LinxcVar *variableReference;
-    LinxcTypeReference typeReference;
-    LinxcFunc *functionReference;
-    LinxcNamespace *namespaceReference;
+// enum LinxcParseIdentifierResultID
+// {
+//     LinxcParseIdentifierResult_None,
+//     LinxcParseIdentifierResult_Variable,
+//     LinxcParseIdentifierResult_Type,
+//     LinxcParseIdentifierResult_Func,
+//     LinxcParseIdentifierResult_Namespace
+// };
+// union LinxcParseIdentifierResultData
+// {
+//     LinxcVar *variableReference;
+//     LinxcType *typeReference;
+//     LinxcFunc *functionReference;
+//     LinxcNamespace *namespaceReference;
 
-    LinxcParseIdentifierResultData();
-};
-struct LinxcParseIdentifierResult
-{
-    LinxcParseIdentifierResultData value;
-    LinxcParseIdentifierResultID ID;
+//     LinxcParseIdentifierResultData();
+// };
+// struct LinxcParseIdentifierResult
+// {
+//     LinxcParseIdentifierResultData value;
+//     LinxcParseIdentifierResultID ID;
 
-    LinxcParseIdentifierResult();
-};
+//     LinxcParseIdentifierResult();
+// };
 
 //can probably make this constexpr, but linxc doesn't support it as C doesn't
 inline i8 GetAssociation(LinxcTokenID ID)
@@ -72,6 +72,7 @@ inline i8 GetAssociation(LinxcTokenID ID)
         Linxc_AngleBracketRight:
         Linxc_AngleBracketRightEqual:
         Linxc_Period:
+        Linxc_ColonColon:
             return 1; //left to right ->
         default:
             return -1; //<- right to left
@@ -81,6 +82,8 @@ inline i32 GetPrecedence(LinxcTokenID ID)
 {
     switch (ID)
     {
+        Linxc_ColonColon:
+            return 6;
         Linxc_Arrow:
         Linxc_Period:
             return 5;
@@ -121,9 +124,10 @@ struct LinxcParserState
     LinxcParser *parser;
     /// We keep a pointer to a tokenizer for each parser state in case multiple files are parsed at once or in a call stack
     LinxcTokenizer *tokenizer;
-    LinxcNamespace *currentNamespace;
     LinxcParsedFile *parsingFile;
+    LinxcNamespace *currentNamespace;
     LinxcType *parentType;
+    LinxcFunc *currentFunction;
     bool isToplevel;
     LinxcEndOn endOn;
     collections::hashmap<string, LinxcVar *> varsInScope;
@@ -149,18 +153,19 @@ struct LinxcParser
     LinxcNamespace globalNamespace;
 
     LinxcParser(IAllocator *allocator);
-    void deinit();
 
     //Call after parsing the opening ( of the function declaration, ends after parsing the closing )
     collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state);
-    //Parses an identifier or primitive type token. Can return either a LinxcTypeReference, or a variable reference.
-    LinxcParseIdentifierResult ParseIdentifier(LinxcParserState *state);
     //Parses an entire file, parsing include directives under it and their relative files if unparsed thusfar.
-    LinxcParsedFile *ParseFile(collections::Array<string> includeDirs, string fileFullPath, string includeName, string fileContents);
+    LinxcParsedFile *ParseFile(string fileFullPath, string includeName, string fileContents);
     //Parses a compound statement and returns it given the state. Returns invalid if an error is encountered
-    option<LinxcCompoundStmt> ParseCompoundStmt(LinxcParserState *state);
+    option<collections::vector<LinxcStatement>> ParseCompoundStmt(LinxcParserState *state);
+    //Parses a single, non-operator expression
     option<LinxcExpression> ParseExpressionPrimary(LinxcParserState *state);
+    //Given a primary expression, parse following expressions and join them with operators in appropriate order
     LinxcExpression ParseExpression(LinxcParserState *state, LinxcExpression primary, i32 startingPrecedence);
+    // parses a single identifier and returns either a func reference, type reference or variable reference. searches for references within the provided parentScopeOverride if any, if not, takes the values from all current namespace scopes in state and using namespace; declarations as well.
+    LinxcExpression ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride);
 
     void deinit();
     void AddAllFilesFromDirectory(string directoryPath);

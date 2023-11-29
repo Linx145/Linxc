@@ -16,10 +16,22 @@ typedef struct LinxcOperator LinxcOperator;
 typedef union LinxcExpressionData LinxcExpressionData;
 typedef struct LinxcExpression LinxcExpression;
 typedef struct LinxcStatement LinxcStatement;
+typedef struct LinxcModifiedExpression LinxcModifiedExpression;
+typedef struct LinxcTypeReference LinxcTypeReference;
+
+struct LinxcFunctionCall
+{
+    LinxcFunc *func;
+    collections::Array<LinxcExpression> inputParams;
+    collections::Array<LinxcTypeReference> templateSpecializations;
+
+    string ToString(IAllocator *allocator);
+};
 
 /// Represents a type (struct) in Linxc.
 struct LinxcType
 {
+    collections::vector<LinxcStatement> body;
     LinxcNamespace *typeNamespace;
     LinxcType *parentType;
     string name;
@@ -38,21 +50,6 @@ struct LinxcType
     string GetFullName(IAllocator *allocator);
 };
 
-/// Represents a function in Linxc, including the character in it's file where it starts and ends.
-struct LinxcFunc
-{
-    LinxcNamespace *funcNamespace;
-    LinxcType *methodOf;
-    usize startIndex;
-    usize endIndex;
-    string name;
-    LinxcTypeReference returnType;
-    collections::Array<LinxcVar> arguments;
-    collections::Array<string> templateArgs;
-
-    LinxcFunc(string name, LinxcTypeReference returnType);
-};
-
 // A type reference consists of (chain of namespace to parent type to type)<template args, each another typereference> (pointers)
 struct LinxcTypeReference
 {
@@ -66,16 +63,108 @@ struct LinxcTypeReference
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
+
+    bool operator==(LinxcTypeReference B)
+    {
+        bool templatesEqual = true;
+        if (this->templateArgs.length != B.templateArgs.length)
+        {
+            templatesEqual = false;
+        }
+        if (templatesEqual)
+        {
+            for (usize i = 0; i < this->templateArgs.length; i++)
+            {
+                templatesEqual = this->templateArgs.data[i] == B.templateArgs.data[i];
+            }
+        }
+        return this->lastType == B.lastType && templatesEqual && this->pointerCount == B.pointerCount;
+    }
+    inline bool operator!=(LinxcTypeReference B)
+    {
+        return !(*this==B);
+    }
+};
+
+enum LinxcExpressionID
+{
+    LinxcExpr_OperatorCall, 
+    LinxcExpr_IncrementVar, 
+    LinxcExpr_DecrementVar, 
+    LinxcExpr_Literal,
+    LinxcExpr_Variable,
+    LinxcExpr_FunctionRef,
+    LinxcExpr_TypeRef,
+    LinxcExpr_NamespaceRef,
+    LinxcExpr_TypeCast,
+    LinxcExpr_Modified,
+    LinxcExpr_Indexer,
+    LinxcExpr_FuncCall,
+    LinxcExpr_Sizeof,
+    LinxcExpr_Nameof,
+    LinxcExpr_Typeof
+};
+union LinxcExpressionData
+{
+    LinxcOperator *operatorCall; //Eg: X + Y
+    LinxcVar *incrementVariable; //Eg: varName++
+    LinxcVar *decrementVariable; //Eg: varName--
+    string literal; //Eg: "Hello World"
+    LinxcVar *variable; //Eg: varName
+    LinxcFunc *functionRef; //Eg: funcName <- is incomplete
+    LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
+    LinxcNamespace *namespaceRef; //Eg: namespaceName <- is incomplete
+    LinxcExpression *typeCast; //Eg: (typeName)
+    LinxcModifiedExpression *modifiedExpression; //Eg: *varName
+    LinxcExpression *indexerCall; //Eg: varName[expression]
+    LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
+    LinxcTypeReference sizeofCall; //Eg: sizeof(type reference)
+    LinxcTypeReference nameofCall; //Eg: nameof(type reference)
+    LinxcTypeReference typeofCall; //Eg: typeof(type reference)
+
+    LinxcExpressionData();
+};
+struct LinxcExpression
+{
+    LinxcExpressionData data;
+    LinxcExpressionID ID;
+    //what this expression returns. Can be any primitive type, void, or NULL (which is what variable type name expressions resolve to)
+    LinxcTypeReference resolvesTo;
+
+    string ToString(IAllocator *allocator);
+    //In the case that ID is a LinxcTypeReference or operator that eventually resolves to one,
+    //resolvesTo.type will be NULL, as this expression itself *is* a type name.
+    //However, because LinxcTypeReference may not be immediately accessible,
+    //call this function to parse the potential operator tree and retrieve the final type.
+    option<LinxcTypeReference> AsTypeReference();
+    LinxcExpression *ToHeap(IAllocator *allocator);
+};
+
+/// Represents a function in Linxc, including the character in it's file where it starts and ends.
+struct LinxcFunc
+{
+    collections::vector<LinxcStatement> body;
+    LinxcNamespace *funcNamespace;
+    LinxcType *methodOf;
+    string name;
+    LinxcExpression returnType;
+    collections::Array<LinxcVar> arguments;
+    collections::Array<string> templateArgs;
+
+    LinxcFunc();
+    LinxcFunc(string name, LinxcExpression returnType);
 };
 
 /// Represents a variable in Linxc, including it's type, name and optionally default value.
 struct LinxcVar
 {
-    LinxcTypeReference type;
+    //must resolve to a LinxcTypeReference
+    LinxcExpression type;
     string name;
+    option<LinxcExpression> defaultValue;
 
     LinxcVar();
-    LinxcVar(string varName, LinxcTypeReference varType);
+    LinxcVar(string varName, LinxcExpression varType, option<LinxcExpression> defaultVal);
 
     string ToString(IAllocator *allocator);
 };
@@ -122,17 +211,12 @@ struct LinxcParsedFile
 
     collections::vector<ERR_MSG> errors;
 
+    collections::vector<LinxcStatement> ast;
+
+    LinxcParsedFile();
     LinxcParsedFile(IAllocator *allocator, string fullPath, string includeName);
 };
 
-struct LinxcFunctionCall
-{
-    LinxcFunc *func;
-    collections::Array<LinxcExpression> inputParams;
-    collections::Array<LinxcTypeReference> templateSpecializations;
-
-    string ToString(IAllocator *allocator);
-};
 //A modified expression is an expression that is either a dereferenced pointer, a type to pointer conversion or an inverted/NOT/negative expression
 struct LinxcModifiedExpression
 {
@@ -147,49 +231,6 @@ struct LinxcOperator
     LinxcExpression rightExpr;
     LinxcTokenID operatorType;
 };
-enum LinxcExpressionID
-{
-    LinxcExpr_OperatorCall, 
-    LinxcExpr_IncrementVar, 
-    LinxcExpr_DecrementVar, 
-    LinxcExpr_Literal,
-    LinxcExpr_Variable,
-    LinxcExpr_FunctionRef,
-    LinxcExpr_TypeRef,
-    LinxcExpr_TypeCast,
-    LinxcExpr_Modified,
-    LinxcExpr_Indexer,
-    LinxcExpr_FuncCall,
-    LinxcExpr_Sizeof,
-    LinxcExpr_Nameof,
-    LinxcExpr_Typeof
-};
-union LinxcExpressionData
-{
-    LinxcOperator *operatorCall; //Eg: X + Y
-    LinxcVar *incrementVariable; //Eg: varName++
-    LinxcVar *decrementVariable; //Eg: varName--
-    string literal; //Eg: "Hello World"
-    LinxcVar *variable; //Eg: varName
-    LinxcFunc *functionRef; //Eg: funcName <- is incomplete
-    LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
-    LinxcTypeReference typeCast; //Eg: (typeName)
-    LinxcModifiedExpression *modifiedExpression; //Eg: *varName
-    LinxcExpression *indexerCall; //Eg: varName[expression]
-    LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
-    LinxcTypeReference sizeofCall; //Eg: sizeof(type reference)
-    LinxcTypeReference nameofCall; //Eg: nameof(type reference)
-    LinxcTypeReference typeofCall; //Eg: typeof(type reference)
-
-    LinxcExpressionData();
-};
-struct LinxcExpression
-{
-    LinxcExpressionData data;
-    LinxcExpressionID ID;
-
-    string ToString(IAllocator *allocator);
-};
 
 enum LinxcStatementID
 {
@@ -197,6 +238,8 @@ enum LinxcStatementID
     LinxcStmt_Expr,
     LinxcStmt_TypeDecl,
     LinxcStmt_VarDecl,
+    LinxcStmt_FuncDecl,
+    LinxcStmt_TempVarDecl,
     LinxcStmt_Namespace
 };
 union LinxcStatementData
@@ -205,12 +248,15 @@ union LinxcStatementData
     LinxcExpression expression;
     LinxcType *typeDeclaration;
     LinxcVar *varDeclaration;
+    LinxcFunc *funcDeclaration;
+    LinxcVar tempVarDeclaration;
     LinxcNamespace *namespaceScope;
+
+    LinxcStatementData();
 };
 struct LinxcStatement
 {
     LinxcStatementData data;
     LinxcStatementID ID;
 };
-#define LinxcCompoundStmt collections::vector<LinxcStatement>
 #endif

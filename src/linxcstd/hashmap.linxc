@@ -16,12 +16,25 @@ namespace collections
         {
             K key;
             V value;
+
+            Entry(K key, V value)
+            {
+                this->key = key;
+                this->value = value;
+            }
         };
         struct Bucket
         {
             bool initialized;
             i32 keyHash;
             collections::vector<Entry> entries;
+
+            Bucket()
+            {
+                initialized = false;
+                keyHash = 0;
+                entries = collections::vector<Entry>();
+            }
         };
         def_delegate(HashFunc, i32, K);
         def_delegate(EqlFunc, bool, K, K);
@@ -69,7 +82,7 @@ namespace collections
             this->buckets = (Bucket*)this->allocator->Allocate(this->bucketsCount * sizeof(Bucket));
             for (usize i = 0; i < this->bucketsCount; i++)
             {
-                this->buckets[i].initialized = false;
+                this->buckets[i] = Bucket();
             }
         }
         void deinit()
@@ -133,9 +146,7 @@ namespace collections
             }
             Count++;
 
-            Entry newEntry;
-            newEntry.key = key;
-            newEntry.value = value;
+            Entry newEntry = Entry(key, value);
 
             buckets[index].entries.Add(newEntry);
         }

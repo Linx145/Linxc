@@ -29,6 +29,85 @@ bool LinxcIsPrimitiveType(LinxcTokenID ID)
     }
 }
 
+const char *TokenIDToString(LinxcTokenID ID)
+{
+    switch (ID)
+    {
+        case Linxc_BangEqual:
+            return "!=";
+        case Linxc_Pipe:
+            return "|";
+        case Linxc_PipeEqual:
+            return "|=";
+        case Linxc_PipePipe:
+            return "||";
+        case Linxc_Equal:
+            return "=";
+        case Linxc_EqualEqual:
+            return "=";
+        case Linxc_AngleBracketLeft:
+            return "<";
+        case Linxc_AngleBracketRight:
+            return ">";
+        case Linxc_AngleBracketLeftEqual:
+            return "<=";
+        case Linxc_AngleBracketRightEqual:
+            return ">=";
+        case Linxc_Period:
+            return ".";
+        case Linxc_Ellipsis:
+            return "...";
+        case Linxc_Caret:
+            return "^";
+        case Linxc_CaretEqual:
+            return "^=";
+        case Linxc_Plus:
+            return "+";
+        case Linxc_PlusEqual:
+            return "+=";
+        case Linxc_PlusPlus:
+            return "++";
+        case Linxc_Minus:
+            return "-";
+        case Linxc_MinusEqual:
+            return "-=";
+        case Linxc_MinusMinus:
+            return "--";
+        case Linxc_Asterisk:
+            return "*";
+        case Linxc_AsteriskEqual:
+            return "*=";
+        case Linxc_Percent:
+            return "%";
+        case Linxc_PercentEqual:
+            return "%=";
+        case Linxc_Arrow:
+            return "->";
+        case Linxc_Slash:
+            return "/";
+        case Linxc_SlashEqual:
+            return "/=";
+        case Linxc_Colon:
+            return ":";
+        case Linxc_ColonColon:
+            return "::";
+        case Linxc_Comma:
+            return ",";
+        case Linxc_Ampersand:
+            return "&";
+        case Linxc_AmpersandAmpersand:
+            return "&&";
+        case Linxc_AmpersandEqual:
+            return "&=";
+        case Linxc_QuestionMark:
+            return "?";
+        case Linxc_Tilde:
+            return "~";
+        default:
+            return "";
+    }
+}
+
 LinxcToken LinxcTokenizer::PeekNextUntilValid()
 {
     LinxcTokenizer prevState = *this;
@@ -93,13 +172,15 @@ LinxcToken LinxcTokenizer::Next()
 {
     LinxcTokenizer *self = this;
 
+
+    //what
     prevPrevIndex = prevIndex;
     prevPrevTokenID = prevTokenID;
     prevCharsParsed = charsParsed;
     prevPreprocessorDirective = preprocessorDirective;
     prevIndex = index;
-
     prevLine = currentLine;
+
     LinxcToken result;
     result.tokenizer = self;
     result.end = 0;
@@ -1229,6 +1310,7 @@ void LinxcTokenizer::Back()
         prevTokenID = prevPrevTokenID;
         currentLine = prevLine;
         charsParsed = prevCharsParsed;
+        preprocessorDirective = prevPreprocessorDirective;
 
         prevCharsParsed = 0;
         prevLine = 0;

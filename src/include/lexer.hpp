@@ -29,11 +29,17 @@ enum LinxcTokenID
     Linxc_PipeEqual,
     Linxc_Equal,
     Linxc_EqualEqual,
+    //(
     Linxc_LParen,
+    //)
     Linxc_RParen,
+    //{
     Linxc_LBrace,
+    //}
     Linxc_RBrace,
+    //[
     Linxc_LBracket,
+    //]
     Linxc_RBracket,
     Linxc_Period,
     Linxc_Ellipsis,
@@ -146,6 +152,7 @@ enum LinxcTokenID
     Linxc_Keyword_error,
     Linxc_Keyword_pragma
 };
+const char *TokenIDToString(LinxcTokenID ID);
 
 extern collections::hashmap<string, LinxcTokenID> nameToToken;
 

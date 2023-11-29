@@ -8,3 +8,8 @@ zig-out/
 linxc-out
 bin
 src/obj
+Makefile
+*.sln
+*.vcxproj
+*.filters
+.vs/

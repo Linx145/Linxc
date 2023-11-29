@@ -96,7 +96,7 @@ namespace collections
                     newBuckets[newIndex] = buckets[i];
                 }
 
-                this->allocator->free(buckets);
+                this->allocator->Free(buckets);
                 buckets = newBuckets;
                 bucketsCount = newSize;
             }
@@ -135,7 +135,7 @@ namespace collections
             {
                 for (usize i = 0; i < buckets[index].entries.count; i++)
                 {
-                    if (*eqlFunc(buckets[index].entries.Get(i), value))
+                    if (eqlFunc(*buckets[index].entries.Get(i), value))
                     {
                         //buckets[index].entries.Get(i)->value.V~();
                         buckets[index].entries.RemoveAt_Swap(i);

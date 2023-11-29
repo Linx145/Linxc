@@ -48,8 +48,11 @@ namespace collections
         }
         void deinit()
         {
-            this->allocator->Free(ptr);
-            ptr = NULL;
+            if (ptr != NULL)
+            {
+                this->allocator->Free(ptr);
+                ptr = NULL;
+            }
             count = 0;
             capacity = 0;
         }

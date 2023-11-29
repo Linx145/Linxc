@@ -1,9 +1,7 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-i32 main()
+void main()
 {
-    print("Hello world\n");
-
-    return 0;
+    i32 result = 1 + 2;
 }
