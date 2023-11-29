@@ -744,6 +744,18 @@ LinxcToken LinxcTokenizer::Next()
                     toBreak = true;
                 }
                 break;
+            case Linxc_State_Asterisk:
+                if (c == '=')
+                {
+                    result.ID = Linxc_AsteriskEqual;
+                    self->index += 1;
+                }
+                else
+                {
+                    result.ID = Linxc_Asterisk;
+                }
+                toBreak = true;
+                break;
             case Linxc_State_MacroString:
                 if (c == '>')
                 {

@@ -258,5 +258,7 @@ struct LinxcStatement
 {
     LinxcStatementData data;
     LinxcStatementID ID;
+
+    string ToString(IAllocator *allocator);
 };
 #endif

@@ -58,21 +58,21 @@ inline i8 GetAssociation(LinxcTokenID ID)
 {
     switch (ID)
     {
-        Linxc_Arrow:
-        Linxc_Minus:
-        Linxc_Plus:
-        Linxc_Slash:
-        Linxc_Percent:
-        Linxc_AmpersandAmpersand:
-        Linxc_PipePipe:
-        Linxc_EqualEqual:
-        Linxc_BangEqual:
-        Linxc_AngleBracketLeft:
-        Linxc_AngleBracketLeftEqual:
-        Linxc_AngleBracketRight:
-        Linxc_AngleBracketRightEqual:
-        Linxc_Period:
-        Linxc_ColonColon:
+        case Linxc_Arrow:
+        case Linxc_Minus:
+        case Linxc_Plus:
+        case Linxc_Slash:
+        case Linxc_Percent:
+        case Linxc_AmpersandAmpersand:
+        case Linxc_PipePipe:
+        case Linxc_EqualEqual:
+        case Linxc_BangEqual:
+        case Linxc_AngleBracketLeft:
+        case Linxc_AngleBracketLeftEqual:
+        case Linxc_AngleBracketRight:
+        case Linxc_AngleBracketRightEqual:
+        case Linxc_Period:
+        case Linxc_ColonColon:
             return 1; //left to right ->
         default:
             return -1; //<- right to left
@@ -82,37 +82,37 @@ inline i32 GetPrecedence(LinxcTokenID ID)
 {
     switch (ID)
     {
-        Linxc_ColonColon:
+        case Linxc_ColonColon:
             return 6;
-        Linxc_Arrow:
-        Linxc_Period:
+        case Linxc_Arrow:
+        case Linxc_Period:
             return 5;
         //Reserved for pointer dereference (*), NOT(!), bitwise not(~) and pointer reference (&) =>
         //  return 4;
-        Linxc_Asterisk:
-        Linxc_Slash:
-        Linxc_Percent:
+        case Linxc_Asterisk:
+        case Linxc_Slash:
+        case Linxc_Percent:
             return 3;
-        Linxc_Plus:
-        Linxc_Minus:
-        Linxc_Ampersand:
-        Linxc_Caret:
-        Linxc_Tilde:
-        Linxc_Pipe:
-        Linxc_AngleBracketLeft:
-        Linxc_AngleBracketRight:
+        case Linxc_Plus:
+        case Linxc_Minus:
+        case Linxc_Ampersand:
+        case Linxc_Caret:
+        case Linxc_Tilde:
+        case Linxc_Pipe:
+        case Linxc_AngleBracketLeft:
+        case Linxc_AngleBracketRight:
             return 2;
-        Linxc_PipePipe:
-        Linxc_BangEqual:
-        Linxc_EqualEqual:
-        Linxc_AmpersandAmpersand:
+        case Linxc_PipePipe:
+        case Linxc_BangEqual:
+        case Linxc_EqualEqual:
+        case Linxc_AmpersandAmpersand:
             return 1;
-        Linxc_Equal:
-        Linxc_PlusEqual:
-        Linxc_MinusEqual:
-        Linxc_AsteriskEqual:
-        Linxc_PercentEqual:
-        Linxc_SlashEqual:
+        case Linxc_Equal:
+        case Linxc_PlusEqual:
+        case Linxc_MinusEqual:
+        case Linxc_AsteriskEqual:
+        case Linxc_PercentEqual:
+        case Linxc_SlashEqual:
             return 0;
         default:
             return -1;

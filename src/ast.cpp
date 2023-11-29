@@ -78,7 +78,7 @@ string LinxcType::GetFullName(IAllocator *allocator)
     result.allocator = allocator;
 
     LinxcNamespace *currentNamespace = this->typeNamespace;
-    while (currentNamespace != NULL)
+    while (currentNamespace != NULL && currentNamespace->name.buffer != NULL)
     {
         result.Prepend("::");
         result.Prepend(currentNamespace->name.buffer);
@@ -249,9 +249,11 @@ string LinxcExpression::ToString(IAllocator *allocator)
         case LinxcExpr_OperatorCall:
         {
             string result = string(allocator);
+            result.Append("(");
             result.AppendDeinit(this->data.operatorCall->leftExpr.ToString(&defaultAllocator));
             result.Append(TokenIDToString(this->data.operatorCall->operatorType));
             result.AppendDeinit(this->data.operatorCall->rightExpr.ToString(&defaultAllocator));
+            result.Append(")");
             return result;
         }
         case LinxcExpr_Sizeof:
@@ -314,4 +316,100 @@ LinxcExpression *LinxcExpression::ToHeap(IAllocator *allocator)
 LinxcStatementData::LinxcStatementData()
 {
     this->includeStatement = NULL;
+}
+string LinxcStatement::ToString(IAllocator *allocator)
+{
+    switch (this->ID)
+    {
+    case LinxcStmt_Include:
+    {
+        return string(allocator, this->data.includeStatement->includeName.buffer);
+    }
+    case LinxcStmt_Expr:
+    {
+        return this->data.expression.ToString(allocator);
+    }
+    case LinxcStmt_FuncDecl:
+    {
+        string result = string(allocator);
+        result.AppendDeinit(this->data.funcDeclaration->returnType.ToString(&defaultAllocator));
+        result.Append(" ");
+        result.Append(this->data.funcDeclaration->name.buffer);
+        result.Append("(");
+        for (usize i = 0; i < this->data.funcDeclaration->arguments.length; i++)
+        {
+            LinxcVar* var = &this->data.funcDeclaration->arguments.data[i];
+            result.AppendDeinit(var->type.ToString(&defaultAllocator));
+            result.Append(" ");
+            result.Append(var->name.buffer);
+            if (var->defaultValue.present)
+            {
+                result.Append(" = ");
+                result.AppendDeinit(var->defaultValue.value.ToString(&defaultAllocator));
+            }
+            if (i < this->data.funcDeclaration->arguments.length - 1)
+            {
+                result.Append(", ");
+            }
+        }
+        result.Append(") {\n");
+
+        for (usize i = 0; i < this->data.funcDeclaration->body.count; i++)
+        {
+            result.AppendDeinit(this->data.funcDeclaration->body.ptr[i].ToString(&defaultAllocator));
+            result.Append("\n");
+        }
+        result.Append("}");
+        return result;
+    }
+    case LinxcStmt_Namespace:
+    {
+        string result = string(allocator);
+        //this->data.namespaceScope
+        return result;
+    }
+    case LinxcStmt_TempVarDecl:
+    {
+        string result = string(allocator);
+        LinxcVar* var = &this->data.tempVarDeclaration;
+        result.AppendDeinit(var->type.ToString(&defaultAllocator));
+        result.Append(" ");
+        result.Append(var->name.buffer);
+        if (var->defaultValue.present)
+        {
+            result.Append(" = ");
+            result.AppendDeinit(var->defaultValue.value.ToString(&defaultAllocator));
+        }
+        result.Append(";");
+        return result;
+    }
+    case LinxcStmt_TypeDecl:
+    {
+        string result = string(allocator, "struct ");
+        result.Append(this->data.typeDeclaration->name.buffer);
+        result.Append(" { \n");
+        for (usize i = 0; i < this->data.typeDeclaration->body.count; i++)
+        {
+            result.AppendDeinit(this->data.typeDeclaration->body.ptr[i].ToString(&defaultAllocator));
+            result.Append("\n");
+        }
+        result.Append("}");
+        return result;
+    }
+    case LinxcStmt_VarDecl:
+    {
+        string result = string(allocator);
+        LinxcVar* var = this->data.varDeclaration;
+        result.AppendDeinit(var->type.ToString(&defaultAllocator));
+        result.Append(" ");
+        result.Append(var->name.buffer);
+        if (var->defaultValue.present)
+        {
+            result.Append(" = ");
+            result.AppendDeinit(var->defaultValue.value.ToString(&defaultAllocator));
+        }
+        result.Append(";");
+        return result;
+    }
+    }
 }

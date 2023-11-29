@@ -15,7 +15,14 @@ i32 main()
 
     if (result->errors.count == 0)
     {
-        printf("No Error!\n");
+        printf("No Error!\n__\n");
+        for (usize i = 0; i < result->ast.count; i++)
+        {
+            string line = result->ast.Get(i)->ToString(&defaultAllocator);
+            printf("%s\n", line.buffer);
+            line.deinit();
+        }
+        printf("__\n");
     }
     else
     {

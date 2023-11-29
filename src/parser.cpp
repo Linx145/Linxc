@@ -124,6 +124,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     //attempting to modify a type name
                     if (expression.resolvesTo.lastType == NULL)
                     {
+                        printf("%i\n", nextPrimaryOpt.value.ID);
                         state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to place a modifying operator on a type name. You can only modify literals and variables."));
                     }
 
@@ -336,9 +337,6 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
 
         lhs.data.operatorCall = operatorCall;
         lhs.ID = LinxcExpr_OperatorCall;
-        //TODO: operator overloading, implicit cast resolution on adding certain types together
-        //Eg: int + float = float
-        //Eg: int + typename = error
     }
     return lhs;
 }
@@ -372,74 +370,86 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
 
         if (!parentScopeOverride.present)
         {
-            //check state namespaces
-            LinxcNamespace *toCheck = state->currentNamespace;
-            while (toCheck != NULL)
-            {
-                LinxcFunc *asFunction = toCheck->functions.Get(identifierName);
-                if (asFunction != NULL)
-                {
-                    result.ID = LinxcExpr_FunctionRef;
-                    result.data.functionRef = asFunction;
-                    result.resolvesTo = asFunction->returnType.AsTypeReference().value;
-                }
-                else
-                {
-                    LinxcVar *asVar = toCheck->variables.Get(identifierName);
-                    if (asVar != NULL)
-                    {
-                        result.ID = LinxcExpr_Variable;
-                        result.data.variable = asVar;
-                         //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
-                        result.resolvesTo = asVar->type.AsTypeReference().value;
-                    }
-                    else
-                    {
-                        LinxcType *asType = toCheck->types.Get(identifierName);
-                        if (asType != NULL)
-                        {
-                            result.ID = LinxcExpr_TypeRef;
-                            result.data.typeRef = asType;
-                            result.resolvesTo.lastType = NULL;
-                        }
-                    }
-                }
+            //check local variables
 
-                toCheck = toCheck->parentNamespace;
+            LinxcVar **asLocalVar = state->varsInScope.Get(identifierName);
+            if (asLocalVar != NULL)
+            {
+                result.ID = LinxcExpr_Variable;
+                result.data.variable = *asLocalVar;
+                result.resolvesTo = result.data.variable->type.AsTypeReference().value;
             }
-
-            LinxcType *typeCheck = state->parentType;
-            if (typeCheck != NULL)
+            else
             {
-                LinxcFunc *asFunction = typeCheck->FindFunction(identifierName);
-                if (asFunction != NULL)
+                //check state namespaces
+                LinxcNamespace* toCheck = state->currentNamespace;
+                while (toCheck != NULL)
                 {
-                    result.ID = LinxcExpr_FunctionRef;
-                    result.data.functionRef = asFunction;
-                    result.resolvesTo = asFunction->returnType.AsTypeReference().value;
-                }
-                else
-                {
-                    LinxcVar *asVar = typeCheck->FindVar(identifierName);
-                    if (asVar != NULL)
+                    LinxcFunc* asFunction = toCheck->functions.Get(identifierName);
+                    if (asFunction != NULL)
                     {
-                        result.ID = LinxcExpr_Variable;
-                        result.data.variable = asVar;
-                        result.resolvesTo = asVar->type.AsTypeReference().value;
+                        result.ID = LinxcExpr_FunctionRef;
+                        result.data.functionRef = asFunction;
+                        result.resolvesTo = asFunction->returnType.AsTypeReference().value;
                     }
                     else
                     {
-                        LinxcType *asType = typeCheck->FindSubtype(identifierName);
-                        if (asType != NULL)
+                        LinxcVar* asVar = toCheck->variables.Get(identifierName);
+                        if (asVar != NULL)
                         {
-                            result.ID = LinxcExpr_TypeRef;
-                            result.data.typeRef = asType;
-                            result.resolvesTo.lastType = NULL;
+                            result.ID = LinxcExpr_Variable;
+                            result.data.variable = asVar;
+                            //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
+                            result.resolvesTo = asVar->type.AsTypeReference().value;
+                        }
+                        else
+                        {
+                            LinxcType* asType = toCheck->types.Get(identifierName);
+                            if (asType != NULL)
+                            {
+                                result.ID = LinxcExpr_TypeRef;
+                                result.data.typeRef = asType;
+                                result.resolvesTo.lastType = NULL;
+                            }
                         }
                     }
+
+                    toCheck = toCheck->parentNamespace;
                 }
 
-                typeCheck = typeCheck->parentType;
+                LinxcType* typeCheck = state->parentType;
+                if (typeCheck != NULL)
+                {
+                    LinxcFunc* asFunction = typeCheck->FindFunction(identifierName);
+                    if (asFunction != NULL)
+                    {
+                        result.ID = LinxcExpr_FunctionRef;
+                        result.data.functionRef = asFunction;
+                        result.resolvesTo = asFunction->returnType.AsTypeReference().value;
+                    }
+                    else
+                    {
+                        LinxcVar* asVar = typeCheck->FindVar(identifierName);
+                        if (asVar != NULL)
+                        {
+                            result.ID = LinxcExpr_Variable;
+                            result.data.variable = asVar;
+                            result.resolvesTo = asVar->type.AsTypeReference().value;
+                        }
+                        else
+                        {
+                            LinxcType* asType = typeCheck->FindSubtype(identifierName);
+                            if (asType != NULL)
+                            {
+                                result.ID = LinxcExpr_TypeRef;
+                                result.data.typeRef = asType;
+                                result.resolvesTo.lastType = NULL;
+                            }
+                        }
+                    }
+
+                    typeCheck = typeCheck->parentType;
+                }
             }
         }
         else if (parentScopeOverride.value.ID == LinxcExpr_NamespaceRef)
@@ -627,11 +637,9 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     else 
                     {
                         //-2 because its - (next.start + 1)
-                        string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
+                        //string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
 
-                        printf("included %s\n", macroString.buffer);
-
-                        macroString.deinit();
+                        //printf("included %s\n", macroString.buffer);
                     }
                     
                     //let's not deal with #includes until we're ready
@@ -788,6 +796,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                                 stmt.data.tempVarDeclaration = varDecl;
                                 stmt.ID = LinxcStmt_TempVarDecl;
                                 result.Add(stmt);
+
+                                state->varsInScope.Add(varDecl.name, &result.Get(result.count - 1)->data.tempVarDeclaration);
                             }
                         }
                         else if (next.ID == Linxc_LParen) //function declaration

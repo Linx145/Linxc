@@ -3,5 +3,6 @@
 
 void main()
 {
-    i32 result = 1 + 2;
+    i32 result = 0;
+    i32 *resultPtr = &result;
 }
