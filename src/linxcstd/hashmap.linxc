@@ -27,7 +27,7 @@ namespace collections
         struct Bucket
         {
             bool initialized;
-            i32 keyHash;
+            u32 keyHash;
             collections::vector<Entry> entries;
 
             Bucket()
@@ -43,7 +43,7 @@ namespace collections
                 entries = collections::vector<Entry>(allocator);
             }
         };
-        def_delegate(HashFunc, i32, K);
+        def_delegate(HashFunc, u32, K);
         def_delegate(EqlFunc, bool, K, K);
 
         HashFunc hashFunc;
@@ -123,7 +123,7 @@ namespace collections
                     {
                         for (usize j = 0; j < buckets[i].entries.count; j++)
                         {
-                            i32 newKeyHash = hashFunc(buckets[i].entries.ptr[j].key);
+                            u32 newKeyHash = hashFunc(buckets[i].entries.ptr[j].key);
                             usize newIndex = newKeyHash % newSize;
                             newBuckets[newIndex].initialized = true;
                             newBuckets[newIndex].keyHash = newKeyHash;
@@ -142,7 +142,7 @@ namespace collections
         void Add(K key, V value)
         {
             EnsureCapacity();
-            i32 hash = hashFunc(key);
+            u32 hash = hashFunc(key);
             usize index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
@@ -169,7 +169,7 @@ namespace collections
 
         bool Remove(K key)
         {
-            i32 hash = hashFunc(key);
+            u32 hash = hashFunc(key);
             usize index = hash % bucketsCount;
 
             if (buckets[index].initialized)
@@ -189,7 +189,7 @@ namespace collections
 
         V *Get(K key)
         {
-            i32 hash = hashFunc(key);
+            u32 hash = hashFunc(key);
             usize index = hash % bucketsCount;
 
             if (buckets[index].initialized)
@@ -214,15 +214,15 @@ namespace collections
 
         bool Contains(K key)
         {
-            i32 hash = hashFunc(key);
-            i32 index = hash % bucketsCount;
+            u32 hash = hashFunc(key);
+            usize index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
             {
                 return false;
             }
 
-            for (i32 i = 0; i < buckets[index].entries.count; i++)
+            for (usize i = 0; i < buckets[index].entries.count; i++)
             {
                 if (eqlFunc(key, buckets[index].entries.Get(i)->key))
                 {

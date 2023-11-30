@@ -27,7 +27,7 @@ bool LinxcIsPrimitiveType(LinxcTokenID ID)
     }
 }
 
-const char *TokenIDToString(LinxcTokenID ID)
+const char *LinxcTokenIDToString(LinxcTokenID ID)
 {
     switch (ID)
     {
@@ -42,7 +42,7 @@ const char *TokenIDToString(LinxcTokenID ID)
         case Linxc_Equal:
             return "=";
         case Linxc_EqualEqual:
-            return "=";
+            return "==";
         case Linxc_AngleBracketLeft:
             return "<";
         case Linxc_AngleBracketRight:

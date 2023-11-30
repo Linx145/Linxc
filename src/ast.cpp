@@ -1,5 +1,81 @@
 #include <ast.hpp>
 
+u32 LinxcTypeReferenceHash(LinxcTypeReference A)
+{
+    //dont bother with the full name
+    u32 h1 = 7;
+    if (A.lastType != NULL)
+    {
+        stringHash(A.lastType->name);
+    }
+    u32 h2 = 0;
+    for (usize i = 0; i < A.templateArgs.length; i++)
+    {
+        h2 = LinxcTypeReferenceHash(A.templateArgs.data[i]);
+        h1 = ((h1 << 5) + h1) ^ h2;
+        //result *= 11 + LinxcTypeReferenceHash(A.templateArgs.data[i]);
+    }
+    h2 = A.pointerCount;
+    h1 = ((h1 << 5) + h1) ^ h2;
+    return h1;
+}
+u32 LinxcOperatorImplHash(LinxcOperatorImpl A)
+{
+    u32 h1 = LinxcTypeReferenceHash(A.myType);
+    u32 h2 = 0;
+    if (A.ID == LinxcOverloadIs_Operator)
+    {
+        h2 = A.op;
+    }
+    else
+    {
+        h2 = A.implicit ? 7 : 11;
+    }
+    h1 = ((h1 << 5) + h1) ^ h2;
+
+    h2 = LinxcTypeReferenceHash(A.otherType);
+    return ((h1 << 5) + h1) ^ h2;
+}
+bool LinxcOperatorImplEql(LinxcOperatorImpl A, LinxcOperatorImpl B)
+{
+    //If A is implicit and B is explicit but they resolve to the same value, then the cast is considered equal.
+    //Thus, there is no need to check their implicity
+    return A.myType == B.myType && A.otherType == B.otherType && A.ID == B.ID && A.op == B.op && A.implicit == B.implicit;
+}
+string LinxcOperatorImpl::ToString(IAllocator* allocator)
+{
+    if (this->ID == LinxcOverloadIs_Cast)
+    {
+        string str = string(allocator);
+        if (this->implicit)
+        {
+            str.Append("implicit ");
+        }
+        else str.Append("explicit ");
+        str.AppendDeinit(this->myType.ToString(&defaultAllocator));
+        str.Append(" -> ");
+        str.AppendDeinit(this->otherType.ToString(&defaultAllocator));
+        //this->operation.cast.
+        return str;
+    }
+    else
+    {
+        string str = string(allocator);
+        str.AppendDeinit(this->myType.ToString(&defaultAllocator));
+        str.Append(LinxcTokenIDToString(this->op));
+        str.AppendDeinit(this->otherType.ToString(&defaultAllocator));
+        return str;
+    }
+}
+string LinxcOperatorFunc::ToString(IAllocator* allocator)
+{
+    string result = string(allocator);
+    result.AppendDeinit(this->operatorOverride.ToString(&defaultAllocator));
+    result.Append(" returns ");
+    result.AppendDeinit(this->function.returnType.AsTypeReference().value.ToString(&defaultAllocator));
+    return result;
+}
+
 LinxcParsedFile::LinxcParsedFile()
 {
     this->definedFuncs = collections::vector<LinxcFunc *>();
@@ -60,6 +136,7 @@ LinxcType::LinxcType()
     this->subTypes = collections::vector<LinxcType>();
     this->templateArgs = collections::vector<string>();
     this->variables = collections::vector<LinxcVar>();
+    this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>();
 }
 LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent)
 {
@@ -71,6 +148,7 @@ LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNames
     this->subTypes = collections::vector<LinxcType>(allocator);
     this->templateArgs = collections::vector<string>(allocator);
     this->variables = collections::vector<LinxcVar>(allocator);
+    this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>(allocator, &LinxcOperatorImplHash, &LinxcOperatorImplEql);
 }
 string LinxcType::GetFullName(IAllocator *allocator)
 {
@@ -251,7 +329,7 @@ string LinxcExpression::ToString(IAllocator *allocator)
             string result = string(allocator);
             result.Append("(");
             result.AppendDeinit(this->data.operatorCall->leftExpr.ToString(&defaultAllocator));
-            result.Append(TokenIDToString(this->data.operatorCall->operatorType));
+            result.Append(LinxcTokenIDToString(this->data.operatorCall->operatorType));
             result.AppendDeinit(this->data.operatorCall->rightExpr.ToString(&defaultAllocator));
             result.Append(")");
             return result;

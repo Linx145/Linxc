@@ -28,31 +28,6 @@ enum LinxcParseTypeState
     LinxcParseType_ExpectOnlyPointer
 };
 
-// enum LinxcParseIdentifierResultID
-// {
-//     LinxcParseIdentifierResult_None,
-//     LinxcParseIdentifierResult_Variable,
-//     LinxcParseIdentifierResult_Type,
-//     LinxcParseIdentifierResult_Func,
-//     LinxcParseIdentifierResult_Namespace
-// };
-// union LinxcParseIdentifierResultData
-// {
-//     LinxcVar *variableReference;
-//     LinxcType *typeReference;
-//     LinxcFunc *functionReference;
-//     LinxcNamespace *namespaceReference;
-
-//     LinxcParseIdentifierResultData();
-// };
-// struct LinxcParseIdentifierResult
-// {
-//     LinxcParseIdentifierResultData value;
-//     LinxcParseIdentifierResultID ID;
-
-//     LinxcParseIdentifierResult();
-// };
-
 //can probably make this constexpr, but linxc doesn't support it as C doesn't
 inline i8 GetAssociation(LinxcTokenID ID)
 {
@@ -118,6 +93,45 @@ inline i32 GetPrecedence(LinxcTokenID ID)
             return -1;
     }
 };
+inline option<bool> IsSigned(LinxcTokenID tokenID)
+{
+    if (tokenID >= Linxc_Keyword_u8 && tokenID <= Linxc_Keyword_u64)
+    {
+        return option<bool>(true);
+    }
+    else if (tokenID >= Linxc_Keyword_i8 && tokenID <= Linxc_Keyword_i64)
+    {
+        return option<bool>(false);
+    }
+    else return option<bool>();
+}
+inline LinxcTokenID GetOperationResult(LinxcTokenID num1, LinxcTokenID num2)
+{
+    option<bool> num1IsSigned = IsSigned(num1);
+    option<bool> num2IsSigned = IsSigned(num2);
+    if (num1IsSigned.present && num2IsSigned.present)
+    {
+        if (num1IsSigned.value == num2IsSigned.value)
+        {
+            //both have same signature, so return the larger bit number
+            return num2 >= num1 ? num2 : num1;
+        }
+        else
+        {
+            //if u8 + i32, return i32
+            //if u64 + i32, return u64
+
+            //in LinxcTokenID enum, unsigned integers come before signed integers.
+            //thus, if we want to change signed to unsigned, we -4
+
+            LinxcTokenID num1SameSignature = !num1IsSigned.value ? num1 : (LinxcTokenID)(num1 - 4);
+            LinxcTokenID num2SameSignature = !num2IsSigned.value ? num2 : (LinxcTokenID)(num2 - 4);
+
+            return num2SameSignature >= num1SameSignature ? num2 : num1;
+        }
+    }
+    else return Linxc_Invalid;
+}
 
 struct LinxcParserState
 {
@@ -149,7 +163,6 @@ struct LinxcParser
     /// Maps includeName to parsed file and data.
     collections::hashset<string> parsingFiles;
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
-    collections::hashmap<string, LinxcType *> fullNameToType;
     collections::hashmap<string, LinxcTokenID> nameToToken;
     LinxcNamespace globalNamespace;
 
@@ -172,6 +185,8 @@ struct LinxcParser
     void AddAllFilesFromDirectory(string directoryPath);
     string FullPathFromIncludeName(string includeName);
 
+    LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
+    LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
 };
 
 #endif

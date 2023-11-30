@@ -18,6 +18,8 @@ typedef struct LinxcExpression LinxcExpression;
 typedef struct LinxcStatement LinxcStatement;
 typedef struct LinxcModifiedExpression LinxcModifiedExpression;
 typedef struct LinxcTypeReference LinxcTypeReference;
+typedef struct LinxcOperatorImpl LinxcOperatorImpl;
+typedef struct LinxcOperatorFunc LinxcOperatorFunc;
 
 struct LinxcFunctionCall
 {
@@ -39,6 +41,7 @@ struct LinxcType
     collections::vector<LinxcFunc> functions;
     collections::vector<LinxcType> subTypes;
     collections::vector<string> templateArgs;
+    collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc> operatorOverloads;
 
     LinxcType();
     LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent);
@@ -85,6 +88,7 @@ struct LinxcTypeReference
         return !(*this==B);
     }
 };
+u32 LinxcTypeReferenceHash(LinxcTypeReference A);
 
 enum LinxcExpressionID
 {
@@ -261,5 +265,35 @@ struct LinxcStatement
     LinxcStatementID ID;
 
     string ToString(IAllocator *allocator);
+};
+
+enum LinxcOperatorOrCastID
+{
+    LinxcOverloadIs_Operator, LinxcOverloadIs_Cast
+};
+struct LinxcOperatorImpl
+{
+    LinxcOperatorOrCastID ID;
+    bool implicit;
+    LinxcTokenID op;
+
+    //the type that we are operating on
+    LinxcTypeReference myType;
+
+    //in an operator type, refers to what we are operating with
+    //in a cast type, refers to what we are casting to
+    LinxcTypeReference otherType;
+
+    string ToString(IAllocator* allocator);
+};
+u32 LinxcOperatorImplHash(LinxcOperatorImpl A);
+bool LinxcOperatorImplEql(LinxcOperatorImpl A, LinxcOperatorImpl B);
+
+struct LinxcOperatorFunc
+{
+    LinxcOperatorImpl operatorOverride;
+    LinxcFunc function;
+
+    string ToString(IAllocator* allocator);
 };
 #endif

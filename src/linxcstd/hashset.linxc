@@ -17,7 +17,7 @@ namespace collections
             i32 keyHash;
             collections::vector<T> entries;
         };
-        def_delegate(HashFunc, i32, T);
+        def_delegate(HashFunc, u32, T);
         def_delegate(EqlFunc, bool, T, T);
 
         IAllocator *allocator;
@@ -104,7 +104,7 @@ namespace collections
         void Add(T value)
         {
             EnsureCapacity();
-            i32 hash = hashFunc(value);
+            u32 hash = hashFunc(value);
             usize index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
@@ -128,7 +128,7 @@ namespace collections
         }
         bool Remove(T value)
         {
-            i32 hash = hashFunc(value);
+            u32 hash = hashFunc(value);
             usize index = hash % bucketsCount;
 
             if (buckets[index].initialized)
@@ -148,8 +148,8 @@ namespace collections
         }
         bool Contains(T value)
         {
-            i32 hash = hashFunc(value);
-            i32 index = hash % bucketsCount;
+            u32 hash = hashFunc(value);
+            u32 index = hash % bucketsCount;
 
             if (!buckets[index].initialized)
             {
@@ -158,7 +158,7 @@ namespace collections
 
             if (buckets[index].entries.count > 0)
             {
-                for (i32 i = 0; i < buckets[index].entries.count; i++)
+                for (usize i = 0; i < buckets[index].entries.count; i++)
                 {
                     if (eqlFunc(value, *buckets[index].entries.Get(i)))
                     {

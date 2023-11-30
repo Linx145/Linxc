@@ -152,7 +152,7 @@ enum LinxcTokenID
     Linxc_Keyword_error,
     Linxc_Keyword_pragma
 };
-const char *TokenIDToString(LinxcTokenID ID);
+const char *LinxcTokenIDToString(LinxcTokenID ID);
 
 enum LinxcTokenizerState
 {

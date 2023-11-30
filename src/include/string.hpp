@@ -34,9 +34,9 @@ struct string
 
 bool stringEql(string A, string B);
 
-i32 stringHash(string A);
+u32 stringHash(string A);
 
-i32 charHash(const char *A);
+u32 charHash(const char *A);
 
 option<usize> FindFirst(const char *buffer, char character);
 

@@ -1,4 +1,4 @@
-#include <parser.hpp>
+﻿#include <parser.hpp>
 #include <stdio.h>
 
 LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel)
@@ -17,14 +17,90 @@ LinxcParser::LinxcParser(IAllocator *allocator)
 {
     this->allocator = allocator;
     this->globalNamespace = LinxcNamespace(allocator, string());
-    this->fullNameToType = collections::hashmap<string, LinxcType *>(allocator, &stringHash, &stringEql);
 
-    const char *primitiveTypes[13] = {"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "float", "double", "bool", "char", "void"};
-    for (i32 i = 0; i < 13; i++)
+    const i32 numIntegerTypes = 8;
+    const i32 numNumericTypes = 11;
+    const i32 numPrimitiveTypes = 13;
+
+    //every numeric type can be explicitly compared to every other numeric type
+    const char *primitiveTypes[numPrimitiveTypes] = {"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "float", "double", "char", "void", "bool" };
+    string nameStrings[numPrimitiveTypes];
+    LinxcType* primitiveTypePtrs[numPrimitiveTypes];
+    for (i32 i = 0; i < numPrimitiveTypes; i++)
     {
-        string str = string(allocator, primitiveTypes[i]);
-        this->globalNamespace.types.Add(str, LinxcType(allocator, str, &this->globalNamespace, NULL));
-        this->fullNameToType.Add(str, this->globalNamespace.types.Get(str));
+        nameStrings[i] = string(allocator, primitiveTypes[i]);
+        this->globalNamespace.types.Add(nameStrings[i], LinxcType(allocator, nameStrings[i], &this->globalNamespace, NULL));
+        primitiveTypePtrs[i] = this->globalNamespace.types.Get(nameStrings[i]);
+    }
+
+    //all types support ==, !=
+    //all numeric types support +, -, /, *
+    //integer types support <<, >>, |, ^, &
+    //bools support &&, ||, !
+
+    //using == or != on any type MUST convert it into a bool
+    //+, -, /, * MUST return either original type or operatesWith type
+    //<<, >>, |, ^, & MUST return original type
+
+    //all implicit casts may be used explicitly
+    //an explicit cast may not be used implicitly
+
+    //all integer types cast to all other integer types
+    for (i32 i = 0; i < numIntegerTypes; i++)
+    {
+        for (i32 j = 0; j < numIntegerTypes; j++)
+        {
+            if (i != j)
+            {
+                //if casting up and is same sign, implicit
+                //else, explicit
+                bool sameSign = (i < 4 && j < 4) || (i >= 4 && j >= 4);
+                bool implicit = sameSign && j > i;
+
+                LinxcOperatorFunc defaultCast = NewDefaultCast(primitiveTypePtrs, i, j, implicit);
+                primitiveTypePtrs[i]->operatorOverloads.Add(defaultCast.operatorOverride, defaultCast);
+            }
+        }
+        //integers cast to float and double implicitly
+        LinxcOperatorFunc toFloat = NewDefaultCast(primitiveTypePtrs, i, numIntegerTypes, true);
+        primitiveTypePtrs[i]->operatorOverloads.Add(toFloat.operatorOverride, toFloat);
+
+        LinxcOperatorFunc toDouble = NewDefaultCast(primitiveTypePtrs, i, numIntegerTypes + 1, true);
+        primitiveTypePtrs[i]->operatorOverloads.Add(toDouble.operatorOverride, toDouble);
+    }
+    //float and double cast explicitly to all integer types and each other
+    for (i32 i = numIntegerTypes; i < numIntegerTypes + 2; i++)
+    {
+        for (i32 j = 0; j < numIntegerTypes + 2; j++)
+        {
+            if (i != j)
+            {
+                LinxcOperatorFunc defaultCast = NewDefaultCast(primitiveTypePtrs, i, j, false);
+                primitiveTypePtrs[i]->operatorOverloads.Add(defaultCast.operatorOverride, defaultCast);
+            }
+        }
+    }
+    //all numeric types can be +, -, /, * with each other
+    //this results in 
+    for (i32 i = 0; i < numIntegerTypes; i++)
+    {
+        for (i32 j = 0; j < numIntegerTypes; j++)
+        {
+            if (i != j)
+            {
+                LinxcOperatorFunc operatorAdd = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Plus);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorAdd.operatorOverride, operatorAdd);
+            
+                LinxcOperatorFunc operatorSubtract = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Minus);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorSubtract.operatorOverride, operatorSubtract);
+
+                LinxcOperatorFunc operatorMult = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Asterisk);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorMult.operatorOverride, operatorMult);
+
+                LinxcOperatorFunc operatorDiv = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Slash);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorDiv.operatorOverride, operatorDiv);
+            }
+        }
     }
 
     this->parsedFiles = collections::hashmap<string, LinxcParsedFile>(allocator, &stringHash, &stringEql);
@@ -32,7 +108,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     this->includedFiles = collections::vector<string>(allocator);
     this->includeDirectories = collections::vector<string>(allocator);
     this->nameToToken = collections::hashmap<string, LinxcTokenID>(allocator, &stringHash, &stringEql);
-    char ch = 'f';
+
     nameToToken.Add(string(nameToToken.allocator, "include"), Linxc_Keyword_include);
     nameToToken.Add(string(nameToToken.allocator, "alignas"), Linxc_Keyword_alignas);
     nameToToken.Add(string(nameToToken.allocator, "alignof"), Linxc_Keyword_alignof);
@@ -170,6 +246,115 @@ string LinxcParser::FullPathFromIncludeName(string includeName)
         else potentialFullPath.deinit();
     }
     return string();
+}
+LinxcOperatorFunc LinxcParser::NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit)
+{
+    LinxcType* myType = primitiveTypePtrs[myTypeIndex];
+    LinxcType* toType = primitiveTypePtrs[otherTypeIndex];
+    //i32 toTypeIndex = GetOperationResult((LinxcTokenID)(myTypeIndex + Linxc_Keyword_u8), (LinxcTokenID)(otherTypeIndex + Linxc_Keyword_u8)) - Linxc_Keyword_u8;
+    //LinxcTypeReference toType = LinxcTypeReference(primitiveTypePtrs[toTypeIndex]);
+
+    LinxcOperatorImpl cast;
+    cast.implicit = isImplicit;
+    cast.ID = LinxcOverloadIs_Cast;
+    cast.otherType = toType;
+    cast.myType = LinxcTypeReference(myType);
+
+    LinxcExpression returnType;
+    returnType.resolvesTo.lastType = NULL;
+    returnType.data.typeRef = toType;
+    returnType.ID = LinxcExpr_TypeRef; //what we're casting into
+    LinxcFunc castFunc = LinxcFunc(string(), returnType); //these functions don't need names
+    
+    //cast functions don't have arguments, eg: (float)integer has no argument
+    castFunc.arguments = collections::Array<LinxcVar>();
+
+    LinxcOperatorFunc result;
+    result.operatorOverride = cast;
+    result.function = castFunc;
+
+    //string debug = cast.ToString(&defaultAllocator);
+    //printf("%s\n", debug.buffer);
+    //debug.deinit();
+
+    return result;
+}
+LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op)
+{
+    //unsigned comes before signed in the enum
+    LinxcType* myType = primitiveTypePtrs[myTypeIndex];
+    LinxcType* otherType = primitiveTypePtrs[otherTypeIndex];
+    i32 returnTypeIndex = 0;
+    
+    if (myTypeIndex < 8 && otherTypeIndex < 8)
+    {
+        bool IAmSigned = myTypeIndex >= 4;
+        bool otherIsSigned = otherTypeIndex >= 4;
+        bool sameSign = IAmSigned == otherIsSigned;//(myTypeIndex < 4 && otherTypeIndex < 4) || (myTypeIndex >= 4 && otherTypeIndex >= 4);
+
+        if (sameSign)
+        {
+            returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
+        }
+        else
+        {
+            //when signed op unsigned, convert signed to unsigned
+            if (IAmSigned && !otherIsSigned)
+            {
+                i32 meUnsignedIndex = myTypeIndex - 4;
+                returnTypeIndex = otherTypeIndex > meUnsignedIndex ? otherTypeIndex : meUnsignedIndex;
+            }
+            else// if (!IAmSigned && otherIsSigned)
+            {
+                i32 otherUnsignedIndex = otherTypeIndex - 4;
+                returnTypeIndex = otherUnsignedIndex > myTypeIndex ? otherUnsignedIndex : myTypeIndex;
+            }
+        }
+    }
+    else
+    {
+        //float * double = double
+        if (myTypeIndex == otherTypeIndex)
+        {
+            returnTypeIndex = myTypeIndex;
+        }
+        else
+        {
+            returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
+        }
+    }
+    LinxcType* returnType = primitiveTypePtrs[returnTypeIndex];
+    LinxcOperatorImpl operation;
+    operation.myType = LinxcTypeReference(myType);
+    operation.otherType = LinxcTypeReference(otherType);
+    operation.op = op;
+    operation.ID = LinxcOverloadIs_Operator;
+    operation.implicit = false; //doesn't matter, just make sure we reset it
+    
+    LinxcExpression returnTypeExpr;
+    returnTypeExpr.resolvesTo.lastType = NULL;
+    returnTypeExpr.data.typeRef = returnType;
+    returnTypeExpr.ID = LinxcExpr_TypeRef; //what we're returning after the operation
+
+    LinxcFunc opFunc = LinxcFunc(string(), returnTypeExpr); //these functions don't need names
+    
+    //our sole argument is the other type. EG: intVar + floatVar = intVar.Add(floatVar)
+    LinxcVar* inputArg = (LinxcVar*)this->allocator->Allocate(sizeof(LinxcVar));
+    inputArg->type.ID = LinxcExpr_TypeRef;
+    inputArg->type.data.typeRef = LinxcTypeReference(otherType);
+    inputArg->type.resolvesTo.lastType = NULL;
+    inputArg->name = string(this->allocator, "other");
+    opFunc.arguments = collections::Array<LinxcVar>(this->allocator, inputArg, 1);
+
+    LinxcOperatorFunc result;
+    result.operatorOverride = operation;
+    result.function = opFunc;
+
+    string debug = result.ToString(&defaultAllocator);
+    printf("%s\n", debug.buffer);
+    debug.deinit();
+
+    return result;
 }
 
 option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *state)
@@ -769,15 +954,11 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 {
                     state->parentType->subTypes.Add(type);
                     ptr = state->parentType->subTypes.Get(state->parentType->subTypes.count - 1);
-                    //as type is now owned by parentType->subTypes, we need to add the pointer to that instead of types directly
-                    this->fullNameToType.Add(fullName, ptr);
                 }
                 else
                 {
                     state->currentNamespace->types.Add(type.name, type);
                     ptr = state->currentNamespace->types.Get(type.name);
-                    //as type is now owned by currentNamespace->types, we need to add the pointer to that instead of types directly
-                    this->fullNameToType.Add(fullName, ptr);
                 }
 
                 LinxcStatement stmt;

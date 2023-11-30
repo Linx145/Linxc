@@ -146,13 +146,13 @@ bool stringEql(string A, string B)
     }
     return A.eql(B.buffer);
 }
-i32 stringHash(string A)
+u32 stringHash(string A)
 {
     if (A.buffer == NULL)
     {
         return 7;
     }
-    i32 hash = 7;
+    u32 hash = 7;
     for (usize i = 0; i < A.length - 1; i++)
     {
         hash = hash * 31 + A.buffer[i];
@@ -160,9 +160,9 @@ i32 stringHash(string A)
 
     return hash;
 }
-i32 charHash(const char *A)
+u32 charHash(const char *A)
 {
-    i32 hash = 7;
+    u32 hash = 7;
     usize i = 0;
     while (true)
     {
