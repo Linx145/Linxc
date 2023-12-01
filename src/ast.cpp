@@ -83,13 +83,37 @@ option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
         return option<LinxcTypeReference>(this->rightExpr.resolvesTo);
     }
     LinxcOperatorImpl key;
+    LinxcOperatorFunc* result = NULL;
+    if (this->operatorType == Linxc_Equal)
+    {
+        if (this->rightExpr.resolvesTo == this->leftExpr.resolvesTo)
+        {
+            return option<LinxcTypeReference>(this->rightExpr.resolvesTo);
+        }
+        //if the operator is =, don't bother checking whether typeA = typeB, as Linxc
+        //dictates that only typeA = typeA, however, a implicit cast may be performed on
+        //typeB to convert it to typeA, so check that instead
+
+        key.ID = LinxcOverloadIs_Cast;
+        key.implicit = true;
+        key.myType = this->rightExpr.resolvesTo;
+        key.otherType = this->leftExpr.resolvesTo;
+        key.op = Linxc_Invalid;
+
+        result = this->rightExpr.resolvesTo.lastType->operatorOverloads.Get(key);
+        if (result != NULL)
+        {
+            return option<LinxcTypeReference>(result->function.returnType.AsTypeReference());
+        }
+    }
+
     key.ID = LinxcOverloadIs_Operator;
     key.implicit = false;
     key.myType = this->leftExpr.resolvesTo;
     key.otherType = this->rightExpr.resolvesTo;
     key.op = this->operatorType;
 
-    LinxcOperatorFunc* result = this->leftExpr.resolvesTo.lastType->operatorOverloads.Get(key);
+    result = this->leftExpr.resolvesTo.lastType->operatorOverloads.Get(key);
     if (result != NULL)
     {
         //todo: precalculate these?
@@ -108,6 +132,7 @@ option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
         {
             return option<LinxcTypeReference>(result->function.returnType.AsTypeReference());
         }
+
         return option<LinxcTypeReference>();
     }
 }
@@ -467,6 +492,12 @@ string LinxcStatement::ToString(IAllocator *allocator)
     case LinxcStmt_Expr:
     {
         return this->data.expression.ToString(allocator);
+    }
+    case LinxcStmt_Return:
+    {
+        string result = string(allocator, "return ");
+        result.AppendDeinit(this->data.returnStatement.ToString(&defaultAllocator));
+        return result;
     }
     case LinxcStmt_FuncDecl:
     {

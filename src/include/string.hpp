@@ -25,11 +25,15 @@ struct string
 
     void Prepend(const char *other);
     void Append(const char *other);
+    void Append(i64 value);
+    void Append(u64 value);
+    void Append(float value);
 
     void PrependDeinit(string other);
     void AppendDeinit(string other);
 
     bool operator==(const char* other);
+    bool operator!=(const char* other);
 };
 
 bool stringEql(string A, string B);
@@ -41,5 +45,14 @@ u32 charHash(const char *A);
 option<usize> FindFirst(const char *buffer, char character);
 
 option<usize> FindLast(const char *buffer, char character);
+
+inline const char* digits2(usize value)
+{
+    return &"0001020304050607080910111213141516171819"
+        "2021222324252627282930313233343536373839"
+        "4041424344454647484950515253545556575859"
+        "6061626364656667686970717273747576777879"
+        "8081828384858687888990919293949596979899"[value * 2];
+}
 
 #endif

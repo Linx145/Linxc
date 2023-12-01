@@ -508,11 +508,24 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
             {
                 //move back so we can parse token with ParseIdentifier
                 state->tokenizer->Back();
-                LinxcExpression result = this->ParseIdentifier(state, prevScopeIfAny);
+                option<LinxcExpression> result = this->ParseIdentifier(state, prevScopeIfAny);
                 //if the result is a function ref, it may be a function call instead
                 //since function calls are not handled by the operator chaining of scope resolutions,
                 //we have to handle it here as a primary expression
-                if (result.ID == LinxcExpr_FunctionRef)
+                if (!result.present)
+                {
+                    ERR_MSG msg = ERR_MSG(this->allocator, "No type or variable of name ");
+                    msg.AppendDeinit(token.ToString(&defaultAllocator));
+                    msg.Append(" exists");
+                    if (prevScopeIfAny.present)
+                    {
+                        msg.Append(" within scope ");
+                        msg.AppendDeinit(prevScopeIfAny.value.ToString(&defaultAllocator));
+                    }
+                    state->parsingFile->errors.Add(msg);
+                    return option<LinxcExpression>();
+                }
+                if (result.value.ID == LinxcExpr_FunctionRef)
                 {
                     if (state->tokenizer->PeekNextUntilValid().ID == Linxc_LParen)
                     {
@@ -520,44 +533,66 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         state->tokenizer->NextUntilValid();
 
                         collections::vector<LinxcExpression> inputArgs = collections::vector<LinxcExpression>(&defaultAllocator);
-
-                        while (true)
+                        LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
+                        if (peekNext.ID == Linxc_RParen)
                         {
-                            LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
-                            if (peekNext.ID == Linxc_RParen)
-                            {
-                                state->tokenizer->NextUntilValid();
-                                break;
-                            }
-                            else if (peekNext.ID == Linxc_Comma)
-                            {
-                                state->tokenizer->NextUntilValid();
-                            }
-                            else
-                            {
-                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected , or ) after function input"));
-                                break;
-                            }
-                            option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
-                            if (!primaryOpt.present)
-                            {
-                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected expression in function argument"));
-                                break;
-                            }
-                            LinxcExpression fullExpression = this->ParseExpression(state, primaryOpt.value, -1);
-
-                            inputArgs.Add(fullExpression);
+                            state->tokenizer->NextUntilValid();
                         }
-                        if (inputArgs.count > result.data.functionRef->arguments.length)
+                        else
                         {
-                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Too many inputs in function"));
+                            usize i = 0;
+                            //parse function input
+                            while (true)
+                            {
+                                option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
+                                if (!primaryOpt.present)
+                                {
+                                    break;
+                                }
+                                LinxcExpression fullExpression = this->ParseExpression(state, primaryOpt.value, -1);
+
+                                inputArgs.Add(fullExpression);
+
+                                if (!CanAssign(result.value.data.functionRef->arguments.data[i].type.AsTypeReference().value, fullExpression.resolvesTo))
+                                {
+                                    ERR_MSG msg = ERR_MSG(this->allocator, "Argument of type ");
+                                    msg.AppendDeinit(fullExpression.resolvesTo.ToString(&defaultAllocator));
+                                    msg.Append(" cannot be implicitly converted to parameter type ");
+                                    msg.AppendDeinit(result.value.data.functionRef->arguments.data[i].type.AsTypeReference().value.ToString(&defaultAllocator));
+                                    state->parsingFile->errors.Add(msg);
+                                }
+
+                                peekNext = state->tokenizer->PeekNextUntilValid();
+                                if (peekNext.ID == Linxc_Semicolon)
+                                {
+                                    state->tokenizer->NextUntilValid();
+                                }
+                                else if (peekNext.ID == Linxc_RParen)
+                                {
+                                    state->tokenizer->NextUntilValid();
+                                    break;
+                                }
+                                else
+                                {
+                                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected , or ) after function input argument"));
+                                }
+                                i += 1;
+                            }
+                        }
+                        if (inputArgs.count > result.value.data.functionRef->arguments.length)
+                        {
+                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Provided too many input params to function"));
+                        }
+                        else if (inputArgs.count < result.value.data.functionRef->arguments.length)
+                        {
+                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Function expects more input params"));
                         }
                         LinxcExpression finalResult;
                         finalResult.ID = LinxcExpr_FuncCall;
-                        finalResult.data.functionCall.func = result.data.functionRef;
+                        finalResult.data.functionCall.func = result.value.data.functionRef;
                         finalResult.data.functionCall.inputParams = inputArgs.ToOwnedArrayWith(this->allocator);
                         finalResult.data.functionCall.templateSpecializations = collections::Array<LinxcTypeReference>(); //todo
-                        finalResult.resolvesTo = result.data.functionRef->returnType.AsTypeReference().value;
+                        finalResult.resolvesTo = result.value.data.functionRef->returnType.AsTypeReference().value;
 
                         return option<LinxcExpression>(finalResult);
                     }
@@ -611,11 +646,9 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 //move back so we can parse token with ParseIdentifier (which handles primitive types too)
                 if (LinxcIsPrimitiveType(token.ID))
                 {
-                    state->tokenizer->Back();
-                    LinxcExpression result = this->ParseIdentifier(state, option<LinxcExpression>());
                     //cannot call anything with primitive type so, and result is guaranteed to be type reference so
-                    
-                    return option<LinxcExpression>(result);
+                    state->tokenizer->Back();
+                    return this->ParseIdentifier(state, option<LinxcExpression>());
                 }
             }
             break;
@@ -683,7 +716,7 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
     }
     return lhs;
 }
-LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride)
+option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride)
 {
     LinxcExpression result;
     result.ID = LinxcExpr_None;
@@ -884,7 +917,11 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
     }
 
     identifierName.deinit();
-    return result;
+    if (result.ID == LinxcExpr_None)
+    {
+        return option<LinxcExpression>();
+    }
+    return option<LinxcExpression>(result);
 }
 
 collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *state)
@@ -955,6 +992,10 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
 option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(LinxcParserState* state)
 {
     bool expectSemicolon = false;
+
+    //when flagged to true (upon encountering an error), skip parsing the entire file until a semicolon is reached.
+    //this is to avoid causing even more errors because the first member of an expression is invalid.
+    bool errorSkipUntilSemicolon = false;
     collections::vector<ERR_MSG>* errors = &state->parsingFile->errors;
     collections::vector<LinxcStatement> result = collections::vector<LinxcStatement>(this->allocator);
     //collections::vector<ERR_MSG> errors = collections::vector<ERR_MSG>(this->allocator);
@@ -967,6 +1008,18 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         usize prevIndex = tokenizer->prevIndex;
         LinxcTokenID prevTokenID = tokenizer->prevTokenID;
         LinxcToken token = tokenizer->Next();
+
+        if (errorSkipUntilSemicolon)
+        {
+            if (token.ID == Linxc_Semicolon || token.ID == Linxc_LineComment || token.ID == Linxc_MultiLineComment || token.ID == Linxc_Hash || (token.ID == Linxc_RBrace && state->endOn == LinxcEndOn_RBrace))
+            {
+                errorSkipUntilSemicolon = false;
+            }
+            else
+            {
+                continue;
+            }
+        }
         if (token.ID == Linxc_Semicolon && expectSemicolon)
         {
             expectSemicolon = false;
@@ -1048,13 +1101,15 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                 string fullName = type.GetFullName(allocator);
 
-                LinxcToken next = tokenizer->NextUntilValid();
+                LinxcToken next = tokenizer->PeekNextUntilValid();
                 if (next.ID != Linxc_LBrace)
                 {
                     errors->Add(ERR_MSG(this->allocator, "Expected { after struct name!"));
-                    toBreak = true;
-                    break;
+                    //toBreak = true;
+                    //break;
                 }
+                else tokenizer->NextUntilValid();
+
                 LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
                 nextState.parentType = &type;
                 nextState.endOn = LinxcEndOn_RBrace;
@@ -1147,7 +1202,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             option<LinxcExpression> primary = this->ParseExpressionPrimary(state);
                             if (!primary.present)
                             {
-                                toBreak = true;
+                                errorSkipUntilSemicolon = true;
                                 break;
                             }
                             defaultValue.value = this->ParseExpression(state, primary.value, -1);
@@ -1215,13 +1270,17 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     else if (next.ID == Linxc_LParen) //function declaration
                     {
                         collections::Array<LinxcVar> args = this->ParseFunctionArgs(state);
-                        next = tokenizer->NextUntilValid();
+                        LinxcToken next = tokenizer->PeekNextUntilValid();
                         if (next.ID != Linxc_LBrace)
                         {
-                            errors->Add(ERR_MSG(this->allocator, "Expected { to be after function name"));
+                            errors->Add(ERR_MSG(this->allocator, "Expected { after function name"));
+                            //toBreak = true;
+                            //break;
                         }
+                        else tokenizer->NextUntilValid();
 
                         LinxcFunc newFunc = LinxcFunc(identifier.ToString(this->allocator), expr);
+                        newFunc.arguments = args;
                         if (state->parentType != NULL)
                         {
                             newFunc.methodOf = state->parentType;
@@ -1236,6 +1295,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         nextState.endOn = LinxcEndOn_RBrace;
                         nextState.currentNamespace = state->currentNamespace;
                         nextState.currentFunction = &newFunc;
+                        for (usize i = 0; i < args.length; i++)
+                        {
+                            nextState.varsInScope.Add(args.data[i].name, &args.data[i]);
+                        }
 
                         option<collections::vector<LinxcStatement>> funcBody = this->ParseCompoundStmt(&nextState);
 
@@ -1258,7 +1321,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                         LinxcStatement stmt;
                         stmt.data.funcDeclaration = ptr;
-                        stmt.ID = LinxcStmt_TypeDecl;
+                        stmt.ID = LinxcStmt_FuncDecl;
 
                         result.Add(stmt);
                         nextState.deinit();
@@ -1289,6 +1352,47 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             {
                 toBreak = true;
                 break;
+            }
+        }
+        break;
+        case Linxc_Keyword_return:
+        {
+            expectSemicolon = true;
+            if (state->currentFunction == NULL)
+            {
+                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to use return statement outside of a function body"));
+                break;
+            }
+            if (tokenizer->PeekNextUntilValid().ID == Linxc_Semicolon)
+            {
+                //return; statement. Only valid in functions that return void
+
+                if (state->currentFunction->returnType.AsTypeReference().value.lastType->name != "void")
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Empty return statement not allowed in function that expects a return type"));
+                }
+                break;
+            }
+            option<LinxcExpression> primary = ParseExpressionPrimary(state);
+            if (primary.present)
+            {
+                LinxcExpression returnExpression = ParseExpression(state, primary.value, -1);
+                if (returnExpression.resolvesTo.lastType == NULL)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Cannot return a type name"));
+                    break;
+                }
+                if (CanAssign(state->currentFunction->returnType.AsTypeReference().value, returnExpression.resolvesTo))
+                {
+                    LinxcStatement stmt;
+                    stmt.data.returnStatement = returnExpression;
+                    stmt.ID = LinxcStmt_Return;
+                    result.Add(stmt);
+                }
+                else
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Returned type does not match expected function return type, and cannot be converted to it"));
+                }
             }
         }
         break;

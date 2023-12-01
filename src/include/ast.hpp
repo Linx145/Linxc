@@ -255,6 +255,7 @@ enum LinxcStatementID
 {
     LinxcStmt_Include,
     LinxcStmt_Expr,
+    LinxcStmt_Return,
     LinxcStmt_TypeDecl,
     LinxcStmt_VarDecl,
     LinxcStmt_FuncDecl,
@@ -265,6 +266,7 @@ union LinxcStatementData
 {
     LinxcParsedFile *includeStatement;
     LinxcExpression expression;
+    LinxcExpression returnStatement;
     LinxcType *typeDeclaration;
     LinxcVar *varDeclaration;
     LinxcFunc *funcDeclaration;

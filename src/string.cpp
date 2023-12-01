@@ -129,6 +129,69 @@ void string::PrependDeinit(string other)
     this->Prepend(other.buffer);
     other.deinit();
 }
+void string::Append(i64 integer)
+{
+    //max integer is 19 characters, with - sign its 20
+    char chars[20];
+    chars[19] = '\0';
+    usize index = 19;
+    i64 positive = integer < 0 ? -integer : integer;
+    while (positive > 100)
+    {
+        index -= 2;
+        memcpy(chars + index, digits2(positive % 100), 2);
+        positive /= 100;
+    }
+    if (positive < 10)
+    {
+        index -= 1;
+        chars[index] = '0' + positive;
+        
+        this->Append(chars);
+        return;
+    }
+    index -= 2;
+    memcpy(chars + index, digits2(positive), 2);
+    if (integer < 0)
+    {
+        index -= 1;
+        *(chars + index) = '-';
+    }
+    this->Append(chars + index);
+}
+void string::Append(u64 integer)
+{
+    //max integer is 20 characters
+    char chars[21];
+    chars[20] = '\0';
+    usize index = 20;
+    while (integer > 100)
+    {
+        index -= 2;
+        memcpy(chars + index, digits2(integer % 100), 2);
+        integer /= 100;
+    }
+    if (integer < 10)
+    {
+        index -= 1;
+        chars[index] = '0' + integer;
+
+        this->Append(chars);
+        return;
+    }
+    index -= 2;
+    memcpy(chars + index, digits2(integer), 2);
+    this->Append(chars + index);
+}
+void string::Append(float value)
+{
+    if (value == 0.0f)
+    {
+        this->Append("0.0");
+        return;
+    }
+    char chars[16];
+}
 bool string::operator==(const char* other)
 {
     if (this->buffer == NULL)
@@ -136,6 +199,10 @@ bool string::operator==(const char* other)
         return false;
     }
     return strcmp(this->buffer, other) == 0;
+}
+bool string::operator!=(const char* other)
+{
+    return !(*this==other);
 }
 
 bool stringEql(string A, string B)

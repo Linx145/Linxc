@@ -180,7 +180,7 @@ struct LinxcParser
     //Given a primary expression, parse following expressions and join them with operators in appropriate order
     LinxcExpression ParseExpression(LinxcParserState *state, LinxcExpression primary, i32 startingPrecedence);
     // parses a single identifier and returns either a func reference, type reference or variable reference. searches for references within the provided parentScopeOverride if any, if not, takes the values from all current namespace scopes in state and using namespace; declarations as well.
-    LinxcExpression ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride);
+    option<LinxcExpression> ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride);
 
     void deinit();
     void AddAllFilesFromDirectory(string directoryPath);

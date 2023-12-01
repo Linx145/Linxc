@@ -1,16 +1,10 @@
 #include <stdio.h>
 #include <Linxc.h>
 
-struct IntegerWrapper
-{
-    i32 funky;
-};
-
 struct myStructure
 {
-    void Function()
+    i32 Main()
     {
-        IntegerWrapper wrap;
-        wrap.funky = 3;
+        return 0;
     }
 };
