@@ -1,11 +1,16 @@
 #include <stdio.h>
 #include <Linxc.h>
 
+struct IntegerWrapper
+{
+    i32 funky;
+};
+
 struct myStructure
 {
-
     void Function()
     {
-        i64 bigNum = 32;
+        IntegerWrapper wrap;
+        wrap.funky = 3;
     }
 };

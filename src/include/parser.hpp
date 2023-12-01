@@ -164,6 +164,7 @@ struct LinxcParser
     collections::hashset<string> parsingFiles;
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
     collections::hashmap<string, LinxcTokenID> nameToToken;
+    LinxcType* typeofU8;
     LinxcNamespace globalNamespace;
 
     LinxcParser(IAllocator *allocator);
@@ -175,7 +176,7 @@ struct LinxcParser
     //Parses a compound statement and returns it given the state. Returns invalid if an error is encountered
     option<collections::vector<LinxcStatement>> ParseCompoundStmt(LinxcParserState *state);
     //Parses a single, non-operator expression
-    option<LinxcExpression> ParseExpressionPrimary(LinxcParserState *state);
+    option<LinxcExpression> ParseExpressionPrimary(LinxcParserState *state, option<LinxcExpression> prevScopeIfAny);
     //Given a primary expression, parse following expressions and join them with operators in appropriate order
     LinxcExpression ParseExpression(LinxcParserState *state, LinxcExpression primary, i32 startingPrecedence);
     // parses a single identifier and returns either a func reference, type reference or variable reference. searches for references within the provided parentScopeOverride if any, if not, takes the values from all current namespace scopes in state and using namespace; declarations as well.
@@ -185,6 +186,22 @@ struct LinxcParser
     void AddAllFilesFromDirectory(string directoryPath);
     string FullPathFromIncludeName(string includeName);
 
+    inline bool CanAssign(LinxcTypeReference variableType, LinxcTypeReference exprResult)
+    {
+        //special case for string literals
+        //we can assign non const to const, but this is not the case for string literals\
+        //we have to run this check first because linxcref comparison or cancastto don't take into account const of input expression
+        if (variableType.lastType == typeofU8 && exprResult.lastType == typeofU8 && exprResult.isConst)
+        {
+            return variableType.pointerCount == 1 && exprResult.pointerCount == 1 && variableType.isConst;
+        }
+        else if (variableType == exprResult || exprResult.CanCastTo(variableType, true))
+        {
+            return true;
+        }
+
+        return false;
+    }
     LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
     LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
 };

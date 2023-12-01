@@ -77,6 +77,11 @@ string LinxcOperatorFunc::ToString(IAllocator* allocator)
 }
 option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
 {
+    //if we are scope resolution operators, simply return the type of the rightmost member
+    if (this->operatorType == Linxc_ColonColon || this->operatorType == Linxc_Period)
+    {
+        return option<LinxcTypeReference>(this->rightExpr.resolvesTo);
+    }
     LinxcOperatorImpl key;
     key.ID = LinxcOverloadIs_Operator;
     key.implicit = false;
@@ -134,17 +139,20 @@ LinxcTypeReference::LinxcTypeReference()
 {
     this->lastType = NULL;
     this->pointerCount = 0;
+    this->isConst = false;
     this->templateArgs = collections::Array<LinxcTypeReference>();
 }
 LinxcTypeReference::LinxcTypeReference(LinxcType *type)
 {
     this->lastType = type;
     this->pointerCount = 0;
+    this->isConst = false;
     this->templateArgs = collections::Array<LinxcTypeReference>();
 }
 bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
 {
-    if (this->pointerCount > 0 && type.pointerCount > 0)
+    //any pointer type can cast to void pointer type
+    if (this->pointerCount > 0 && type.pointerCount > 0 && type.lastType->name == "void")
     {
         return true;
     }
@@ -247,12 +255,14 @@ LinxcVar *LinxcType::FindVar(string name)
 
 LinxcVar::LinxcVar()
 {
+    this->isConst = false;
     this->name = string();
     this->type = LinxcExpression();
     this->defaultValue = option<LinxcExpression>();
 }
 LinxcVar::LinxcVar(string varName, LinxcExpression varType, option<LinxcExpression> defaultVal)
 {
+    this->isConst = false;
     this->name = varName;
     this->type = varType;
     this->defaultValue = defaultVal;
@@ -299,6 +309,10 @@ string LinxcFunctionCall::ToString(IAllocator *allocator)
 string LinxcTypeReference::ToString(IAllocator *allocator)
 {
     string result = string(allocator);
+    if (this->isConst)
+    {
+        result.Append("const ");
+    }
     result.AppendDeinit(this->lastType->GetFullName(&defaultAllocator));
     for (i32 i = 0; i < this->pointerCount; i++)
     {
@@ -391,8 +405,10 @@ string LinxcExpression::ToString(IAllocator *allocator)
         {
             string result = string(allocator);
             result.Append("(");
-            result.AppendDeinit(this->data.typeCast->ToString(&defaultAllocator));
+            result.AppendDeinit(this->data.typeCast->castToType.ToString(&defaultAllocator));
             result.Append(")");
+            result.AppendDeinit(this->data.typeCast->expressionToCast.ToString(&defaultAllocator));
+            
             return result;
         }
         case LinxcExpr_Typeof:
@@ -408,7 +424,7 @@ string LinxcExpression::ToString(IAllocator *allocator)
         case LinxcExpr_Variable:
             return this->data.variable->ToString(allocator);
         default:
-            return string();
+            return string("NULL");
     }
 }
 option<LinxcTypeReference> LinxcExpression::AsTypeReference()
@@ -419,7 +435,7 @@ option<LinxcTypeReference> LinxcExpression::AsTypeReference()
     }
     if (this->ID == LinxcExpr_TypeRef)
     {
-        return this->data.typeRef;
+        return option<LinxcTypeReference>(this->data.typeRef);
     }
     if (this->ID == LinxcExpr_OperatorCall)
     {
@@ -495,6 +511,10 @@ string LinxcStatement::ToString(IAllocator *allocator)
     {
         string result = string(allocator);
         LinxcVar* var = &this->data.tempVarDeclaration;
+        if (var->isConst)
+        {
+            result.Append("const ");
+        }
         result.AppendDeinit(var->type.ToString(&defaultAllocator));
         result.Append(" ");
         result.Append(var->name.buffer);
@@ -523,6 +543,10 @@ string LinxcStatement::ToString(IAllocator *allocator)
     {
         string result = string(allocator);
         LinxcVar* var = this->data.varDeclaration;
+        if (var->isConst)
+        {
+            result.Append("const ");
+        }
         result.AppendDeinit(var->type.ToString(&defaultAllocator));
         result.Append(" ");
         result.Append(var->name.buffer);

@@ -20,6 +20,7 @@ typedef struct LinxcModifiedExpression LinxcModifiedExpression;
 typedef struct LinxcTypeReference LinxcTypeReference;
 typedef struct LinxcOperatorImpl LinxcOperatorImpl;
 typedef struct LinxcOperatorFunc LinxcOperatorFunc;
+typedef struct LinxcTypeCast LinxcTypeCast;
 
 struct LinxcFunctionCall
 {
@@ -63,11 +64,15 @@ struct LinxcTypeReference
 
     u32 pointerCount;
 
+    bool isConst;
+
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
 
     bool CanCastTo(LinxcTypeReference type, bool implicitly);
+    //dont need to check const as only const u8* is a special type
+    //we parse that within EvaluatePossible
     bool operator==(LinxcTypeReference B)
     {
         bool templatesEqual = true;
@@ -120,7 +125,7 @@ union LinxcExpressionData
     LinxcFunc *functionRef; //Eg: funcName <- is incomplete
     LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
     LinxcNamespace *namespaceRef; //Eg: namespaceName <- is incomplete
-    LinxcExpression *typeCast; //Eg: (typeName)
+    LinxcTypeCast *typeCast; //Eg: (typeName)
     LinxcModifiedExpression *modifiedExpression; //Eg: *varName
     LinxcExpression *indexerCall; //Eg: varName[expression]
     LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
@@ -145,6 +150,11 @@ struct LinxcExpression
     option<LinxcTypeReference> AsTypeReference();
     LinxcExpression *ToHeap(IAllocator *allocator);
 };
+struct LinxcTypeCast
+{
+    LinxcExpression castToType;
+    LinxcExpression expressionToCast;
+};
 
 /// Represents a function in Linxc, including the character in it's file where it starts and ends.
 struct LinxcFunc
@@ -168,6 +178,7 @@ struct LinxcVar
     LinxcExpression type;
     string name;
     option<LinxcExpression> defaultValue;
+    bool isConst;
 
     LinxcVar();
     LinxcVar(string varName, LinxcExpression varType, option<LinxcExpression> defaultVal);

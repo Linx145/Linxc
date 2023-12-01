@@ -31,6 +31,10 @@ LinxcParser::LinxcParser(IAllocator *allocator)
         nameStrings[i] = string(allocator, primitiveTypes[i]);
         this->globalNamespace.types.Add(nameStrings[i], LinxcType(allocator, nameStrings[i], &this->globalNamespace, NULL));
         primitiveTypePtrs[i] = this->globalNamespace.types.Get(nameStrings[i]);
+        if (i == 0)
+        {
+            typeofU8 = primitiveTypePtrs[i];
+        }
     }
 
     //all types support ==, !=
@@ -85,6 +89,9 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     //because typeA + typeB = typeB + typeA, we should avoid adding the duplicates
     for (i32 i = 0; i < numNumericTypes; i++)
     {
+        LinxcOperatorFunc operatorSet = NewDefaultOperator(primitiveTypePtrs, i, i, Linxc_Equal);
+        primitiveTypePtrs[i]->operatorOverloads.Add(operatorSet.operatorOverride, operatorSet);
+
         for (i32 j = 0; j < numNumericTypes; j++)
         {
             LinxcOperatorImpl opposite;
@@ -170,8 +177,8 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "imaginary"), Linxc_Keyword_imaginary);
     nameToToken.Add(string(nameToToken.allocator, "include"), Linxc_Keyword_include);
     nameToToken.Add(string(nameToToken.allocator, "inline"), Linxc_Keyword_inline);
-    nameToToken.Add(string(nameToToken.allocator, "int"), Linxc_Keyword_int);
-    nameToToken.Add(string(nameToToken.allocator, "long"), Linxc_Keyword_long);
+    //nameToToken.Add(string(nameToToken.allocator, "int"), Linxc_Keyword_int);
+    //nameToToken.Add(string(nameToToken.allocator, "long"), Linxc_Keyword_long);
     nameToToken.Add(string(nameToToken.allocator, "nameof"), Linxc_Keyword_nameof);
     nameToToken.Add(string(nameToToken.allocator, "namespace"), Linxc_Keyword_namespace);
     nameToToken.Add(string(nameToToken.allocator, "noreturn"), Linxc_Keyword_noreturn);
@@ -180,7 +187,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "restrict"), Linxc_Keyword_restrict);
     nameToToken.Add(string(nameToToken.allocator, "return"), Linxc_Keyword_return);
     nameToToken.Add(string(nameToToken.allocator, "short"), Linxc_Keyword_short);
-    nameToToken.Add(string(nameToToken.allocator, "signed"), Linxc_Keyword_signed);
+    //nameToToken.Add(string(nameToToken.allocator, "signed"), Linxc_Keyword_signed);
     nameToToken.Add(string(nameToToken.allocator, "sizeof"), Linxc_Keyword_sizeof);
     nameToToken.Add(string(nameToToken.allocator, "static"), Linxc_Keyword_static);
     nameToToken.Add(string(nameToToken.allocator, "struct"), Linxc_Keyword_struct);
@@ -388,7 +395,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     return result;
 }
 
-option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *state)
+option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *state, option<LinxcExpression> prevScopeIfAny = option<LinxcExpression>())
 {
     LinxcToken token = state->tokenizer->NextUntilValid();
     switch (token.ID)
@@ -411,7 +418,6 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     }
                     else
                     {
-
                         LinxcModifiedExpression* modified = (LinxcModifiedExpression*)this->allocator->Allocate(sizeof(LinxcModifiedExpression));
                         modified->expression = expression;
                         modified->modification = token.ID;
@@ -421,6 +427,15 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         result.ID = LinxcExpr_Modified;
                         //TODO: check what the modifier does to the expression's original results based on operator overloading
                         result.resolvesTo = expression.resolvesTo;
+
+                        if (token.ID == Linxc_Asterisk || token.ID == Linxc_Ampersand)
+                        {
+                            //attempting to reference/dereference a literal
+                            if (expression.ID == LinxcExpr_Literal)
+                            {
+                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to reference/dereference a literal. This is not possible as literals do not have memory addresses!"));
+                            }
+                        }
 
                         if (token.ID == Linxc_Asterisk) //if we put *variableName, our pointer count goes down by 1 when resolved
                         {
@@ -444,21 +459,38 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
             }
         case Linxc_LParen:
             {
-                option<LinxcExpression> nextPrimaryOpt = this->ParseExpressionPrimary(state);
-                if (nextPrimaryOpt.present)
+                option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
+                if (primaryOpt.present)
                 {
-                    LinxcExpression expression = this->ParseExpression(state, nextPrimaryOpt.value, -1);
+                    LinxcExpression expression = this->ParseExpression(state, primaryOpt.value, -1);
                     
                     if (state->tokenizer->PeekNextUntilValid().ID == Linxc_RParen)
                     {
                         state->tokenizer->NextUntilValid();
                     }
+                    else
+                    {
+                        state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected )"));
+                        return option< LinxcExpression>();
+                    }
 
                     //check if expression is a type reference. If so, then this is a cast.
                     if (expression.resolvesTo.lastType == NULL)
                     {
+                        //parse the next thing to be casted
+                        option<LinxcExpression> nextPrimaryOpt = this->ParseExpressionPrimary(state);
+                        if (!nextPrimaryOpt.present)
+                        {
+                            return option< LinxcExpression>();
+                        }
+                        LinxcExpression nextExpression = this->ParseExpression(state, nextPrimaryOpt.value, 3); //3 because cast itself is 3
+
+                        LinxcTypeCast* typeCast = (LinxcTypeCast*)this->allocator->Allocate(sizeof(LinxcTypeCast));
+                        typeCast->castToType = expression;
+                        typeCast->expressionToCast = nextExpression;
+
                         LinxcExpression result;
-                        result.data.typeCast = expression.ToHeap(this->allocator);
+                        result.data.typeCast = typeCast;//expression.ToHeap(this->allocator);
                         result.ID = LinxcExpr_TypeCast;
                         result.resolvesTo = expression.AsTypeReference().value;
                         return option<LinxcExpression>(result);
@@ -476,7 +508,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
             {
                 //move back so we can parse token with ParseIdentifier
                 state->tokenizer->Back();
-                LinxcExpression result = this->ParseIdentifier(state, option<LinxcExpression>());
+                LinxcExpression result = this->ParseIdentifier(state, prevScopeIfAny);
                 //if the result is a function ref, it may be a function call instead
                 //since function calls are not handled by the operator chaining of scope resolutions,
                 //we have to handle it here as a primary expression
@@ -558,14 +590,19 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 }
                 else if (token.ID == Linxc_CharLiteral)
                 {
-                    temp = string("char");
+                    temp = string("u8");
                 }
-                else
+                else if (token.ID == Linxc_StringLiteral)
                 {
-                    temp = string("string");
+                    temp = string("u8");
                 }
                 LinxcType* resolvesToType = this->globalNamespace.types.Get(temp);
                 result.resolvesTo = LinxcTypeReference(resolvesToType);
+                if (token.ID == Linxc_StringLiteral)
+                {
+                    result.resolvesTo.isConst = true;
+                    result.resolvesTo.pointerCount = 1;
+                }
                 temp.deinit();
                 return option<LinxcExpression>(result);
             }
@@ -597,7 +634,7 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
             break;
         }
         state->tokenizer->NextUntilValid();
-        option<LinxcExpression> rhsOpt = this->ParseExpressionPrimary(state);
+        option<LinxcExpression> rhsOpt = this->ParseExpressionPrimary(state, option<LinxcExpression>(lhs));
         if (!rhsOpt.present)
         {
             //state->parsingFile->errors.Add(ERR_MSG(&defaultAllocator, "Error parsing right side of operator"));
@@ -657,6 +694,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
     {
         LinxcType *type = this->globalNamespace.types.Get(identifierName);
         LinxcTypeReference reference;
+        reference.isConst = false;
         reference.lastType = type;
         reference.templateArgs = collections::Array<LinxcTypeReference>();
 
@@ -684,6 +722,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                 result.ID = LinxcExpr_Variable;
                 result.data.variable = *asLocalVar;
                 result.resolvesTo = result.data.variable->type.AsTypeReference().value;
+                result.resolvesTo.isConst = result.data.variable->isConst;
             }
             else
             {
@@ -707,6 +746,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                             result.data.variable = asVar;
                             //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
                             result.resolvesTo = asVar->type.AsTypeReference().value;
+                            result.resolvesTo.isConst = asVar->isConst;
                         }
                         else
                         {
@@ -741,6 +781,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                             result.ID = LinxcExpr_Variable;
                             result.data.variable = asVar;
                             result.resolvesTo = asVar->type.AsTypeReference().value;
+                            result.resolvesTo.isConst = asVar->isConst;
                         }
                         else
                         {
@@ -777,6 +818,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                     result.ID = LinxcExpr_Variable;
                     result.data.variable = asVar;
                     result.resolvesTo = asVar->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = asVar->isConst;
                 }
                 else
                 {
@@ -790,9 +832,17 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                 }
             }
         }
-        else if (parentScopeOverride.value.ID == LinxcExpr_TypeRef)
+        else if (parentScopeOverride.value.ID == LinxcExpr_TypeRef || parentScopeOverride.value.ID == LinxcExpr_Variable)
         {
-            LinxcType *toCheck = parentScopeOverride.value.data.typeRef.lastType;
+            LinxcType* toCheck;
+            if (parentScopeOverride.value.ID == LinxcExpr_Variable)
+            {
+                toCheck = parentScopeOverride.value.data.variable->type.AsTypeReference().value.lastType;
+            }
+            else
+            {
+                toCheck = parentScopeOverride.value.data.typeRef.lastType;
+            }
             //only need to check immediate parent scope's namespace
             LinxcFunc *asFunction = toCheck->FindFunction(identifierName);
             if (asFunction != NULL)
@@ -809,6 +859,7 @@ LinxcExpression LinxcParser::ParseIdentifier(LinxcParserState *state, option<Lin
                     result.ID = LinxcExpr_Variable;
                     result.data.variable = asVar;
                     result.resolvesTo = asVar->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = asVar->isConst;
                 }
                 else
                 {
@@ -908,6 +959,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
     collections::vector<LinxcStatement> result = collections::vector<LinxcStatement>(this->allocator);
     //collections::vector<ERR_MSG> errors = collections::vector<ERR_MSG>(this->allocator);
     LinxcTokenizer* tokenizer = state->tokenizer;
+
+    bool nextIsConst = false;
     while (true)
     {
         bool toBreak = false;
@@ -922,13 +975,24 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         else if (expectSemicolon)
         {
             errors->Add(ERR_MSG(this->allocator, "Expected semicolon"));
-            break;
+            expectSemicolon = false; //dont get the same error twice
         }
 
         switch (token.ID)
         {
+        case Linxc_Keyword_const:
+        {
+            nextIsConst = true;
+        }
+        break;
         case Linxc_Keyword_include:
         {
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare a include statement as const"));
+                nextIsConst = false;
+            }
+
             LinxcToken next = tokenizer->Next();
             if (next.ID != Linxc_MacroString)
             {
@@ -957,6 +1021,12 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         //Linxc expects <name> to be after struct keyword. There are no typedef struct {} <name> here.
         case Linxc_Keyword_struct:
         {
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare a struct as const in Linxc"));
+                nextIsConst = false;
+            }
+
             LinxcToken structName = tokenizer->Next();
 
             //printf("STRUCT FOUND: %s\n", structName.ToString(this->allocator).buffer);
@@ -1051,6 +1121,13 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     //this is the actual variable's/function return type
                     
                     LinxcTypeReference expectedType = expr.AsTypeReference().value;
+
+                    if (nextIsConst)
+                    {
+                        expectedType.isConst = true;
+                        nextIsConst = false;
+                    }
+                    
                     LinxcToken identifier = tokenizer->NextUntilValid();
                     if (identifier.ID != Linxc_Identifier)
                     {
@@ -1075,18 +1152,27 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             }
                             defaultValue.value = this->ParseExpression(state, primary.value, -1);
                             defaultValue.present = true;
+                            expectSemicolon = true;
                         }
                         LinxcVar varDecl = LinxcVar(identifier.ToString(this->allocator), expr, defaultValue);
+                        if (expectedType.isConst)
+                        {
+                            varDecl.isConst = true;
+                        }
 
                         if (defaultValue.present)
                         {
                             //expected type is not what the default value expression resolves to, and there is no implicit cast for it
-                            if (expectedType != defaultValue.value.resolvesTo && !defaultValue.value.resolvesTo.CanCastTo(expectedType, true))
+                            if (!CanAssign(expectedType, defaultValue.value.resolvesTo))
                             {
                                 ERR_MSG msg = ERR_MSG(this->allocator, "Variable's initial value is not of the same type as the variable itself, and no implicit cast was found.");
                                 if (defaultValue.value.resolvesTo.CanCastTo(expectedType, false))
                                 {
-                                    msg.Append(". Are you missing an explicit cast?");
+                                    msg.Append(" An explicit cast is required.");
+                                }
+                                else if (expectedType.lastType == typeofU8 && defaultValue.value.resolvesTo.lastType == typeofU8 && defaultValue.value.resolvesTo.isConst && !expectedType.isConst)
+                                {
+                                    msg.Append(" String literals (eg: \"Hello World\") may only be assigned to const u8*.");
                                 }
                                 errors->Add(msg);
                             }
@@ -1122,7 +1208,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                             //printf("Added temp variable %s\n", stmt.ToString(this->allocator).buffer);
 
-                            state->varsInScope.Add(varDecl.name, &result.Get(result.count - 1)->data.tempVarDeclaration);
+                            LinxcVar* tempPtr = &result.Get(result.count - 1)->data.tempVarDeclaration;
+                            state->varsInScope.Add(varDecl.name, tempPtr);
                         }
                     }
                     else if (next.ID == Linxc_LParen) //function declaration
@@ -1179,6 +1266,11 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 }
                 else //random expressions (EG: functionCall()) are only allowed within functions
                 {
+                    if (nextIsConst)
+                    {
+                        errors->Add(ERR_MSG(this->allocator, "Cannot declare an expression as const"));
+                        nextIsConst = false;
+                    }
                     if (state->currentFunction != NULL)
                     {
                         LinxcStatement stmt;
@@ -1192,6 +1284,11 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         errors->Add(ERR_MSG(this->allocator, "Standalone expressions are only allowed within the body of a function"));
                     }
                 }
+            }
+            else
+            {
+                toBreak = true;
+                break;
             }
         }
         break;
