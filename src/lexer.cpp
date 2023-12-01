@@ -1176,6 +1176,7 @@ LinxcToken LinxcTokenizer::Next()
                     result.ID = Linxc_FloatLiteral; //none
                     break;
                 }
+                toBreak = true;
                 break;
             default:
                 toBreak = true;

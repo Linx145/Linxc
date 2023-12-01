@@ -19,7 +19,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     this->globalNamespace = LinxcNamespace(allocator, string());
 
     const i32 numIntegerTypes = 8;
-    const i32 numNumericTypes = 11;
+    const i32 numNumericTypes = 10;// 11; TODO: Deal with char, probably will remove it
     const i32 numPrimitiveTypes = 13;
 
     //every numeric type can be explicitly compared to every other numeric type
@@ -80,17 +80,25 @@ LinxcParser::LinxcParser(IAllocator *allocator)
             }
         }
     }
-    //all numeric types can be +, -, /, * with each other
-    //this results in 
-    for (i32 i = 0; i < numIntegerTypes; i++)
+    //all numeric types can be +, -, /, *, ==, != with each other
+    //TODO: Settle the bitshift and bitwise comparison operators
+    //because typeA + typeB = typeB + typeA, we should avoid adding the duplicates
+    for (i32 i = 0; i < numNumericTypes; i++)
     {
-        for (i32 j = 0; j < numIntegerTypes; j++)
+        for (i32 j = 0; j < numNumericTypes; j++)
         {
-            if (i != j)
+            LinxcOperatorImpl opposite;
+            opposite.implicit = false;
+            opposite.ID = LinxcOverloadIs_Operator;
+            opposite.op = Linxc_Plus;
+            opposite.myType = LinxcTypeReference(primitiveTypePtrs[j]);
+            opposite.otherType = LinxcTypeReference(primitiveTypePtrs[i]);
+
+            if (!primitiveTypePtrs[j]->operatorOverloads.Contains(opposite))
             {
                 LinxcOperatorFunc operatorAdd = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Plus);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorAdd.operatorOverride, operatorAdd);
-            
+
                 LinxcOperatorFunc operatorSubtract = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Minus);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorSubtract.operatorOverride, operatorSubtract);
 
@@ -99,8 +107,26 @@ LinxcParser::LinxcParser(IAllocator *allocator)
 
                 LinxcOperatorFunc operatorDiv = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Slash);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorDiv.operatorOverride, operatorDiv);
+            
+                LinxcOperatorFunc operatorEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_EqualEqual);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorEquals.operatorOverride, operatorEquals);
+
+                LinxcOperatorFunc operatorNotEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_BangEqual);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorNotEquals.operatorOverride, operatorNotEquals);
             }
         }
+    }
+    //bools can be ==, !=, &&, ||
+    {
+        LinxcOperatorFunc boolEquals = NewDefaultOperator(primitiveTypePtrs, 12, 12, Linxc_EqualEqual);
+        LinxcOperatorFunc boolNotEquals = NewDefaultOperator(primitiveTypePtrs, 12, 12, Linxc_BangEqual);
+        LinxcOperatorFunc boolAnd = NewDefaultOperator(primitiveTypePtrs, 12, 12, Linxc_AmpersandAmpersand);
+        LinxcOperatorFunc boolOr = NewDefaultOperator(primitiveTypePtrs, 12, 12, Linxc_PipePipe);
+
+        primitiveTypePtrs[12]->operatorOverloads.Add(boolEquals.operatorOverride, boolEquals);
+        primitiveTypePtrs[12]->operatorOverloads.Add(boolNotEquals.operatorOverride, boolNotEquals);
+        primitiveTypePtrs[12]->operatorOverloads.Add(boolAnd.operatorOverride, boolAnd);
+        primitiveTypePtrs[12]->operatorOverloads.Add(boolOr.operatorOverride, boolOr);
     }
 
     this->parsedFiles = collections::hashmap<string, LinxcParsedFile>(allocator, &stringHash, &stringEql);
@@ -258,6 +284,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultCast(LinxcType** primitiveTypePtrs, i32
     cast.implicit = isImplicit;
     cast.ID = LinxcOverloadIs_Cast;
     cast.otherType = toType;
+    cast.op = Linxc_Invalid;
     cast.myType = LinxcTypeReference(myType);
 
     LinxcExpression returnType;
@@ -273,10 +300,6 @@ LinxcOperatorFunc LinxcParser::NewDefaultCast(LinxcType** primitiveTypePtrs, i32
     result.operatorOverride = cast;
     result.function = castFunc;
 
-    //string debug = cast.ToString(&defaultAllocator);
-    //printf("%s\n", debug.buffer);
-    //debug.deinit();
-
     return result;
 }
 LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op)
@@ -286,43 +309,51 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     LinxcType* otherType = primitiveTypePtrs[otherTypeIndex];
     i32 returnTypeIndex = 0;
     
-    if (myTypeIndex < 8 && otherTypeIndex < 8)
+    if (op == Linxc_EqualEqual || op == Linxc_BangEqual)
     {
-        bool IAmSigned = myTypeIndex >= 4;
-        bool otherIsSigned = otherTypeIndex >= 4;
-        bool sameSign = IAmSigned == otherIsSigned;//(myTypeIndex < 4 && otherTypeIndex < 4) || (myTypeIndex >= 4 && otherTypeIndex >= 4);
-
-        if (sameSign)
-        {
-            returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
-        }
-        else
-        {
-            //when signed op unsigned, convert signed to unsigned
-            if (IAmSigned && !otherIsSigned)
-            {
-                i32 meUnsignedIndex = myTypeIndex - 4;
-                returnTypeIndex = otherTypeIndex > meUnsignedIndex ? otherTypeIndex : meUnsignedIndex;
-            }
-            else// if (!IAmSigned && otherIsSigned)
-            {
-                i32 otherUnsignedIndex = otherTypeIndex - 4;
-                returnTypeIndex = otherUnsignedIndex > myTypeIndex ? otherUnsignedIndex : myTypeIndex;
-            }
-        }
+        returnTypeIndex = 12; //== and != MUST result in bool
     }
     else
     {
-        //float * double = double
-        if (myTypeIndex == otherTypeIndex)
+        if (myTypeIndex < 8 && otherTypeIndex < 8)
         {
-            returnTypeIndex = myTypeIndex;
+            bool IAmSigned = myTypeIndex >= 4;
+            bool otherIsSigned = otherTypeIndex >= 4;
+            bool sameSign = IAmSigned == otherIsSigned;//(myTypeIndex < 4 && otherTypeIndex < 4) || (myTypeIndex >= 4 && otherTypeIndex >= 4);
+
+            if (sameSign)
+            {
+                returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
+            }
+            else
+            {
+                //when signed op unsigned, convert signed to unsigned
+                if (IAmSigned && !otherIsSigned)
+                {
+                    i32 meUnsignedIndex = myTypeIndex - 4;
+                    returnTypeIndex = otherTypeIndex > meUnsignedIndex ? otherTypeIndex : meUnsignedIndex;
+                }
+                else// if (!IAmSigned && otherIsSigned)
+                {
+                    i32 otherUnsignedIndex = otherTypeIndex - 4;
+                    returnTypeIndex = otherUnsignedIndex > myTypeIndex ? otherUnsignedIndex : myTypeIndex;
+                }
+            }
         }
         else
         {
-            returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
+            //float * double = double
+            if (myTypeIndex == otherTypeIndex)
+            {
+                returnTypeIndex = myTypeIndex;
+            }
+            else
+            {
+                returnTypeIndex = otherTypeIndex > myTypeIndex ? otherTypeIndex : myTypeIndex;
+            }
         }
     }
+    
     LinxcType* returnType = primitiveTypePtrs[returnTypeIndex];
     LinxcOperatorImpl operation;
     operation.myType = LinxcTypeReference(myType);
@@ -350,9 +381,9 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     result.operatorOverride = operation;
     result.function = opFunc;
 
-    string debug = result.ToString(&defaultAllocator);
-    printf("%s\n", debug.buffer);
-    debug.deinit();
+    //string debug = result.ToString(&defaultAllocator);
+    //printf("%s\n", debug.buffer);
+    //debug.deinit();
 
     return result;
 }
@@ -376,36 +407,38 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     //attempting to modify a type name
                     if (expression.resolvesTo.lastType == NULL)
                     {
-                        printf("%i\n", nextPrimaryOpt.value.ID);
                         state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to place a modifying operator on a type name. You can only modify literals and variables."));
                     }
-
-                    LinxcModifiedExpression *modified = (LinxcModifiedExpression*)this->allocator->Allocate(sizeof(LinxcModifiedExpression));
-                    modified->expression = expression;
-                    modified->modification = token.ID;
-
-                    LinxcExpression result;
-                    result.data.modifiedExpression = modified;
-                    result.ID = LinxcExpr_Modified;
-                    //TODO: check what the modifier does to the expression's original results based on operator overloading
-                    result.resolvesTo = expression.resolvesTo;
-                    
-                    if (token.ID == Linxc_Asterisk) //if we put *variableName, our pointer count goes down by 1 when resolved
+                    else
                     {
-                        if (result.resolvesTo.pointerCount > 0)
+
+                        LinxcModifiedExpression* modified = (LinxcModifiedExpression*)this->allocator->Allocate(sizeof(LinxcModifiedExpression));
+                        modified->expression = expression;
+                        modified->modification = token.ID;
+
+                        LinxcExpression result;
+                        result.data.modifiedExpression = modified;
+                        result.ID = LinxcExpr_Modified;
+                        //TODO: check what the modifier does to the expression's original results based on operator overloading
+                        result.resolvesTo = expression.resolvesTo;
+
+                        if (token.ID == Linxc_Asterisk) //if we put *variableName, our pointer count goes down by 1 when resolved
                         {
-                            result.resolvesTo.pointerCount -= 1;
+                            if (result.resolvesTo.pointerCount > 0)
+                            {
+                                result.resolvesTo.pointerCount -= 1;
+                            }
+                            else
+                            {
+                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to dereference a non-pointer variable"));
+                            }
                         }
-                        else
+                        else if (token.ID == Linxc_Ampersand)
                         {
-                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Attempting to dereference a non-pointer variable"));
+                            result.resolvesTo.pointerCount += 1;
                         }
+                        return option<LinxcExpression>(result);
                     }
-                    else if (token.ID == Linxc_Ampersand)
-                    {
-                        result.resolvesTo.pointerCount += 1;
-                    }
-                    return option<LinxcExpression>(result);
                 }
                 break;
             }
@@ -494,12 +527,12 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         finalResult.data.functionCall.templateSpecializations = collections::Array<LinxcTypeReference>(); //todo
                         finalResult.resolvesTo = result.data.functionRef->returnType.AsTypeReference().value;
 
-                        return finalResult;
+                        return option<LinxcExpression>(finalResult);
                     }
                     else
                     {
                         //don't throw an error as &functionName is a technically 2 valid primary parses
-                        return result;
+                        return option<LinxcExpression>(result);
                     }
                 }
                 return result;
@@ -531,10 +564,10 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 {
                     temp = string("string");
                 }
-                result.resolvesTo = LinxcTypeReference(this->globalNamespace.types.Get(temp));
+                LinxcType* resolvesToType = this->globalNamespace.types.Get(temp);
+                result.resolvesTo = LinxcTypeReference(resolvesToType);
                 temp.deinit();
-
-                return result;
+                return option<LinxcExpression>(result);
             }
         default:
             {
@@ -544,7 +577,8 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     state->tokenizer->Back();
                     LinxcExpression result = this->ParseIdentifier(state, option<LinxcExpression>());
                     //cannot call anything with primitive type so, and result is guaranteed to be type reference so
-                    return result;
+                    
+                    return option<LinxcExpression>(result);
                 }
             }
             break;
@@ -592,6 +626,21 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
         operatorCall->rightExpr = rhsOpt.value;
         operatorCall->operatorType = op.ID;
 
+        option<LinxcTypeReference> resolvesTo = operatorCall->EvaluatePossible();
+        if (!resolvesTo.present)
+        {
+            ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
+            msg.AppendDeinit(operatorCall->leftExpr.resolvesTo.ToString(&defaultAllocator));
+            msg.Append(" cannot be ");
+            msg.Append(LinxcTokenIDToString(op.ID));
+            msg.Append("'d with ");
+            msg.AppendDeinit(operatorCall->rightExpr.resolvesTo.ToString(&defaultAllocator));
+            state->parsingFile->errors.Add(msg);
+        }
+        else
+        {
+            lhs.resolvesTo = resolvesTo.value;
+        }
         lhs.data.operatorCall = operatorCall;
         lhs.ID = LinxcExpr_OperatorCall;
     }
@@ -938,16 +987,15 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 }
                 LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
                 nextState.parentType = &type;
+                nextState.endOn = LinxcEndOn_RBrace;
                 nextState.currentNamespace = state->currentNamespace;
 
                 option<collections::vector<LinxcStatement>> structBody = this->ParseCompoundStmt(&nextState);
 
-                if (!structBody.present)
+                if (structBody.present)
                 {
-                    toBreak = true;
-                    break;
+                    type.body = structBody.value;
                 }
-                type.body = structBody.value;
 
                 LinxcType* ptr;
                 if (state->parentType != NULL)
@@ -966,6 +1014,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 stmt.ID = LinxcStmt_TypeDecl;
                 result.Add(stmt);
                 nextState.deinit();
+
+                expectSemicolon = true;
             }
         }
         break;
@@ -991,148 +1041,156 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             tokenizer->Back();
 
             option<LinxcExpression> typeExpressionOpt = this->ParseExpressionPrimary(state);
-            if (!typeExpressionOpt.present)
+            if (typeExpressionOpt.present)
             {
-                toBreak = true;
-                break;
-            }
-            LinxcExpression expr = this->ParseExpression(state, typeExpressionOpt.value, -1);
+                LinxcExpression expr = this->ParseExpression(state, typeExpressionOpt.value, -1);
 
-            //resolves to a type name
-            if (expr.resolvesTo.lastType == NULL)
-            {
-                //this is the actual variable's/function return type
-                LinxcTypeReference expectedType = expr.AsTypeReference().value;
-                LinxcToken identifier = tokenizer->NextUntilValid();
-                if (identifier.ID != Linxc_Identifier)
+                //resolves to a type name
+                if (expr.resolvesTo.lastType == NULL)
                 {
-                    ERR_MSG error = ERR_MSG(this->allocator, "Expected identifier after type name, token was ");
-                    error.AppendDeinit(identifier.ToString(&defaultAllocator));
-                    errors->Add(error);
-                    toBreak = true;
-                    break;
-                }
-
-                LinxcToken next = tokenizer->NextUntilValid();
-                if (next.ID == Linxc_Semicolon || next.ID == Linxc_Equal)
-                {
-                    option<LinxcExpression> defaultValue;
-                    if (next.ID == Linxc_Equal)
+                    //this is the actual variable's/function return type
+                    
+                    LinxcTypeReference expectedType = expr.AsTypeReference().value;
+                    LinxcToken identifier = tokenizer->NextUntilValid();
+                    if (identifier.ID != Linxc_Identifier)
                     {
-                        option<LinxcExpression> primary = this->ParseExpressionPrimary(state);
-                        if (!primary.present)
-                        {
-                            //errors->Add(ERR_MSG(this->allocator, "Failed to parse variable value"));
-                            toBreak = true;
-                            break;
-                        }
-                        defaultValue.value = this->ParseExpression(state, primary.value, -1);
-                        defaultValue.present = true;
-                    }
-                    LinxcVar varDecl = LinxcVar(identifier.ToString(this->allocator), expr, defaultValue);
-
-                    if (defaultValue.present && expectedType != defaultValue.value.resolvesTo)
-                    {
-                        errors->Add(ERR_MSG(this->allocator, "Variable initial value is not of the same type as the variable"));
-                    }
-
-                    //not in a function
-                    if (state->currentFunction == NULL)
-                    {
-                        LinxcVar* ptr = NULL;
-                        //in a struct
-                        if (state->parentType != NULL)
-                        {
-                            state->parentType->variables.Add(varDecl);
-                            ptr = state->parentType->variables.Get(state->parentType->variables.count - 1);
-                        }
-                        else //else add to namespace
-                        {
-                            state->currentNamespace->variables.Add(varDecl.name, varDecl);
-                            ptr = state->currentNamespace->variables.Get(varDecl.name);
-                        }
-
-                        LinxcStatement stmt;
-                        stmt.data.varDeclaration = ptr;
-                        stmt.ID = LinxcStmt_VarDecl;
-                        result.Add(stmt);
-                    }
-                    else //in a function, add as temp variable instead
-                    {
-                        LinxcStatement stmt;
-                        stmt.data.tempVarDeclaration = varDecl;
-                        stmt.ID = LinxcStmt_TempVarDecl;
-                        result.Add(stmt);
-
-                        state->varsInScope.Add(varDecl.name, &result.Get(result.count - 1)->data.tempVarDeclaration);
-                    }
-                }
-                else if (next.ID == Linxc_LParen) //function declaration
-                {
-                    collections::Array<LinxcVar> args = this->ParseFunctionArgs(state);
-                    next = tokenizer->NextUntilValid();
-                    if (next.ID != Linxc_LBrace)
-                    {
-                        errors->Add(ERR_MSG(this->allocator, "Expected { to be after function name"));
-                    }
-
-                    LinxcFunc newFunc = LinxcFunc(identifier.ToString(this->allocator), expr);
-                    if (state->parentType != NULL)
-                    {
-                        newFunc.methodOf = state->parentType;
-                    }
-                    else
-                    {
-                        newFunc.funcNamespace = state->currentNamespace;
-                    }
-
-                    LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
-                    nextState.parentType = state->parentType;
-                    nextState.currentNamespace = state->currentNamespace;
-                    nextState.currentFunction = &newFunc;
-
-                    option<collections::vector<LinxcStatement>> funcBody = this->ParseCompoundStmt(&nextState);
-
-                    if (!funcBody.present)
-                    {
+                        ERR_MSG error = ERR_MSG(this->allocator, "Expected identifier after type name, token was ");
+                        error.AppendDeinit(identifier.ToString(&defaultAllocator));
+                        errors->Add(error);
                         toBreak = true;
                         break;
                     }
-                    newFunc.body = funcBody.value;
-                    LinxcFunc* ptr = NULL;
 
-                    if (state->parentType != NULL)
+                    LinxcToken next = tokenizer->NextUntilValid();
+                    if (next.ID == Linxc_Semicolon || next.ID == Linxc_Equal)
                     {
-                        state->parentType->functions.Add(newFunc);
-                        ptr = state->parentType->functions.Get(state->parentType->functions.count - 1);
+                        option<LinxcExpression> defaultValue;
+                        if (next.ID == Linxc_Equal)
+                        {
+                            option<LinxcExpression> primary = this->ParseExpressionPrimary(state);
+                            if (!primary.present)
+                            {
+                                toBreak = true;
+                                break;
+                            }
+                            defaultValue.value = this->ParseExpression(state, primary.value, -1);
+                            defaultValue.present = true;
+                        }
+                        LinxcVar varDecl = LinxcVar(identifier.ToString(this->allocator), expr, defaultValue);
+
+                        if (defaultValue.present)
+                        {
+                            //expected type is not what the default value expression resolves to, and there is no implicit cast for it
+                            if (expectedType != defaultValue.value.resolvesTo && !defaultValue.value.resolvesTo.CanCastTo(expectedType, true))
+                            {
+                                ERR_MSG msg = ERR_MSG(this->allocator, "Variable's initial value is not of the same type as the variable itself, and no implicit cast was found.");
+                                if (defaultValue.value.resolvesTo.CanCastTo(expectedType, false))
+                                {
+                                    msg.Append(". Are you missing an explicit cast?");
+                                }
+                                errors->Add(msg);
+                            }
+                        }
+
+                        //not in a function
+                        if (state->currentFunction == NULL)
+                        {
+                            LinxcVar* ptr = NULL;
+                            //in a struct
+                            if (state->parentType != NULL)
+                            {
+                                state->parentType->variables.Add(varDecl);
+                                ptr = state->parentType->variables.Get(state->parentType->variables.count - 1);
+                            }
+                            else //else add to namespace
+                            {
+                                state->currentNamespace->variables.Add(varDecl.name, varDecl);
+                                ptr = state->currentNamespace->variables.Get(varDecl.name);
+                            }
+
+                            LinxcStatement stmt;
+                            stmt.data.varDeclaration = ptr;
+                            stmt.ID = LinxcStmt_VarDecl;
+                            result.Add(stmt);
+                        }
+                        else //in a function, add as temp variable instead
+                        {
+                            LinxcStatement stmt;
+                            stmt.data.tempVarDeclaration = varDecl;
+                            stmt.ID = LinxcStmt_TempVarDecl;
+                            result.Add(stmt);
+
+                            //printf("Added temp variable %s\n", stmt.ToString(this->allocator).buffer);
+
+                            state->varsInScope.Add(varDecl.name, &result.Get(result.count - 1)->data.tempVarDeclaration);
+                        }
+                    }
+                    else if (next.ID == Linxc_LParen) //function declaration
+                    {
+                        collections::Array<LinxcVar> args = this->ParseFunctionArgs(state);
+                        next = tokenizer->NextUntilValid();
+                        if (next.ID != Linxc_LBrace)
+                        {
+                            errors->Add(ERR_MSG(this->allocator, "Expected { to be after function name"));
+                        }
+
+                        LinxcFunc newFunc = LinxcFunc(identifier.ToString(this->allocator), expr);
+                        if (state->parentType != NULL)
+                        {
+                            newFunc.methodOf = state->parentType;
+                        }
+                        else
+                        {
+                            newFunc.funcNamespace = state->currentNamespace;
+                        }
+
+                        LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
+                        nextState.parentType = state->parentType;
+                        nextState.endOn = LinxcEndOn_RBrace;
+                        nextState.currentNamespace = state->currentNamespace;
+                        nextState.currentFunction = &newFunc;
+
+                        option<collections::vector<LinxcStatement>> funcBody = this->ParseCompoundStmt(&nextState);
+
+                        if (funcBody.present)
+                        {
+                            newFunc.body = funcBody.value;
+                        }
+                        LinxcFunc* ptr = NULL;
+
+                        if (state->parentType != NULL)
+                        {
+                            state->parentType->functions.Add(newFunc);
+                            ptr = state->parentType->functions.Get(state->parentType->functions.count - 1);
+                        }
+                        else
+                        {
+                            state->currentNamespace->functions.Add(newFunc.name, newFunc);
+                            ptr = state->currentNamespace->functions.Get(newFunc.name);
+                        }
+
+                        LinxcStatement stmt;
+                        stmt.data.funcDeclaration = ptr;
+                        stmt.ID = LinxcStmt_TypeDecl;
+
+                        result.Add(stmt);
+                        nextState.deinit();
+                    }
+                }
+                else //random expressions (EG: functionCall()) are only allowed within functions
+                {
+                    if (state->currentFunction != NULL)
+                    {
+                        LinxcStatement stmt;
+                        stmt.data.expression = expr;
+                        stmt.ID = LinxcStmt_Expr;
+                        result.Add(stmt);
+                        expectSemicolon = true;
                     }
                     else
                     {
-                        state->currentNamespace->functions.Add(newFunc.name, newFunc);
-                        ptr = state->currentNamespace->functions.Get(newFunc.name);
+                        errors->Add(ERR_MSG(this->allocator, "Standalone expressions are only allowed within the body of a function"));
                     }
-
-                    LinxcStatement stmt;
-                    stmt.data.funcDeclaration = ptr;
-                    stmt.ID = LinxcStmt_TypeDecl;
-
-                    result.Add(stmt);
-                    nextState.deinit();
-                }
-            }
-            else //random expressions (EG: functionCall()) are only allowed within functions
-            {
-                if (state->currentFunction != NULL)
-                {
-                    LinxcStatement stmt;
-                    stmt.data.expression = expr;
-                    stmt.ID = LinxcStmt_Expr;
-                    result.Add(stmt);
-                    expectSemicolon = true;
-                }
-                else
-                {
-                    errors->Add(ERR_MSG(this->allocator, "Standalone expressions are only allowed within the body of a function"));
                 }
             }
         }
@@ -1142,6 +1200,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             if (state->endOn == LinxcEndOn_RBrace)
             {
                 toBreak = true;
+            }
+            else
+            {
+                errors->Add(ERR_MSG(this->allocator, "Unexpected }"));
             }
         }
         break;

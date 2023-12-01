@@ -67,6 +67,7 @@ struct LinxcTypeReference
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
 
+    bool CanCastTo(LinxcTypeReference type, bool implicitly);
     bool operator==(LinxcTypeReference B)
     {
         bool templatesEqual = true;
@@ -235,6 +236,8 @@ struct LinxcOperator
     LinxcExpression leftExpr;
     LinxcExpression rightExpr;
     LinxcTokenID operatorType;
+
+    option<LinxcTypeReference> EvaluatePossible();
 };
 
 enum LinxcStatementID

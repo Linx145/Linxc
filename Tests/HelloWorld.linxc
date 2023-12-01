@@ -3,10 +3,9 @@
 
 struct myStructure
 {
-    i32 result;
 
     void Function()
     {
-        result;
+        i64 bigNum = 32;
     }
-}
+};

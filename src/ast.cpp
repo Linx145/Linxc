@@ -75,6 +75,37 @@ string LinxcOperatorFunc::ToString(IAllocator* allocator)
     result.AppendDeinit(this->function.returnType.AsTypeReference().value.ToString(&defaultAllocator));
     return result;
 }
+option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
+{
+    LinxcOperatorImpl key;
+    key.ID = LinxcOverloadIs_Operator;
+    key.implicit = false;
+    key.myType = this->leftExpr.resolvesTo;
+    key.otherType = this->rightExpr.resolvesTo;
+    key.op = this->operatorType;
+
+    LinxcOperatorFunc* result = this->leftExpr.resolvesTo.lastType->operatorOverloads.Get(key);
+    if (result != NULL)
+    {
+        //todo: precalculate these?
+        return option<LinxcTypeReference>(result->function.returnType.AsTypeReference());
+    }
+    else
+    {
+        key.ID = LinxcOverloadIs_Operator;
+        key.implicit = false;
+        key.myType = this->rightExpr.resolvesTo;
+        key.otherType = this->leftExpr.resolvesTo;
+        key.op = this->operatorType;
+
+        result = this->rightExpr.resolvesTo.lastType->operatorOverloads.Get(key);
+        if (result != NULL)
+        {
+            return option<LinxcTypeReference>(result->function.returnType.AsTypeReference());
+        }
+        return option<LinxcTypeReference>();
+    }
+}
 
 LinxcParsedFile::LinxcParsedFile()
 {
@@ -110,6 +141,20 @@ LinxcTypeReference::LinxcTypeReference(LinxcType *type)
     this->lastType = type;
     this->pointerCount = 0;
     this->templateArgs = collections::Array<LinxcTypeReference>();
+}
+bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
+{
+    if (this->pointerCount > 0 && type.pointerCount > 0)
+    {
+        return true;
+    }
+    LinxcOperatorImpl castImpl;
+    castImpl.ID = LinxcOverloadIs_Cast;
+    castImpl.implicit = implicitly;
+    castImpl.myType = *this;
+    castImpl.op = Linxc_Invalid;
+    castImpl.otherType = type;
+    return lastType->operatorOverloads.Contains(castImpl);
 }
 
 LinxcNamespace::LinxcNamespace()

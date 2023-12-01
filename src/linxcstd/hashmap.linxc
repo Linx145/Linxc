@@ -194,22 +194,15 @@ namespace collections
 
             if (buckets[index].initialized)
             {
-                if (buckets[index].entries.count > 1)
+                for (usize i = 0; i < buckets[index].entries.count; i++)
                 {
-                    for (usize i = 0; i < buckets[index].entries.count; i++)
+                    if (eqlFunc(buckets[index].entries.Get(i)->key, key))
                     {
-                        if (eqlFunc(buckets[index].entries.Get(i)->key, key))
-                        {
-                            return &buckets[index].entries.Get(i)->value;
-                        }
+                        return &buckets[index].entries.Get(i)->value;
                     }
                 }
-                else
-                {
-                    return &buckets[index].entries.Get(0)->value;
-                }
             }
-            return (V*)0;
+            return NULL;
         }
 
         bool Contains(K key)
