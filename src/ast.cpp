@@ -326,6 +326,10 @@ string LinxcFunctionCall::ToString(IAllocator *allocator)
     for (int i = 0; i < this->inputParams.length; i++)
     {
         result.AppendDeinit(this->inputParams.data[i].ToString(&defaultAllocator));
+        if (i < this->inputParams.length - 1)
+        {
+            result.Append(", ");
+        }
     }
     result.Append(")");
     return result;

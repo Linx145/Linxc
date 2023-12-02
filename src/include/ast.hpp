@@ -165,6 +165,7 @@ struct LinxcFunc
     string name;
     LinxcExpression returnType;
     collections::Array<LinxcVar> arguments;
+    u16 necessaryArguments;
     collections::Array<string> templateArgs;
 
     LinxcFunc();

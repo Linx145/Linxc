@@ -544,6 +544,8 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                             //parse function input
                             while (true)
                             {
+                                bool tooManyArgs = i >= result.value.data.functionRef->arguments.length;
+
                                 option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
                                 if (!primaryOpt.present)
                                 {
@@ -551,19 +553,33 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 }
                                 LinxcExpression fullExpression = this->ParseExpression(state, primaryOpt.value, -1);
 
+                                if (fullExpression.resolvesTo.lastType == NULL)
+                                {
+                                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Cannot parse a type name as a variable. Did you mean sizeof(), nameof() or typeof() instead?"));
+                                }
+
                                 inputArgs.Add(fullExpression);
 
-                                if (!CanAssign(result.value.data.functionRef->arguments.data[i].type.AsTypeReference().value, fullExpression.resolvesTo))
+                                //this wont be present if our variable is open ended and typeless
+                                option<LinxcTypeReference> expectedType = result.value.data.functionRef->arguments.data[i].type.AsTypeReference();
+
+                                if (expectedType.present && !tooManyArgs)
                                 {
-                                    ERR_MSG msg = ERR_MSG(this->allocator, "Argument of type ");
-                                    msg.AppendDeinit(fullExpression.resolvesTo.ToString(&defaultAllocator));
-                                    msg.Append(" cannot be implicitly converted to parameter type ");
-                                    msg.AppendDeinit(result.value.data.functionRef->arguments.data[i].type.AsTypeReference().value.ToString(&defaultAllocator));
-                                    state->parsingFile->errors.Add(msg);
+                                    expectedType.value.isConst = result.value.data.functionRef->arguments.data[i].isConst;
+
+                                    //printf("is const: %s\n", expectedType.value.isConst ? "true" : "false");
+                                    if (!CanAssign(expectedType.value, fullExpression.resolvesTo))
+                                    {
+                                        ERR_MSG msg = ERR_MSG(this->allocator, "Argument of type ");
+                                        msg.AppendDeinit(fullExpression.resolvesTo.ToString(&defaultAllocator));
+                                        msg.Append(" cannot be implicitly converted to parameter type ");
+                                        msg.AppendDeinit(expectedType.value.ToString(&defaultAllocator));
+                                        state->parsingFile->errors.Add(msg);
+                                    }
                                 }
 
                                 peekNext = state->tokenizer->PeekNextUntilValid();
-                                if (peekNext.ID == Linxc_Semicolon)
+                                if (peekNext.ID == Linxc_Comma)
                                 {
                                     state->tokenizer->NextUntilValid();
                                 }
@@ -576,16 +592,30 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 {
                                     state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected , or ) after function input argument"));
                                 }
-                                i += 1;
+                                //if we reach an open ended function, that means we've come to the end. Do not parse further
+                                if (result.value.data.functionRef->arguments.data[i].name != "...")
+                                {
+                                    i += 1;
+                                }
                             }
                         }
-                        if (inputArgs.count > result.value.data.functionRef->arguments.length)
+
+                        //this only applies to non-open ended functions
+                        if (result.value.data.functionRef->arguments.data[result.value.data.functionRef->arguments.length - 1].name != "..." && inputArgs.count > result.value.data.functionRef->arguments.length)
                         {
-                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Provided too many input params to function"));
+                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too many input params to function, expected ");
+                            msg.Append(result.value.data.functionRef->arguments.length);
+                            msg.Append(" arguments, provided ");
+                            msg.Append(inputArgs.count);
+                            state->parsingFile->errors.Add(msg);
                         }
-                        else if (inputArgs.count < result.value.data.functionRef->arguments.length)
+                        else if (inputArgs.count < result.value.data.functionRef->necessaryArguments)
                         {
-                            state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Function expects more input params"));
+                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too few input params to function, expected ");
+                            msg.Append((u64)result.value.data.functionRef->necessaryArguments);
+                            msg.Append(" arguments, provided ");
+                            msg.Append(inputArgs.count);
+                            state->parsingFile->errors.Add(msg);
                         }
                         LinxcExpression finalResult;
                         finalResult.ID = LinxcExpr_FuncCall;
@@ -924,7 +954,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
     return option<LinxcExpression>(result);
 }
 
-collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *state)
+collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *state, u32* necessaryArguments)
 {
     collections::vector<ERR_MSG> *errors = &state->parsingFile->errors;
     collections::vector<LinxcVar> variables = collections::vector<LinxcVar>(this->allocator);
@@ -936,46 +966,125 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
         return variables.ToOwnedArray();
     }
 
+    bool foundOptionalVariable = false;
+    bool foundEllipsis = false;
+
+    bool isConst = false;
+
     while (true)
     {
+        peekNext = state->tokenizer->PeekNextUntilValid();
+        if (peekNext.ID == Linxc_Keyword_const)
+        {
+            isConst = true;
+            state->tokenizer->NextUntilValid();
+            continue;
+        }
+        else if (peekNext.ID == Linxc_Ellipsis)
+        {
+            state->tokenizer->NextUntilValid();
+            //typeless open ended function
+            foundEllipsis = true;
+
+            LinxcVar openEndedVar;
+            openEndedVar.defaultValue = option<LinxcExpression>();
+            openEndedVar.name = string(this->allocator, "...");
+            openEndedVar.type.ID = LinxcExpr_None;
+            openEndedVar.isConst = isConst;
+
+            variables.Add(openEndedVar);
+            
+            peekNext = state->tokenizer->PeekNextUntilValid();
+            if (peekNext.ID == Linxc_RParen)
+            {
+                state->tokenizer->NextUntilValid();
+                break;
+            }
+            else
+            {
+                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Input params after open-ended argument (...) are not allowed"));
+            }
+        }
+
         option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
         if (!primaryOpt.present) //error encountered
         {
             return collections::Array<LinxcVar>();
         }
-        LinxcExpression expression = this->ParseExpression(state, primaryOpt.value, -1);
+        LinxcExpression typeExpression = this->ParseExpression(state, primaryOpt.value, -1);
 
         //if it resolves to nothing, that means it's a variable type.
-        if (expression.resolvesTo.lastType == NULL)
+        if (typeExpression.resolvesTo.lastType == NULL)
         {
+            typeExpression.resolvesTo.isConst = isConst;
+            isConst = false;
             LinxcToken varNameToken = state->tokenizer->NextUntilValid();
-            if (varNameToken.ID != Linxc_Identifier)
+            if (varNameToken.ID == Linxc_Ellipsis)
             {
-                errors->Add(ERR_MSG(this->allocator, "Expected identifier after variable type name!"));
+                foundEllipsis = true;
+            }
+            else if (varNameToken.ID != Linxc_Identifier)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected identifier after variable type name"));
                 break;
             }
             string varName = varNameToken.ToString(this->allocator);
-            variables.Add(LinxcVar(varName, expression, option<LinxcExpression>()));
+            LinxcVar var = LinxcVar(varName, typeExpression, option<LinxcExpression>());
+            var.isConst = typeExpression.resolvesTo.isConst;
+            *necessaryArguments = *necessaryArguments + 1;
 
             LinxcToken next = state->tokenizer->NextUntilValid();
             if (next.ID == Linxc_Comma)
             {
+                if (foundOptionalVariable)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "All function arguments without default values must be placed before those that have"));
+                    break;
+                }
+                else if (foundEllipsis)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Input params after open-ended argument (...) are not allowed"));
+                    break;
+                }
             }
             else if (next.ID == Linxc_Equal)
             {
-                //TODO: variable default values, to be impl'd when expression parsing becomes a thing again
+                if (foundEllipsis)
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Open-ended arguments (...) cannot have default values"));
+                    break;
+                }
+
+                option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
+                if (!primaryOpt.present)
+                {
+                    break;
+                }
+                LinxcExpression defaultValueExpression = this->ParseExpression(state, primaryOpt.value, -1);
+
+                if (CanAssign(typeExpression.AsTypeReference().value, defaultValueExpression.resolvesTo))
+                {
+
+                    var.defaultValue = option<LinxcExpression>(defaultValueExpression);
+                }
+                else
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Input argument's initial value is not of the same type as the argument itself, and no implicit cast was found."));
+                }
+                foundOptionalVariable = true;
             }
-            else if (next.ID == Linxc_RParen)
+            variables.Add(var);
+            if (next.ID == Linxc_RParen)
             {
                 break;
             }
         }
-        else if (expression.ID == LinxcExpr_NamespaceRef)
+        else if (typeExpression.ID == LinxcExpr_NamespaceRef)
         {
             errors->Add(ERR_MSG(this->allocator, "Attempted to use a namespace as variable type"));
             break;
         }
-        else if (expression.ID == LinxcExpr_Variable)
+        else if (typeExpression.ID == LinxcExpr_Variable)
         {
             errors->Add(ERR_MSG(this->allocator, "Attempted to use another variable as variable type"));
             break;
@@ -1269,7 +1378,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     }
                     else if (next.ID == Linxc_LParen) //function declaration
                     {
-                        collections::Array<LinxcVar> args = this->ParseFunctionArgs(state);
+                        u32 necessaryArgs = 0;
+                        collections::Array<LinxcVar> args = this->ParseFunctionArgs(state, &necessaryArgs);
                         LinxcToken next = tokenizer->PeekNextUntilValid();
                         if (next.ID != Linxc_LBrace)
                         {
@@ -1281,6 +1391,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                         LinxcFunc newFunc = LinxcFunc(identifier.ToString(this->allocator), expr);
                         newFunc.arguments = args;
+                        newFunc.necessaryArguments = necessaryArgs;
                         if (state->parentType != NULL)
                         {
                             newFunc.methodOf = state->parentType;

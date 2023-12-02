@@ -1,10 +1,14 @@
 #include <stdio.h>
 #include <Linxc.h>
 
+void fakeprint(const u8* toFormat, ...)
+{
+}
+
 struct myStructure
 {
     i32 Main()
     {
-        return 0;
+        fakeprint("Hello %s, %i\n", "World", 32);
     }
 };

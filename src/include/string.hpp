@@ -27,6 +27,7 @@ struct string
     void Append(const char *other);
     void Append(i64 value);
     void Append(u64 value);
+    void Append(double value);
     void Append(float value);
 
     void PrependDeinit(string other);

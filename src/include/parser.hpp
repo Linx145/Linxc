@@ -170,7 +170,7 @@ struct LinxcParser
     LinxcParser(IAllocator *allocator);
 
     //Call after parsing the opening ( of the function declaration, ends after parsing the closing )
-    collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state);
+    collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state, u32* necessaryArguments);
     //Parses an entire file, parsing include directives under it and their relative files if unparsed thusfar.
     LinxcParsedFile *ParseFile(string fileFullPath, string includeName, string fileContents);
     //Parses a compound statement and returns it given the state. Returns invalid if an error is encountered

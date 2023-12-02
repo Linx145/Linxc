@@ -40,10 +40,7 @@ i32 main()
     fileContents.deinit();
 
     parser.deinit();
-    string testStr = string(parser.allocator, "integer: ");
-    testStr.Append(18446744073709551615);
-    printf("%s\n", testStr.buffer);
-    printf("Program finish, freeing remainding %i allocations\n", arena.ptrs.count);
+    printf("Program finish, freeing remainding %i allocations\n", (i32)arena.ptrs.count);
     arena.deinit();
     getchar();
 

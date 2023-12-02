@@ -1,5 +1,6 @@
 #include "string.hpp"
 #include "stdio.h"
+#include "math.h"
 
 string::string()
 {
@@ -146,8 +147,14 @@ void string::Append(i64 integer)
     {
         index -= 1;
         chars[index] = '0' + positive;
+
+        if (integer < 0)
+        {
+            index -= 1;
+            *(chars + index) = '-';
+        }
         
-        this->Append(chars);
+        this->Append(chars + index);
         return;
     }
     index -= 2;
@@ -176,12 +183,28 @@ void string::Append(u64 integer)
         index -= 1;
         chars[index] = '0' + integer;
 
-        this->Append(chars);
+        this->Append(chars + index);
         return;
     }
     index -= 2;
     memcpy(chars + index, digits2(integer), 2);
     this->Append(chars + index);
+}
+void string::Append(double value)
+{
+    if (value == 0.0)
+    {
+        this->Append("0.0");
+        return;
+    }
+    char chars[16];
+    i32 result = snprintf(chars, 16, "%lf", value);
+    if (result >= 16)
+    {
+        result = 16;
+    }
+    chars[result - 1] = '\0';
+    this->Append(chars);
 }
 void string::Append(float value)
 {
@@ -191,6 +214,13 @@ void string::Append(float value)
         return;
     }
     char chars[16];
+    i32 result = snprintf(chars, 16, "%f", value);
+    if (result >= 16)
+    {
+        result = 16;
+    }
+    chars[result - 1] = '\0';
+    this->Append(chars);
 }
 bool string::operator==(const char* other)
 {
