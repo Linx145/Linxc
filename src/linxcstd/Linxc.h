@@ -1,5 +1,4 @@
-#ifndef linxch
-#define linxch
+#pragma once
 
 #ifndef NULL
 #define NULL 0
@@ -8,6 +7,7 @@
 #define def_delegate(name, returns, ...) typedef returns (*name)(__VA_ARGS__)
 #define trait struct
 #define impl_trait(name)
+#define IsAttribute
 
 typedef signed char i8;
 typedef short i16;
@@ -18,6 +18,3 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
-
-void print(const char *fmt, ...);
-#endif

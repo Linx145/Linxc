@@ -1,5 +1,4 @@
-#ifndef linxcvector
-#define linxcvector
+#pragma once
 
 #include <Linxc.h>
 #include <allocators.hpp>
@@ -172,4 +171,3 @@ namespace collections
         }
     };
 }
-#endif

@@ -190,8 +190,9 @@ struct LinxcVar
 struct LinxcMacro
 {
     string name;
-    collections::vector<string> arguments;
-    string body;
+    bool isFunctionMacro;
+    collections::Array<LinxcToken> arguments;
+    collections::vector<LinxcToken> body;
 };
 
 struct LinxcNamespace
@@ -217,6 +218,8 @@ struct LinxcParsedFile
     /// A list of all defined macros in the file. Does not count macros #undef'd before the end of the file. 
     /// Macros within are owned by LinxcParsedFile instance itself. (Makes no sense for it to be under namespaces)
     collections::vector<LinxcMacro> definedMacros;
+
+    collections::vector<LinxcMacro> definedAttributes;
 
     /// A list of all defined or included types in this file. Points to actual type storage location within a namespace.
     collections::vector<LinxcType *> definedTypes;

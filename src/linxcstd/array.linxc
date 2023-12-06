@@ -1,5 +1,4 @@
-#ifndef linxcarray
-#define linxcarray
+#pragma once
 
 #include <Linxc.h>
 #include <allocators.hpp>
@@ -37,5 +36,3 @@ namespace collections
         }
     };
 }
-
-#endif

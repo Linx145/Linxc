@@ -1,5 +1,4 @@
-#ifndef linxchashmap
-#define linxchashmap
+#pragma once
 
 #define HASHMAP_MAX_WEIGHT 0.8f
 
@@ -226,5 +225,3 @@ namespace collections
         }
     };
 }
-
-#endif

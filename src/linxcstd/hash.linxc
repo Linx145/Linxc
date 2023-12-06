@@ -1,5 +1,4 @@
-#ifndef linxchash
-#define linxchash
+#pragma once
 
 #include "Linxc.h"
 
@@ -31,5 +30,3 @@ inline i32 GetHash(const char* ptr)
     }
     return hash;
 };
-
-#endif

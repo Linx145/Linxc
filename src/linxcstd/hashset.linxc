@@ -1,5 +1,4 @@
-#ifndef linxchashset
-#define linxchashset
+#pragma once
 
 #define HASHSET_MAX_WEIGHT 0.8f
 
@@ -170,5 +169,3 @@ namespace collections
         }
     };
 }
-
-#endif

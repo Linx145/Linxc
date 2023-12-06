@@ -145,9 +145,10 @@ struct LinxcParserState
     bool isToplevel;
     LinxcEndOn endOn;
     collections::hashmap<string, LinxcVar *> varsInScope;
+    bool parsingLinxci;
 
     void deinit();
-    LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel);
+    LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel, bool isParsingLinxci);
 };
 
 struct LinxcParser
@@ -173,6 +174,7 @@ struct LinxcParser
     collections::Array<LinxcVar> ParseFunctionArgs(LinxcParserState *state, u32* necessaryArguments);
     //Parses an entire file, parsing include directives under it and their relative files if unparsed thusfar.
     LinxcParsedFile *ParseFile(string fileFullPath, string includeName, string fileContents);
+    bool TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator, LinxcParsedFile* parsingFile);
     //Parses a compound statement and returns it given the state. Returns invalid if an error is encountered
     option<collections::vector<LinxcStatement>> ParseCompoundStmt(LinxcParserState *state);
     //Parses a single, non-operator expression
@@ -204,6 +206,8 @@ struct LinxcParser
     }
     LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
     LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
+
+    void TranspileFile(LinxcParsedFile *parsedFile);
 };
 
 #endif

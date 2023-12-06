@@ -1,7 +1,9 @@
 ﻿#include <parser.hpp>
 #include <stdio.h>
+#include <path.hpp>
+#include <ArenaAllocator.hpp>
 
-LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel)
+LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel, bool isParsingLinxci)
 {
     this->tokenizer = myTokenizer;
     this->parser = myParser;
@@ -12,6 +14,7 @@ LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *curre
     this->currentFunction = NULL;
     this->parentType = NULL;
     this->varsInScope = collections::hashmap<string, LinxcVar *>(this->parser->allocator, &stringHash, &stringEql);
+    this->parsingLinxci = isParsingLinxci;
 }
 LinxcParser::LinxcParser(IAllocator *allocator)
 {
@@ -207,6 +210,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "void"), Linxc_Keyword_void);
     nameToToken.Add(string(nameToToken.allocator, "volatile"), Linxc_Keyword_volatile);
     nameToToken.Add(string(nameToToken.allocator, "while"), Linxc_Keyword_while);
+    nameToToken.Add(string(nameToToken.allocator, "attribute"), Linxc_keyword_attribute);
 }
 void LinxcParserState::deinit()
 {
@@ -246,17 +250,27 @@ LinxcParsedFile *LinxcParser::ParseFile(string fileFullPath, string includeName,
     {
         return this->parsedFiles.Get(includeName);
     }
+    bool parsingLinxci = false;
+    string extension = path::GetExtension(&defaultAllocator, fileFullPath);
+    if (extension == ".linxci")
+    {
+        parsingLinxci = true;
+    }
 
-    LinxcParsedFile file = LinxcParsedFile(this->allocator, fileFullPath, includeName); //todo
+    LinxcParsedFile file = LinxcParsedFile(this->allocator, fileFullPath, includeName);
     this->parsingFiles.Add(includeName);
 
     LinxcTokenizer tokenizer = LinxcTokenizer(fileContents.buffer, fileContents.length, &this->nameToToken);
-    LinxcParserState parserState = LinxcParserState(this, &file, &tokenizer, LinxcEndOn_Eof, true);
-    option<collections::vector<LinxcStatement>> ast = this->ParseCompoundStmt(&parserState);
-
-    if (ast.present)
+    
+    if (this->TokenizeFile(&tokenizer, allocator, &file))
     {
-        file.ast = ast.value;
+        LinxcParserState parserState = LinxcParserState(this, &file, &tokenizer, LinxcEndOn_Eof, true, parsingLinxci);
+        option<collections::vector<LinxcStatement>> ast = this->ParseCompoundStmt(&parserState);
+
+        if (ast.present)
+        {
+            file.ast = ast.value;
+        }
     }
 
     //this->parsedFiles.Add(filePath);
@@ -395,6 +409,279 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     return result;
 }
 
+bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator, LinxcParsedFile* parsingFile)
+{
+    collections::hashmap<string, LinxcMacro*> identifierToMacro = collections::hashmap<string, LinxcMacro*>(&defaultAllocator, &stringHash, &stringEql);
+    tokenizer->tokenStream = collections::vector<LinxcToken>(allocator);
+    bool nextMacroIsAttribute = false;
+    while (true)
+    {
+        LinxcToken token = tokenizer->TokenizeAdvance();
+
+        if (token.ID == Linxc_keyword_attribute)
+        {
+            nextMacroIsAttribute = true;
+        }
+        else if (token.ID == Linxc_Hash)
+        {
+            LinxcToken preprocessorDirective = tokenizer->TokenizeAdvance();
+            if (preprocessorDirective.ID == Linxc_Keyword_define)
+            {
+                LinxcToken name = tokenizer->TokenizeAdvance();
+                if (name.ID == Linxc_Identifier)
+                {
+                    LinxcToken next = tokenizer->TokenizeAdvance();
+                    if (next.ID == Linxc_LParen)
+                    {
+                        collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
+                        collections::vector<LinxcToken> macroArgs = collections::vector<LinxcToken>(&defaultAllocator);
+                        bool foundEllipsis = false;
+
+                        LinxcToken macroArg = tokenizer->TokenizeAdvance();
+                        if (macroArg.ID != Linxc_RParen)
+                        {
+                            while (true)
+                            {
+                                if (macroArg.ID == Linxc_Ellipsis)
+                                {
+                                    macroArgs.Add(macroArg);
+                                    foundEllipsis = true;
+                                }
+                                if (macroArg.ID == Linxc_Identifier)
+                                {
+                                    if (foundEllipsis)
+                                    {
+                                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: No macro arguments allowed after open-ended argument ... !"));
+                                        identifierToMacro.deinit();
+                                        return false;
+                                    }
+                                    else
+                                    {
+                                        macroArgs.Add(macroArg);
+                                    }
+                                }
+                                LinxcToken afterMacroArg = tokenizer->TokenizeAdvance();
+                                if (afterMacroArg.ID == Linxc_RParen)
+                                {
+                                    break;
+                                }
+                                else if (afterMacroArg.ID == Linxc_Comma)
+                                {
+                                    macroArg = tokenizer->TokenizeAdvance();
+                                }
+                                else
+                                {
+                                    parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Unexpected token after macro argument. Token after macro argument must be either , or )"));
+                                    return false;
+                                }
+                            }
+                        }
+
+                        LinxcToken bodyToken = tokenizer->TokenizeAdvance();
+                        while (bodyToken.ID != Linxc_Eof && bodyToken.ID != Linxc_Nl)
+                        {
+                            macroBody.Add(bodyToken);
+                            bodyToken = tokenizer->TokenizeAdvance();
+                        }
+                        LinxcMacro macro;
+                        macro.name = name.ToString(allocator);
+                        macro.arguments = macroArgs.ToOwnedArrayWith(allocator);
+                        macro.body = macroBody;
+                        macro.isFunctionMacro = true;
+                        parsingFile->definedMacros.Add(macro);
+                        
+                        if (nextMacroIsAttribute)
+                        {
+                            parsingFile->definedAttributes.Add(macro);
+                            nextMacroIsAttribute = false;
+                        }
+                        else identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
+                    }
+                    else
+                    {
+                        collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
+
+                        while (next.ID != Linxc_Eof && next.ID != Linxc_Nl)
+                        {
+                            macroBody.Add(next);
+                            next = tokenizer->TokenizeAdvance();
+                        }
+                        LinxcMacro macro;
+                        macro.name = name.ToString(allocator);
+                        macro.arguments = collections::Array<LinxcToken>();
+                        macro.body = macroBody;
+                        macro.isFunctionMacro = false;
+                        parsingFile->definedMacros.Add(macro);
+                        if (nextMacroIsAttribute)
+                        {
+                            parsingFile->definedAttributes.Add(macro);
+                            nextMacroIsAttribute = false;
+                        }
+                        else identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
+                    }
+                }
+                else
+                {
+                    parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Expected non-reserved identifier name after #define directive"));
+                    return false;
+                }
+            }
+            else if (preprocessorDirective.ID == Linxc_Keyword_include)
+            {
+                LinxcToken next = tokenizer->TokenizeAdvance();
+                if (next.ID != Linxc_MacroString)
+                {
+                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected <file to be included> after #include declaration"));
+                    identifierToMacro.deinit();
+                    return false;
+                }
+
+                if (next.end - 1 <= next.start + 1)
+                {
+                    parsingFile->errors.Add(ERR_MSG(this->allocator, "#include directive is empty!"));
+                }
+                else
+                {
+                    //-2 because its - (next.start + 1)
+                    //string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
+
+                    //printf("included %s\n", macroString.buffer);
+                }
+            }
+        }
+        else
+        {
+            if (token.ID == Linxc_Identifier)
+            {
+                string temp = token.ToString(&defaultAllocator);
+                LinxcMacro **potentialMacro = identifierToMacro.Get(temp);
+                temp.deinit();
+                if (potentialMacro != NULL)
+                {
+                    LinxcMacro* macro = *potentialMacro;
+
+                    if (macro->isFunctionMacro)
+                    {
+                        LinxcToken next = tokenizer->TokenizeAdvance();
+                        if (next.ID != Linxc_LParen)
+                        {
+                            parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected ( after function macro identifier"));
+                            identifierToMacro.deinit();
+                            return false;
+                        }
+                        next = tokenizer->TokenizeAdvance();
+
+                        if (macro->arguments.length == 0)
+                        {
+                            if (next.ID != Linxc_RParen)
+                            {
+                                parsingFile->errors.Add(ERR_MSG(this->allocator, "This macro does not have arguments"));
+                                identifierToMacro.deinit();
+                                return false;
+                            }
+                            if (macro->body.count > 0)
+                            {
+                                for (usize i = 0; i < macro->body.count; i++)
+                                {
+                                    tokenizer->tokenStream.Add(*macro->body.Get(i));
+                                }
+                            }
+                            continue;
+                        }
+                        else
+                        {
+                            i32 expectedArguments = macro->arguments.length;
+                            if (macro->arguments.data[expectedArguments - 1].ID == Linxc_Ellipsis)
+                            {
+                                expectedArguments = -1;
+                            }
+
+                            ArenaAllocator arena = ArenaAllocator(&defaultAllocator);
+                            
+                            collections::vector<LinxcToken> tokensInArg = collections::vector<LinxcToken>(&arena.asAllocator);
+                            collections::hashmap<string, collections::Array<LinxcToken>> argsInMacro = collections::hashmap<string, collections::Array<LinxcToken>>(&arena.asAllocator, &stringHash, &stringEql);
+
+                            while (next.ID != Linxc_RParen)
+                            {
+                                //dont actually add the comma to the tokenstream
+                                if (next.ID != Linxc_Comma)
+                                    tokensInArg.Add(next);
+
+                                next = tokenizer->TokenizeAdvance();
+                                if (next.ID == Linxc_RParen || next.ID == Linxc_Comma)
+                                {
+                                    collections::Array<LinxcToken> argsTokenStream = tokensInArg.ToOwnedArray();
+                                    string currentArgName = macro->arguments.data[argsInMacro.Count].ToString(&arena.asAllocator);
+                                    argsInMacro.Add(currentArgName, argsTokenStream);
+                                    tokensInArg = collections::vector<LinxcToken>(&arena.asAllocator);
+                                }
+                                if (next.ID == Linxc_RParen)
+                                {
+                                    break;
+                                }
+                            }
+
+                            //expected arguments will be -1 if open ended
+                            if (expectedArguments > -1)
+                            {
+                                if (argsInMacro.Count != expectedArguments)
+                                {
+                                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Improper amount of arguments provided to macro"));
+                                    identifierToMacro.deinit();
+                                    argsInMacro.deinit();
+                                    return false;
+                                }
+                            }
+
+                            if (macro->body.count > 0)
+                            {
+                                for (usize i = 0; i < macro->body.count; i++)
+                                {
+                                    LinxcToken macroToken = *macro->body.Get(i);
+
+                                    string macroTokenName = macroToken.ToString(&defaultAllocator);
+                                    collections::Array<LinxcToken> *inputToArgs = argsInMacro.Get(macroTokenName);
+                                    if (inputToArgs != NULL)
+                                    {
+                                        for (usize j = 0; j < inputToArgs->length; j++)
+                                        {
+                                            tokenizer->tokenStream.Add(inputToArgs->data[j]);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        tokenizer->tokenStream.Add(macroToken);
+                                    }
+                                    macroTokenName.deinit();
+                                }
+                            }
+                            arena.deinit();
+                        }
+                    }
+                    else
+                    {
+                        if (macro->body.count > 0)
+                        {
+                            for (usize i = 0; i < macro->body.count; i++)
+                            {
+                                tokenizer->tokenStream.Add(*macro->body.Get(i));
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+            tokenizer->tokenStream.Add(token);
+        }
+
+        if (token.ID == Linxc_Eof || token.ID == Linxc_Invalid)
+        {
+            break;
+        }
+    }
+    identifierToMacro.deinit();
+    return true;
+}
 option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *state, option<LinxcExpression> prevScopeIfAny = option<LinxcExpression>())
 {
     LinxcToken token = state->tokenizer->NextUntilValid();
@@ -1100,6 +1387,7 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
 
 option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(LinxcParserState* state)
 {
+    bool isComment = false;
     bool expectSemicolon = false;
 
     //when flagged to true (upon encountering an error), skip parsing the entire file until a semicolon is reached.
@@ -1129,26 +1417,40 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 continue;
             }
         }
-        if (token.ID == Linxc_Semicolon && expectSemicolon)
+        if (!isComment)
         {
-            expectSemicolon = false;
-            continue;
-        }
-        else if (expectSemicolon)
-        {
-            errors->Add(ERR_MSG(this->allocator, "Expected semicolon"));
-            expectSemicolon = false; //dont get the same error twice
+            if (token.ID == Linxc_Semicolon && expectSemicolon)
+            {
+                expectSemicolon = false;
+                continue;
+            }
+            else if (expectSemicolon)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected semicolon"));
+                expectSemicolon = false; //dont get the same error twice
+            }
         }
 
         switch (token.ID)
         {
         case Linxc_Keyword_const:
         {
+            if (isComment)
+            {
+                continue;
+            }
             nextIsConst = true;
         }
         break;
-        case Linxc_Keyword_include:
+        case Linxc_Nl:
+            isComment = false;
+            break;
+        /*case Linxc_Keyword_include:
         {
+            if (isComment)
+            {
+                continue;
+            }
             if (nextIsConst)
             {
                 errors->Add(ERR_MSG(this->allocator, "Cannot declare a include statement as const"));
@@ -1180,9 +1482,43 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             //20/11/2023
         }
         break;
+        case Linxc_Hash:
+        {
+            LinxcToken next = tokenizer->Next(); //dont use nextuntilvalid as these are nextline sensitive
+            if (next.ID == Linxc_Keyword_define)
+            {
+                LinxcToken nameToken = tokenizer->Next();
+                if (nameToken.ID == Linxc_Nl || nameToken.ID == Linxc_Eof)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expected something to be defined"));
+                    break;
+                }
+                string macroName = nameToken.ToString(this->allocator);
+
+                next = tokenizer->PeekNext();
+                if (next.ID == Linxc_Nl || next.ID == Linxc_Eof)
+                {
+                    LinxcMacro macro;
+                    macro.arguments = collections::Array<LinxcT>();
+                    macro.name = macroName;
+                    macro.body = string();
+
+                    state->parsingFile->definedMacros.Add(macro);
+                }
+                else
+                {
+
+                }
+            }
+        }
+        break;*/
         //Linxc expects <name> to be after struct keyword. There are no typedef struct {} <name> here.
         case Linxc_Keyword_struct:
         {
+            if (isComment)
+            {
+                continue;
+            }
             if (nextIsConst)
             {
                 errors->Add(ERR_MSG(this->allocator, "Cannot declare a struct as const in Linxc"));
@@ -1219,7 +1555,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 }
                 else tokenizer->NextUntilValid();
 
-                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
+                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
                 nextState.parentType = &type;
                 nextState.endOn = LinxcEndOn_RBrace;
                 nextState.currentNamespace = state->currentNamespace;
@@ -1253,6 +1589,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             }
         }
         break;
+        case Linxc_LineComment:
+        {
+            isComment = true;
+        }
         case Linxc_Keyword_i8:
         case Linxc_Keyword_i16:
         case Linxc_Keyword_i32:
@@ -1271,6 +1611,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         case Linxc_Asterisk:
         case Linxc_Identifier:
         {
+            if (isComment)
+            {
+                continue;
+            }
             //move backwards
             tokenizer->Back();
 
@@ -1401,7 +1745,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             newFunc.funcNamespace = state->currentNamespace;
                         }
 
-                        LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false);
+                        LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
                         nextState.parentType = state->parentType;
                         nextState.endOn = LinxcEndOn_RBrace;
                         nextState.currentNamespace = state->currentNamespace;
@@ -1468,6 +1812,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         break;
         case Linxc_Keyword_return:
         {
+            if (isComment)
+            {
+                continue;
+            }
             expectSemicolon = true;
             if (state->currentFunction == NULL)
             {
@@ -1509,6 +1857,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         break;
         case Linxc_RBrace:
         {
+            if (isComment)
+            {
+                continue;
+            }
             if (state->endOn == LinxcEndOn_RBrace)
             {
                 toBreak = true;
@@ -1545,4 +1897,9 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         }
     }
     return option<collections::vector<LinxcStatement>>(result);
+}
+
+void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile)
+{
+
 }

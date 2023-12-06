@@ -110,7 +110,9 @@ enum LinxcTokenID
     Linxc_Keyword_typeof,
     Linxc_Keyword_nameof,
 
+    Linxc_keyword_attribute,
     Linxc_Keyword_trait,
+
     Linxc_Keyword_switch,
     Linxc_Keyword_typedef,
     Linxc_Keyword_union,
@@ -152,6 +154,7 @@ enum LinxcTokenID
     Linxc_Keyword_error,
     Linxc_Keyword_pragma
 };
+
 const char *LinxcTokenIDToString(LinxcTokenID ID);
 
 enum LinxcTokenizerState
@@ -235,23 +238,28 @@ struct LinxcTokenizer
     LinxcTokenID prevTokenID;
     bool preprocessorDirective;
     usize currentLine;
-    usize charsParsed;
-
-    usize prevPrevIndex;
-    LinxcTokenID prevPrevTokenID;
-    bool prevPreprocessorDirective;
-    usize prevLine;
-    usize prevCharsParsed;
+    usize lineStartIndex;
+    usize currentToken;
 
     collections::hashmap<string, LinxcTokenID>* nameToToken;
+    collections::vector<LinxcToken> tokenStream;
 
     LinxcTokenizer();
     LinxcTokenizer(const char *buffer, i32 bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
-    LinxcToken Next();
+
+    LinxcToken TokenizeAdvance();
+    inline LinxcToken Next()
+    {
+        return this->tokenStream.ptr[this->currentToken++];
+    }
     LinxcToken PeekNext();
     LinxcToken NextUntilValid();
     LinxcToken PeekNextUntilValid();
-    void Back();
+    inline void Back()
+    {
+        if (this->currentToken > 0)
+            this->currentToken -= 1;
+    }
 };
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID);

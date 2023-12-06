@@ -1,6 +1,4 @@
-#ifndef linxcoption
-#define linxcoption
-
+#pragma once
 #include <Linxc.h>
 
 template <typename T>
@@ -19,5 +17,3 @@ struct option
         present = true;
     }
 };
-
-#endif

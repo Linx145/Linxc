@@ -1,14 +1,10 @@
-#include <stdio.h>
-#include <Linxc.h>
-
-void fakeprint(const u8* toFormat, ...)
-{
-}
+#include <stdio.linxci>
+#define HASH(prime1, prime2) prime1 * prime2;
 
 struct myStructure
 {
     i32 Main()
     {
-        fakeprint("Hello %s, %i\n", "World", 32);
+        return HASH(7, 31)
     }
 };
