@@ -8,6 +8,7 @@
 
 namespace path
 {
+    string SwapExtension(IAllocator* allocator, string path, const char* newExtension);
     //Including the '.'
     string GetExtension(IAllocator *allocator, string path);
 }

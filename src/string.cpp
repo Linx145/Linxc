@@ -306,3 +306,24 @@ option<usize> FindLast(const char *buffer, char character)
 
     return result;
 }
+
+string ReplaceChar(IAllocator *allocator, string input, char toReplace, char replaceWith)
+{
+    string str = string(allocator);
+    char* buffer = (char*)allocator->Allocate(input.length);
+    str.length = input.length;
+
+    for (usize i = 0; i < input.length - 1; i++)
+    {
+        if (input.buffer[i] == toReplace)
+        {
+            buffer[i] = replaceWith;
+        }
+        else buffer[i] = input.buffer[i];
+    }
+
+    buffer[input.length - 1] = '\0';
+
+    str.buffer = buffer;
+    return str;
+}

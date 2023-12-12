@@ -1,10 +1,15 @@
-#include <stdio.linxci>
-#define HASH(prime1, prime2) prime1 * prime2;
+#include <Linxc.h>
 
-struct myStructure
+namespace MyNamespace
 {
-    i32 Main()
+    struct myStructure
     {
-        return HASH(7, 31)
-    }
-};
+        i32 A;
+        float B;
+        bool C;
+    };
+}
+i32 Main()
+{
+    return 0;
+}

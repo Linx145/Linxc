@@ -207,7 +207,9 @@ struct LinxcParser
     LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
     LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
 
-    void TranspileFile(LinxcParsedFile *parsedFile);
+    void TranspileFile(LinxcParsedFile *parsedFile, const char* outputPathC, const char* outputPathH);
+    void TranspileStatementH(FILE* fs, LinxcStatement* stmt);
+    void TranspileVar(FILE* fs, LinxcVar* var);
 };
 
 #endif

@@ -19,12 +19,14 @@ i32 main()
     if (result->errors.count == 0)
     {
         printf("No Error!\n__\n");
-        for (usize i = 0; i < result->ast.count; i++)
+        parser.TranspileFile(result, "C:/Users/Linus/source/repos/Linxc/linxc-out/HelloWorld.c", "C:/Users/Linus/source/repos/Linxc/linxc-out/HelloWorld.h");
+        printf("File written successfully\n");
+        /*for (usize i = 0; i < result->ast.count; i++)
         {
             string line = result->ast.Get(i)->ToString(&defaultAllocator);
             printf("%s\n", line.buffer);
             line.deinit();
-        }
+        }*/
         printf("__\n");
     }
     else

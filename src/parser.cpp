@@ -528,6 +528,10 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
             }
             else if (preprocessorDirective.ID == Linxc_Keyword_include)
             {
+                //parser doesn't care about the opening # so dont need to add that
+
+                tokenizer->tokenStream.Add(preprocessorDirective);
+
                 LinxcToken next = tokenizer->TokenizeAdvance();
                 if (next.ID != Linxc_MacroString)
                 {
@@ -542,10 +546,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                 }
                 else
                 {
-                    //-2 because its - (next.start + 1)
-                    //string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
-
-                    //printf("included %s\n", macroString.buffer);
+                    tokenizer->tokenStream.Add(next);
                 }
             }
         }
@@ -1445,7 +1446,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         case Linxc_Nl:
             isComment = false;
             break;
-        /*case Linxc_Keyword_include:
+        case Linxc_Keyword_include:
         {
             if (isComment)
             {
@@ -1472,8 +1473,16 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             else
             {
                 //-2 because its - (next.start + 1)
-                //string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
+                string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
 
+                LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
+                includeStatement.includedFile = NULL;
+                includeStatement.includeString = macroString;
+
+                LinxcStatement stmt;
+                stmt.data.includeStatement = includeStatement;
+                stmt.ID = LinxcStmt_Include;
+                result.Add(stmt);
                 //printf("included %s\n", macroString.buffer);
             }
 
@@ -1482,37 +1491,69 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             //20/11/2023
         }
         break;
-        case Linxc_Hash:
+        //Linxc expects <name> to be after struct keyword. There are no typedef struct {} <name> here.
+        case Linxc_Keyword_namespace:
         {
-            LinxcToken next = tokenizer->Next(); //dont use nextuntilvalid as these are nextline sensitive
-            if (next.ID == Linxc_Keyword_define)
+            if (isComment)
             {
-                LinxcToken nameToken = tokenizer->Next();
-                if (nameToken.ID == Linxc_Nl || nameToken.ID == Linxc_Eof)
-                {
-                    errors->Add(ERR_MSG(this->allocator, "Expected something to be defined"));
-                    break;
-                }
-                string macroName = nameToken.ToString(this->allocator);
+                continue;
+            }
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare a namespace as const"));
+                nextIsConst = false;
+            }
 
-                next = tokenizer->PeekNext();
-                if (next.ID == Linxc_Nl || next.ID == Linxc_Eof)
-                {
-                    LinxcMacro macro;
-                    macro.arguments = collections::Array<LinxcT>();
-                    macro.name = macroName;
-                    macro.body = string();
+            LinxcToken namespaceName = tokenizer->Next();
 
-                    state->parsingFile->definedMacros.Add(macro);
-                }
-                else
-                {
+            if (namespaceName.ID != Linxc_Identifier)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected a valid namespace name after namespace keyword!"));
+            }
+            else
+            {
+                string namespaceNameStrTemp = namespaceName.ToString(&defaultAllocator);
+                LinxcNamespace* thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStrTemp);
 
+                if (thisNamespace == NULL)
+                {
+                    string namespaceNameStr = namespaceName.ToString(this->allocator);
+                    LinxcNamespace newNamespace = LinxcNamespace(this->allocator, namespaceNameStr);
+                    newNamespace.parentNamespace = state->currentNamespace;
+                    state->currentNamespace->subNamespaces.Add(namespaceNameStr, newNamespace);
+                    thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStr);
                 }
+
+                LinxcToken next = tokenizer->PeekNextUntilValid();
+                if (next.ID != Linxc_LBrace)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expected { after namespace name!"));
+                    //toBreak = true;
+                    //break;
+                }
+                else tokenizer->NextUntilValid();
+
+                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
+                nextState.parentType = state->parentType;
+                nextState.currentNamespace = thisNamespace;
+
+                option<collections::vector<LinxcStatement>> namespaceScopeBody = this->ParseCompoundStmt(&nextState);
+
+                LinxcNamespaceScope namespaceScope = LinxcNamespaceScope();
+                if (namespaceScopeBody.present)
+                {
+                    namespaceScope.referencedNamespace = thisNamespace;
+                    namespaceScope.body = namespaceScopeBody.value;
+                }
+                LinxcStatement stmt;
+                stmt.data.namespaceScope = namespaceScope;
+                stmt.ID = LinxcStmt_Namespace;
+                result.Add(stmt);
+
+                namespaceNameStrTemp.deinit();
             }
         }
-        break;*/
-        //Linxc expects <name> to be after struct keyword. There are no typedef struct {} <name> here.
+        break;
         case Linxc_Keyword_struct:
         {
             if (isComment)
@@ -1531,7 +1572,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
             if (structName.ID != Linxc_Identifier)
             {
-                errors->Add(ERR_MSG(this->allocator, "Expected struct name after struct keyword!"));
+                errors->Add(ERR_MSG(this->allocator, "Expected a valid struct name after struct keyword!"));
             }
             else
             {
@@ -1899,7 +1940,101 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
     return option<collections::vector<LinxcStatement>>(result);
 }
 
-void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile)
+void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputPathC, const char* outputPathH)
 {
+    FILE* fs;
+    if (fopen_s(&fs, outputPathH, "w") == 0)
+    {
+        //transpile header
+        for (usize i = 0; i < parsedFile->ast.count; i++)
+        {
+            TranspileStatementH(fs, parsedFile->ast.Get(i));
+        }
+        fclose(fs);
+    }
+    //transpile source
+}
+void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
+{
+    if (stmt->ID == LinxcStmt_Include)
+    {
+        string includeName = stmt->data.includeStatement.includeString;
+        string extension = path::GetExtension(&defaultAllocator, includeName);
+        if (extension == ".linxc")
+        {
+            includeName = path::SwapExtension(&defaultAllocator, includeName, ".h");
+            //we only set the above to true here as before, we are just referencing the includeName as part of the include
+            //statement. If we deinited that, we would have modified the statement in the AST
+        }
 
+        //make sure no harpy brain programmer uses '\' to specify include paths 
+        string replaced = ReplaceChar(&defaultAllocator, includeName, '\\', '/');
+        fprintf(fs, "#include <%s>\n", includeName.buffer);
+        replaced.deinit();
+
+        if (extension == ".linxc")
+        {
+            includeName.deinit();
+        }
+        extension.deinit();
+    }
+    else if (stmt->ID == LinxcStmt_Namespace)
+    {
+        //dont need to do any funny state incrementing here
+        for (usize i = 0; i < stmt->data.namespaceScope.body.count; i++)
+        {
+            TranspileStatementH(fs, stmt->data.namespaceScope.body.Get(i));
+        }
+    }
+    else if (stmt->ID == LinxcStmt_TypeDecl)
+    {
+        fprintf(fs, "typedef struct {\n");
+        string typeName = stmt->data.typeDeclaration->GetCName(&defaultAllocator);
+        for (usize i = 0; i < stmt->data.typeDeclaration->variables.count; i++)
+        {
+            fprintf(fs, "   ");
+            this->TranspileVar(fs, stmt->data.typeDeclaration->variables.Get(i));
+            fprintf(fs, ";\n");
+        }
+        fprintf(fs, "} %s;\n", typeName.buffer);
+        typeName.deinit();
+    }
+    else if (stmt->ID == LinxcStmt_VarDecl)
+    {
+        this->TranspileVar(fs, stmt->data.varDeclaration);
+    }
+    else if (stmt->ID == LinxcStmt_FuncDecl)
+    {
+        LinxcTypeReference typeRef = stmt->data.funcDeclaration->returnType.AsTypeReference().value;
+
+        string fullName = typeRef.GetCName(&defaultAllocator);
+        fprintf(fs, "%s ", fullName.buffer);
+        fullName.deinit();
+
+        fprintf(fs, "%s(", stmt->data.funcDeclaration->name.buffer);
+
+        for (usize i = 0; i < stmt->data.funcDeclaration->arguments.length; i++)
+        {
+            this->TranspileVar(fs, &stmt->data.funcDeclaration->arguments.data[i]);
+        }
+
+        fprintf(fs, ");\n");
+    }
+}
+void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
+{
+    if (var->isConst)
+    {
+        fprintf(fs, "const ");
+    }
+    LinxcTypeReference typeRef = var->type.AsTypeReference().value;
+    string fullName = typeRef.GetCName(&defaultAllocator);
+    fprintf(fs, "%s ", fullName.buffer);
+    fullName.deinit();
+    fprintf(fs, "%s", var->name.buffer);
+    if (var->defaultValue.present)
+    {
+        fprintf(fs, " = "); //temp
+    }
+    //else fprintf(fs, ";\n");
 }

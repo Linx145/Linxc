@@ -47,6 +47,8 @@ option<usize> FindFirst(const char *buffer, char character);
 
 option<usize> FindLast(const char *buffer, char character);
 
+string ReplaceChar(IAllocator *allocator, string input, char toReplace, char replaceWith);
+
 inline const char* digits2(usize value)
 {
     return &"0001020304050607080910111213141516171819"

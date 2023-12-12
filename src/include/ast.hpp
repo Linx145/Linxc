@@ -52,6 +52,7 @@ struct LinxcType
     LinxcVar *FindVar(string name);
 
     string GetFullName(IAllocator *allocator);
+    string GetCName(IAllocator* allocator);
 };
 
 // A type reference consists of (chain of namespace to parent type to type)<template args, each another typereference> (pointers)
@@ -69,6 +70,7 @@ struct LinxcTypeReference
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
+    string GetCName(IAllocator* allocator);
 
     bool CanCastTo(LinxcTypeReference type, bool implicitly);
     //dont need to check const as only const u8* is a special type
@@ -207,6 +209,13 @@ struct LinxcNamespace
     LinxcNamespace();
     LinxcNamespace(IAllocator *allocator, string name);
 };
+struct LinxcNamespaceScope
+{
+    LinxcNamespace* referencedNamespace;
+    collections::vector<LinxcStatement> body;
+
+    LinxcNamespaceScope();
+};
 
 struct LinxcParsedFile
 {
@@ -255,6 +264,13 @@ struct LinxcOperator
     option<LinxcTypeReference> EvaluatePossible();
 };
 
+struct LinxcIncludeStatement
+{
+    string includeString;
+    LinxcParsedFile* includedFile;
+    LinxcIncludeStatement();
+};
+
 enum LinxcStatementID
 {
     LinxcStmt_Include,
@@ -268,14 +284,14 @@ enum LinxcStatementID
 };
 union LinxcStatementData
 {
-    LinxcParsedFile *includeStatement;
+    LinxcIncludeStatement includeStatement;
     LinxcExpression expression;
     LinxcExpression returnStatement;
     LinxcType *typeDeclaration;
     LinxcVar *varDeclaration;
     LinxcFunc *funcDeclaration;
     LinxcVar tempVarDeclaration;
-    LinxcNamespace *namespaceScope;
+    LinxcNamespaceScope namespaceScope;
 
     LinxcStatementData();
 };

@@ -192,8 +192,12 @@ bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
 
 LinxcNamespace::LinxcNamespace()
 {
-    this->parentNamespace;
+    this->parentNamespace = NULL;
     this->name = string();
+    this->functions = collections::hashmap<string, LinxcFunc>();
+    this->subNamespaces = collections::hashmap<string, LinxcNamespace>();
+    this->types = collections::hashmap<string, LinxcType>();
+    this->variables = collections::hashmap<string, LinxcVar>();
 }
 LinxcNamespace::LinxcNamespace(IAllocator *allocator, string name)
 {
@@ -203,6 +207,16 @@ LinxcNamespace::LinxcNamespace(IAllocator *allocator, string name)
     this->subNamespaces = collections::hashmap<string, LinxcNamespace>(allocator, &stringHash, &stringEql);
     this->types = collections::hashmap<string, LinxcType>(allocator, &stringHash, &stringEql);
     this->variables = collections::hashmap<string, LinxcVar>(allocator, &stringHash, &stringEql);
+}
+LinxcNamespaceScope::LinxcNamespaceScope()
+{
+    this->body = collections::vector<LinxcStatement>();
+    this->referencedNamespace = NULL;
+}
+LinxcIncludeStatement::LinxcIncludeStatement()
+{
+    this->includedFile = NULL;
+    this->includeString = string();
 }
 
 LinxcType::LinxcType()
@@ -242,6 +256,22 @@ string LinxcType::GetFullName(IAllocator *allocator)
     }
     result.Append(this->name.buffer);
     
+    return result;
+}
+string LinxcType::GetCName(IAllocator* allocator)
+{
+    string result = string();
+    result.allocator = allocator;
+
+    LinxcNamespace* currentNamespace = this->typeNamespace;
+    while (currentNamespace != NULL && currentNamespace->name.buffer != NULL)
+    {
+        result.Prepend("_");
+        result.Prepend(currentNamespace->name.buffer);
+        currentNamespace = currentNamespace->parentNamespace;
+    }
+    result.Append(this->name.buffer);
+
     return result;
 }
 LinxcFunc *LinxcType::FindFunction(string name)
@@ -343,6 +373,20 @@ string LinxcTypeReference::ToString(IAllocator *allocator)
         result.Append("const ");
     }
     result.AppendDeinit(this->lastType->GetFullName(&defaultAllocator));
+    for (i32 i = 0; i < this->pointerCount; i++)
+    {
+        result.Append("*");
+    }
+    return result;
+}
+string LinxcTypeReference::GetCName(IAllocator* allocator)
+{
+    string result = string(allocator);
+    if (this->isConst)
+    {
+        result.Append("const ");
+    }
+    result.AppendDeinit(this->lastType->GetCName(&defaultAllocator));
     for (i32 i = 0; i < this->pointerCount; i++)
     {
         result.Append("*");
@@ -483,7 +527,7 @@ LinxcExpression *LinxcExpression::ToHeap(IAllocator *allocator)
 
 LinxcStatementData::LinxcStatementData()
 {
-    this->includeStatement = NULL;
+    this->includeStatement = LinxcIncludeStatement();
 }
 string LinxcStatement::ToString(IAllocator *allocator)
 {
@@ -491,7 +535,10 @@ string LinxcStatement::ToString(IAllocator *allocator)
     {
     case LinxcStmt_Include:
     {
-        return string(allocator, this->data.includeStatement->includeName.buffer);
+        string result = string(allocator, "#include <");
+        result.Append(this->data.includeStatement.includeString.buffer);
+        result.Append(">");
+        return result;
     }
     case LinxcStmt_Expr:
     {
