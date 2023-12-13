@@ -5,7 +5,8 @@
             "includePath": [
                 "${workspaceFolder}/src/include/",
                 "${workspaceFolder}/Tests/",
-                "${workspaceFolder}/src/linxcstd/"
+                "${workspaceFolder}/src/linxcstd/",
+                "${workspaceFolder}/linxc-out/",
             ],
             "defines": [
                 "WINDOWS"

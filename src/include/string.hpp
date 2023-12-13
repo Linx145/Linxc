@@ -33,6 +33,13 @@ struct string
     void PrependDeinit(string other);
     void AppendDeinit(string other);
 
+    inline string CloneDeinit(IAllocator* allocator)
+    {
+        string result = string(allocator, this->buffer);
+        this->deinit();
+        return result;
+    }
+
     bool operator==(const char* other);
     bool operator!=(const char* other);
 };

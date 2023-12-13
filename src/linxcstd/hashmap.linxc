@@ -98,7 +98,7 @@ namespace collections
                 buckets[i].entries.deinit();
                 //buckets[i].entries.~();
             }
-            allocator->Free(buckets);
+            allocator->Free((void**)&buckets);
         }
 
         void EnsureCapacity()
@@ -132,7 +132,7 @@ namespace collections
                     }
                 }
 
-                this->allocator->Free(buckets);
+                this->allocator->Free((void**)&buckets);
                 buckets = newBuckets;
                 bucketsCount = newSize;
             }

@@ -2,14 +2,29 @@
 
 namespace MyNamespace
 {
-    struct myStructure
+    struct MyStruct
     {
         i32 A;
         float B;
         bool C;
+
+        void DoStuff(i32 amount, float mult)
+        {
+            this->B = (this->A + amount) * mult;
+        }
     };
+    MyStruct NewStructure()
+    {
+        MyStruct result;
+        result.A = 32;
+        result.B = 16.5f;
+        result.C = true;
+        return result;
+    }
 }
 i32 Main()
 {
+    //MyNamespace::MyStruct variable = MyNamespace::NewStructure();
+
     return 0;
 }

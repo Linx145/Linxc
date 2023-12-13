@@ -95,7 +95,7 @@ namespace collections
                     newBuckets[newIndex] = buckets[i];
                 }
 
-                this->allocator->Free(buckets);
+                this->allocator->Free((void**)&buckets);
                 buckets = newBuckets;
                 bucketsCount = newSize;
             }

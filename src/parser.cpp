@@ -13,13 +13,14 @@ LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *curre
     this->currentNamespace = &myParser->globalNamespace;
     this->currentFunction = NULL;
     this->parentType = NULL;
-    this->varsInScope = collections::hashmap<string, LinxcVar *>(this->parser->allocator, &stringHash, &stringEql);
+    this->varsInScope = collections::hashmap<string, LinxcVar *>(&defaultAllocator, &stringHash, &stringEql);
     this->parsingLinxci = isParsingLinxci;
 }
 LinxcParser::LinxcParser(IAllocator *allocator)
 {
     this->allocator = allocator;
     this->globalNamespace = LinxcNamespace(allocator, string());
+    this->thisKeyword = string(allocator, "this");
 
     const i32 numIntegerTypes = 8;
     const i32 numNumericTypes = 10;// 11; TODO: Deal with char, probably will remove it
@@ -889,7 +890,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         }
 
                         //this only applies to non-open ended functions
-                        if (result.value.data.functionRef->arguments.data[result.value.data.functionRef->arguments.length - 1].name != "..." && inputArgs.count > result.value.data.functionRef->arguments.length)
+                        if ((result.value.data.functionRef->arguments.length == 0 || result.value.data.functionRef->arguments.data[result.value.data.functionRef->arguments.length - 1].name != "...") && inputArgs.count > result.value.data.functionRef->arguments.length)
                         {
                             ERR_MSG msg = ERR_MSG(this->allocator, "Provided too many input params to function, expected ");
                             msg.Append(result.value.data.functionRef->arguments.length);
@@ -927,13 +928,19 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
         case Linxc_StringLiteral:
         case Linxc_FloatLiteral:
         case Linxc_IntegerLiteral:
+        case Linxc_Keyword_true:
+        case Linxc_Keyword_false:
             {
                 LinxcExpression result;
                 result.data.literal = token.ToString(this->allocator);
                 result.ID = LinxcExpr_Literal;
 
                 string temp;
-                if (token.ID == Linxc_FloatLiteral)
+                if (token.ID == Linxc_Keyword_true || token.ID == Linxc_Keyword_false)
+                {
+                    temp = string("bool");
+                }
+                else if (token.ID == Linxc_FloatLiteral)
                 {
                     temp = string("float");
                 }
@@ -985,7 +992,15 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
             break;
         }
         state->tokenizer->NextUntilValid();
-        option<LinxcExpression> rhsOpt = this->ParseExpressionPrimary(state, option<LinxcExpression>(lhs));
+
+        option<LinxcExpression> prevScopeIfAny;
+        if (op.ID == Linxc_ColonColon || op.ID == Linxc_Period || op.ID == Linxc_Arrow)
+        {
+            //the lhs is only a valid scope if we are in a scope resolution operator
+            prevScopeIfAny = option<LinxcExpression>(lhs);
+        }
+        else prevScopeIfAny = option<LinxcExpression>();
+        option<LinxcExpression> rhsOpt = this->ParseExpressionPrimary(state, prevScopeIfAny);
         if (!rhsOpt.present)
         {
             //state->parsingFile->errors.Add(ERR_MSG(&defaultAllocator, "Error parsing right side of operator"));
@@ -1071,6 +1086,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
             if (asLocalVar != NULL)
             {
                 result.ID = LinxcExpr_Variable;
+                //this SHOULD point to the location of the var stored in the AST
                 result.data.variable = *asLocalVar;
                 result.resolvesTo = result.data.variable->type.AsTypeReference().value;
                 result.resolvesTo.isConst = result.data.variable->isConst;
@@ -1107,6 +1123,17 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                                 result.ID = LinxcExpr_TypeRef;
                                 result.data.typeRef = asType;
                                 result.resolvesTo.lastType = NULL;
+                            }
+                            else
+                            {
+                                LinxcNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
+                                if (asNamespace != NULL)
+                                {
+                                    result.ID = LinxcExpr_NamespaceRef;
+                                    
+                                    result.data.namespaceRef = asNamespace;
+                                    result.resolvesTo.lastType = NULL;
+                                }
                             }
                         }
                     }
@@ -1534,15 +1561,15 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 else tokenizer->NextUntilValid();
 
                 LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
-                nextState.parentType = state->parentType;
+                //nextState.parentType = state->parentType;
                 nextState.currentNamespace = thisNamespace;
 
                 option<collections::vector<LinxcStatement>> namespaceScopeBody = this->ParseCompoundStmt(&nextState);
 
                 LinxcNamespaceScope namespaceScope = LinxcNamespaceScope();
+                namespaceScope.referencedNamespace = thisNamespace;
                 if (namespaceScopeBody.present)
                 {
-                    namespaceScope.referencedNamespace = thisNamespace;
                     namespaceScope.body = namespaceScopeBody.value;
                 }
                 LinxcStatement stmt;
@@ -1551,6 +1578,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 result.Add(stmt);
 
                 namespaceNameStrTemp.deinit();
+                nextState.deinit();
             }
         }
         break;
@@ -1578,14 +1606,6 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             {
                 //declare new struct
                 LinxcType type = LinxcType(allocator, structName.ToString(allocator), state->currentNamespace, state->parentType);
-                if (state->parentType != NULL)
-                {
-                    type.parentType = state->parentType;
-                }
-                else
-                    type.typeNamespace = state->currentNamespace;
-
-                string fullName = type.GetFullName(allocator);
 
                 LinxcToken next = tokenizer->PeekNextUntilValid();
                 if (next.ID != Linxc_LBrace)
@@ -1595,18 +1615,6 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     //break;
                 }
                 else tokenizer->NextUntilValid();
-
-                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
-                nextState.parentType = &type;
-                nextState.endOn = LinxcEndOn_RBrace;
-                nextState.currentNamespace = state->currentNamespace;
-
-                option<collections::vector<LinxcStatement>> structBody = this->ParseCompoundStmt(&nextState);
-
-                if (structBody.present)
-                {
-                    type.body = structBody.value;
-                }
 
                 LinxcType* ptr;
                 if (state->parentType != NULL)
@@ -1618,6 +1626,19 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 {
                     state->currentNamespace->types.Add(type.name, type);
                     ptr = state->currentNamespace->types.Get(type.name);
+                }
+
+                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
+                nextState.parentType = ptr;
+                nextState.endOn = LinxcEndOn_RBrace;
+                nextState.currentNamespace = state->currentNamespace;
+                state->parsingFile->definedTypes.Add(ptr);
+
+                option<collections::vector<LinxcStatement>> structBody = this->ParseCompoundStmt(&nextState);
+
+                if (structBody.present)
+                {
+                    ptr->body = structBody.value;
                 }
 
                 LinxcStatement stmt;
@@ -1741,6 +1762,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             {
                                 state->currentNamespace->variables.Add(varDecl.name, varDecl);
                                 ptr = state->currentNamespace->variables.Get(varDecl.name);
+
+                                state->parsingFile->definedVars.Add(ptr);
                             }
 
                             LinxcStatement stmt;
@@ -1750,7 +1773,11 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         }
                         else //in a function, add as temp variable instead
                         {
-                            LinxcStatement stmt;
+                            //cant do this as upon adding results to the parent ast, the
+                            //value of tempPtr would change
+                            //we should instead push it to the heap
+
+                            /*LinxcStatement stmt;
                             stmt.data.tempVarDeclaration = varDecl;
                             stmt.ID = LinxcStmt_TempVarDecl;
                             result.Add(stmt);
@@ -1758,7 +1785,16 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             //printf("Added temp variable %s\n", stmt.ToString(this->allocator).buffer);
 
                             LinxcVar* tempPtr = &result.Get(result.count - 1)->data.tempVarDeclaration;
-                            state->varsInScope.Add(varDecl.name, tempPtr);
+                            state->varsInScope.Add(varDecl.name, tempPtr);*/
+
+                            LinxcVar* ptr = (LinxcVar*)this->allocator->Allocate(sizeof(LinxcVar));
+                            *ptr = varDecl;
+
+                            LinxcStatement stmt;
+                            stmt.data.varDeclaration = ptr;
+                            stmt.ID = LinxcStmt_VarDecl;
+                            result.Add(stmt);
+                            state->varsInScope.Add(varDecl.name, ptr);
                         }
                     }
                     else if (next.ID == Linxc_LParen) //function declaration
@@ -1786,22 +1822,6 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             newFunc.funcNamespace = state->currentNamespace;
                         }
 
-                        LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
-                        nextState.parentType = state->parentType;
-                        nextState.endOn = LinxcEndOn_RBrace;
-                        nextState.currentNamespace = state->currentNamespace;
-                        nextState.currentFunction = &newFunc;
-                        for (usize i = 0; i < args.length; i++)
-                        {
-                            nextState.varsInScope.Add(args.data[i].name, &args.data[i]);
-                        }
-
-                        option<collections::vector<LinxcStatement>> funcBody = this->ParseCompoundStmt(&nextState);
-
-                        if (funcBody.present)
-                        {
-                            newFunc.body = funcBody.value;
-                        }
                         LinxcFunc* ptr = NULL;
 
                         if (state->parentType != NULL)
@@ -1815,11 +1835,51 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             ptr = state->currentNamespace->functions.Get(newFunc.name);
                         }
 
+                        LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
+                        nextState.parentType = state->parentType;
+                        nextState.endOn = LinxcEndOn_RBrace;
+                        nextState.currentNamespace = state->currentNamespace;
+                        nextState.currentFunction = ptr;
+                        for (usize i = 0; i < args.length; i++)
+                        {
+                            nextState.varsInScope.Add(args.data[i].name, &args.data[i]);
+                        }
+
+                        LinxcVar *thisVar;
+
+                        if (state->parentType != NULL)
+                        {
+                            //the 'this' keyword counts as a variable within a function's scope if it is within a struct
+
+                            thisVar = (LinxcVar*)allocator->Allocate(sizeof(LinxcVar));
+                            thisVar->name = this->thisKeyword;
+                            thisVar->type = state->parentType->AsExpression();
+                            thisVar->type.data.typeRef.pointerCount += 1;
+                            nextState.varsInScope.Add(this->thisKeyword, thisVar);
+
+                            for (usize i = 0; i < state->parentType->variables.count; i++)
+                            {
+                                LinxcVar* memberVariable = state->parentType->variables.Get(i);
+                                //printf("Member variable %s in type %s\n", memberVariable->name.buffer, state->parentType->name.buffer);
+                                nextState.varsInScope.Add(memberVariable->name, memberVariable);
+                            }
+                        }
+
+                        option<collections::vector<LinxcStatement>> funcBody = this->ParseCompoundStmt(&nextState);
+
+                        if (funcBody.present)
+                        {
+                            ptr->body = funcBody.value;
+                        }
+
+                        state->parsingFile->definedFuncs.Add(ptr);
+
                         LinxcStatement stmt;
                         stmt.data.funcDeclaration = ptr;
                         stmt.ID = LinxcStmt_FuncDecl;
 
                         result.Add(stmt);
+
                         nextState.deinit();
                     }
                 }
@@ -1953,6 +2013,26 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
         fclose(fs);
     }
     //transpile source
+    if (fopen_s(&fs, outputPathC, "w") == 0)
+    {
+        string swappedExtension = path::SwapExtension(&defaultAllocator, parsedFile->includeName, ".h");
+        fprintf(fs, "#include <%s>\n", swappedExtension.buffer);
+        swappedExtension.deinit();
+        //we only care about functions atm
+        for (usize i = 0; i < parsedFile->definedFuncs.count; i++)
+        {
+            LinxcFunc* func = parsedFile->definedFuncs.ptr[i];
+            this->TranspileFunc(fs, func);
+            fprintf(fs, "\n{\n");
+            for (usize j = 0; j < func->body.count; j++)
+            {
+                this->TranspileStatementC(fs, func->body.Get(j));
+                fprintf(fs, ";\n");
+            }
+            fprintf(fs, "}\n");
+        }
+        fclose(fs);
+    }
 }
 void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
 {
@@ -1971,6 +2051,11 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
         string replaced = ReplaceChar(&defaultAllocator, includeName, '\\', '/');
         fprintf(fs, "#include <%s>\n", includeName.buffer);
         replaced.deinit();
+
+        if (includeName == "Linxc.h")
+        {
+            fprintf(fs, "#include <stdbool.h>\n");
+        }
 
         if (extension == ".linxc")
         {
@@ -1998,6 +2083,12 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
         }
         fprintf(fs, "} %s;\n", typeName.buffer);
         typeName.deinit();
+
+        for (usize i = 0; i < stmt->data.typeDeclaration->functions.count; i++)
+        {
+            this->TranspileFunc(fs, stmt->data.typeDeclaration->functions.Get(i));
+            fprintf(fs, ";\n");
+        }
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
@@ -2005,20 +2096,127 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
     }
     else if (stmt->ID == LinxcStmt_FuncDecl)
     {
-        LinxcTypeReference typeRef = stmt->data.funcDeclaration->returnType.AsTypeReference().value;
+        this->TranspileFunc(fs, stmt->data.funcDeclaration);
+        fprintf(fs, ";\n");
+    }
+}
+void LinxcParser::TranspileFunc(FILE *fs, LinxcFunc* func)
+{
+    LinxcTypeReference typeRef = func->returnType.AsTypeReference().value;
 
-        string fullName = typeRef.GetCName(&defaultAllocator);
-        fprintf(fs, "%s ", fullName.buffer);
-        fullName.deinit();
+    string returnTypeName = typeRef.GetCName(&defaultAllocator);
+    fprintf(fs, "%s ", returnTypeName.buffer);
+    returnTypeName.deinit();
 
-        fprintf(fs, "%s(", stmt->data.funcDeclaration->name.buffer);
+    string funcName = func->GetCName(&defaultAllocator);
+    fprintf(fs, "%s(", funcName.buffer);
+    funcName.deinit();
 
-        for (usize i = 0; i < stmt->data.funcDeclaration->arguments.length; i++)
+    //if we are a member function of a struct, the first argument will always be 'this'
+    if (func->methodOf != NULL)
+    {
+        string thisTypeName = func->methodOf->GetCName(&defaultAllocator);
+        fprintf(fs, "%s *this", thisTypeName.buffer);
+        if (func->arguments.length > 0)
         {
-            this->TranspileVar(fs, &stmt->data.funcDeclaration->arguments.data[i]);
+            fprintf(fs, ", ");
         }
+    }
+    for (usize i = 0; i < func->arguments.length; i++)
+    {
+        this->TranspileVar(fs, &func->arguments.data[i]);
+        if (i < func->arguments.length - 1)
+        {
+            fprintf(fs, ", ");
+        }
+    }
 
-        fprintf(fs, ");\n");
+    fprintf(fs, ")");
+}
+void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr)
+{
+    switch (expr->ID)
+    {
+    case LinxcExpr_None:
+        break;
+    case LinxcExpr_Literal:
+    {
+        fprintf(fs, "%s", expr->data.literal.buffer);
+    }
+    break;
+    case LinxcExpr_Variable:
+    {
+        fprintf(fs, "%s", expr->data.variable->name.buffer);
+    }
+    break;
+    case LinxcExpr_Modified:
+    {
+        fprintf(fs, "%s", LinxcTokenIDToString(expr->data.modifiedExpression->modification));
+        this->TranspileExpr(fs, &expr->data.modifiedExpression->expression);
+    }
+    break;
+    case LinxcExpr_FuncCall:
+    {
+        string name = expr->data.functionCall.func->GetCName(&defaultAllocator);
+        fprintf(fs, "%s(", name.buffer);
+        name.deinit();
+        for (usize i = 0; i < expr->data.functionCall.inputParams.length; i++)
+        {
+            this->TranspileExpr(fs, &expr->data.functionCall.inputParams.data[i]);
+            if (i < expr->data.functionCall.inputParams.length - 1)
+            {
+                fprintf(fs, ", ");
+            }
+        }
+        fprintf(fs, "}");
+        //expr->data.functionCall.func->
+    }
+    case LinxcExpr_FunctionRef:
+    {
+        string name = expr->data.functionRef->GetCName(&defaultAllocator);
+        fprintf(fs, "%s(", name.buffer);
+        name.deinit();
+    }
+    break;
+    case LinxcExpr_OperatorCall:
+    {
+        //when transpiling an operator with a scope resolution operation, we should ignore the
+        //resolution and only transpile the right side until we reach the variable/function/type.
+        //this is so as to prevent duplicate namespace scopes when transpiled to C, as we need
+        //to transpile the variable/function/type as it's complete C friendly name.
+        //If we were to transpile it as is, and make the C friendly name by transpiling scope resolution operators,
+        //variables/functions/types contained in a using'd namespace would be improperly transpiled
+        if (expr->data.operatorCall->operatorType == Linxc_ColonColon)
+        {
+            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr);
+        }
+        else
+        {
+            //todo: Convert custom operators to functions
+            LinxcTokenID opType = expr->data.operatorCall->operatorType;
+            bool writePriority = opType != Linxc_ColonColon && opType != Linxc_Arrow && opType != Linxc_Period && opType != Linxc_Equal;
+            if (writePriority)
+            {
+                fprintf(fs, "(");
+            }
+            this->TranspileExpr(fs, &expr->data.operatorCall->leftExpr);
+            //if not ::, ->, ., yes space
+            if (opType != Linxc_ColonColon && opType != Linxc_Arrow && opType != Linxc_Period)
+            {
+                fprintf(fs, " %s ", LinxcTokenIDToString(expr->data.operatorCall->operatorType));
+            }
+            //no space
+            else fprintf(fs, "%s", LinxcTokenIDToString(expr->data.operatorCall->operatorType));
+            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr);
+            if (writePriority)
+            {
+                fprintf(fs, ")");
+            }
+        }
+    }
+    break;
+    default:
+        break;
     }
 }
 void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
@@ -2035,6 +2233,23 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
     if (var->defaultValue.present)
     {
         fprintf(fs, " = "); //temp
+        this->TranspileExpr(fs, &var->defaultValue.value);
     }
     //else fprintf(fs, ";\n");
+}
+void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
+{
+    if (stmt->ID == LinxcStmt_Expr)
+    {
+        this->TranspileExpr(fs, &stmt->data.expression);
+    }
+    else if (stmt->ID == LinxcStmt_Return)
+    {
+        fprintf(fs, "return ");
+        this->TranspileExpr(fs, &stmt->data.returnStatement);
+    }
+    else if (stmt->ID == LinxcStmt_VarDecl)
+    {
+        this->TranspileVar(fs, stmt->data.varDeclaration);
+    }
 }

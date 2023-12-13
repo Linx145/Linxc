@@ -19,9 +19,10 @@ struct IAllocator
     {
         return allocFunction(instance, bytes);
     }
-    inline void Free(void *ptr)
+    inline void Free(void **ptr)
     {
-        freeFunction(instance, ptr);
+        freeFunction(instance, *ptr);
+        *ptr = NULL;
     }
 
     IAllocator();

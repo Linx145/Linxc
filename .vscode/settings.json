@@ -37,6 +37,7 @@
         "xtr1common": "cpp",
         "xutility": "cpp",
         "filesystem": "cpp",
-        "system_error": "cpp"
+        "system_error": "cpp",
+        "helloworld.h": "c"
     }
 }

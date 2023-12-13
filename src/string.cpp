@@ -54,7 +54,7 @@ string::string(IAllocator *myAllocator, const char* source, usize length)
 
 void string::deinit()
 {
-    this->allocator->Free(buffer);
+    this->allocator->Free((void**)&buffer);
 }
 bool string::eql(const char *other)
 {
@@ -87,7 +87,7 @@ void string::Append(const char *other)
 
     if (this->buffer != NULL)
     {
-        this->allocator->Free(this->buffer);
+        this->allocator->Free((void**)&this->buffer);
     }
     this->buffer = newBuffer;
     this->length = newLength;
@@ -115,7 +115,7 @@ void string::Prepend(const char *other)
 
     if (this->buffer != NULL)
     {
-        this->allocator->Free(this->buffer);
+        this->allocator->Free((void**)&this->buffer);
     }
     this->buffer = newBuffer;
     this->length = newLength;

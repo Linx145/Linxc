@@ -24,7 +24,7 @@ void ArenaAllocator::deinit()
 {
     for (usize i = 0; i < this->ptrs.count; i++)
     {
-        this->baseAllocator->Free(*this->ptrs.Get(i));
+        this->baseAllocator->Free(this->ptrs.Get(i));
     }
     ptrs.deinit();
 }

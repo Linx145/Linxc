@@ -53,6 +53,8 @@ struct LinxcType
 
     string GetFullName(IAllocator *allocator);
     string GetCName(IAllocator* allocator);
+
+    LinxcExpression AsExpression();
 };
 
 // A type reference consists of (chain of namespace to parent type to type)<template args, each another typereference> (pointers)
@@ -172,6 +174,7 @@ struct LinxcFunc
 
     LinxcFunc();
     LinxcFunc(string name, LinxcExpression returnType);
+    string GetCName(IAllocator* allocator);
 };
 
 /// Represents a variable in Linxc, including it's type, name and optionally default value.
@@ -279,7 +282,7 @@ enum LinxcStatementID
     LinxcStmt_TypeDecl,
     LinxcStmt_VarDecl,
     LinxcStmt_FuncDecl,
-    LinxcStmt_TempVarDecl,
+    //LinxcStmt_TempVarDecl,
     LinxcStmt_Namespace
 };
 union LinxcStatementData
@@ -290,7 +293,7 @@ union LinxcStatementData
     LinxcType *typeDeclaration;
     LinxcVar *varDeclaration;
     LinxcFunc *funcDeclaration;
-    LinxcVar tempVarDeclaration;
+    //LinxcVar tempVarDeclaration;
     LinxcNamespaceScope namespaceScope;
 
     LinxcStatementData();

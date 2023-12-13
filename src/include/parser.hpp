@@ -167,6 +167,7 @@ struct LinxcParser
     collections::hashmap<string, LinxcTokenID> nameToToken;
     LinxcType* typeofU8;
     LinxcNamespace globalNamespace;
+    string thisKeyword;
 
     LinxcParser(IAllocator *allocator);
 
@@ -209,7 +210,10 @@ struct LinxcParser
 
     void TranspileFile(LinxcParsedFile *parsedFile, const char* outputPathC, const char* outputPathH);
     void TranspileStatementH(FILE* fs, LinxcStatement* stmt);
+    void TranspileFunc(FILE* fs, LinxcFunc* func);
     void TranspileVar(FILE* fs, LinxcVar* var);
+    void TranspileExpr(FILE* fs, LinxcExpression* expr);
+    void TranspileStatementC(FILE* fs, LinxcStatement* stmt);
 };
 
 #endif
