@@ -4,11 +4,11 @@
 template<typename T>
 struct Type
 {
-    static u32 ID = 0;
-    static T globalInstance;
+     static u32 ID = 0;
+     static T globalInstance;
 
-    static void PrintID()
-    {
-        printf("%u\n", ID);
-    }
+     static void PrintID()
+     {
+         printf("%u\n", ID);
+     }
 };

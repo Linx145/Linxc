@@ -6,3 +6,10 @@ zig-out/
 /build-*/
 /docgen_tmp/
 linxc-out
+bin
+src/obj
+Makefile
+*.sln
+*.vcxproj
+*.filters
+.vs/

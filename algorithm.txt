@@ -1,0 +1,153 @@
+The Linxc ast should be a list, similar to as follows:
+______
+include directive
+include directive
+struct declaration
+    var declaration
+    var declaration
+    func declaration
+        var declaration = literal
+        expression operator(var addeql literal)
+        expression operator(var set var)
+func declaration
+    var declaration = literal
+    expression funccall(literal, operator(var add literal))
+    return expression var
+______
+statements
+struct declaration
+    -namespace
+    -name
+    -variables
+    -functions
+    -template args list
+    -list of implemented traits
+    -list of tags
+
+var declaration
+    -type
+    -name
+    -default value (expression)
+
+function declaration
+    -body (compound statement)
+    -name
+    -return type
+    -args list (variables)
+    -template args list
+
+namespace scope
+    -name
+
+operator
+    Left Expression
+    Right Expression
+    operator
+
+ternary operator
+    Conditional Expression
+    True Expression
+    False Expression
+
+function call
+    function declaration pointer
+    next expression
+
+increment operator, decrement operator
+    variable expression
+    next expression
+
+pointer dereference
+    contained expression
+    next expression
+
+variable expression
+    variable name
+    next expression
+
+literal expression
+    literal value
+    next expression
+
+sizeof, nameof, typeof call
+    type reference
+    next expression
+______
+
+def function
+    -start index
+    -end index
+    -name
+    -return type
+    -list of args (variables)
+    -template args list
+
+def variable
+    -type
+    -name
+    -default value
+
+var list of types
+var list of global functions
+var list of global variables
+var list of parsing files
+var list of parsed files
+
+def state
+    current namespaces
+    is toplevel
+    end on } or #endif or EoF
+
+def parseresult
+    list of variables
+    list of structs
+    list of functions
+
+def macro
+    -name
+    -list of args
+    -body string
+
+begin
+
+foreach linxc file in directories of project
+    if file not parsed
+        add file name to list of parsing files
+
+        def parse_compoundstmt_h(state)
+            var return value (parseresult)
+
+            foreach line
+                if state is toplevel
+                    if include statement <file>
+                        if <file> is under list of parsing files, that means we are already parsing that file in the tree, throw error
+                        if <file> is under list of parsed files, ignore
+                        else search for existence of <file> under directory of files in project, parse file first
+
+                    if #define <name>; add <name> to list of defines
+                    if #define <name>(<args>) <code>; add <name> to list of defines and add <code> under it with <args>
+                    if #define <name> <value>; add <name> to list of defines and add <value> under it as code
+                    if kw namespace <name>; parse_compoundstmt_h with added namespace <name> until }
+                else if any, throw error
+
+                if #ifdef <name>; if name is defined, parse_compoundstmt_h until #endif, else parse and discard
+                
+                if kw struct <name>; parse_compoundstmt_h until }; add results to new struct of <name>, add struct <name> to return value
+
+                if <type> <name>
+                    if next is (<args>)
+                        var new function (function)
+                        parse_args_h(args), add results to new function
+                        move until }, record start and end, add to new function
+                        add new function to return value
+                    if next is ;
+                        var new variable (variable)
+                        add new variable to return value
+                    if next is =
+                        var new variable (variable)
+                        parse expression, add to new variable 
+                        add new variable to return value
+                if within type and <type name>(<args>); parse_compoundstmt_h until }, add results to new ctor function, add ctor function to enclosing struct
+
+                if kw template<args>, parse args, next function/struct will have template. If not either or Eof, throw error
+                

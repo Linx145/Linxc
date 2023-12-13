@@ -1,35 +1,25 @@
 # Linxc
-Linxc is an experimental language that works through transpilation to C++. It is unique as it's syntax is a subset of C++: Any IDE that can analyze C++ can also analyze linxc. It aims to modernize C and make it tolerable to write in the year 2023 and beyond, removing the need to manually create header files, adding static reflection, traits and more while keeping things simpler than C++.
+Linxc is an experimental dialect of C++ that works through transpilation to C, much like the original CFront. Any IDE that can analyze C++ can also analyze linxc. It aims to remove the need to manually create header files while adding static reflection, once-per-project template specialization and more. Moreover, it enforces a cleaner syntax that is both simpler than C++ but more modern than C, ensuring readable code even for large projects.
 
-The language is in a very early alpha stage and does not support all planned features yet.
+The language is in a pre-alpha stage and does not support all planned features yet.
 
 ## Usage
-After building with zig (zig build), cd into zig-out/bin and run the program with a folder path as input, and another folder path for outputting the transpiled C++ files.
+Currently, no command line interface exists to use Linxcc, the Linxc transpiler. I will update this readme when one becomes available.
 
-To write linxc, you must include the Linxc.h file in your program, as linxc does not recognise C primitive types like int, long, long long, etc. Instead, it follows rust/zig primitive naming conventions, such as i8, i32, u64, usize etc. Float, double, char and bool (but not _Bool) remain in place.
+## Planned Features
+* Transpile Linxc to .c and .h
+* Optionally output .linxci headers if building a static library, which is cross-compatible with regular C++ programs.
+* Static reflection w/ database built and integrated at transpile time
+* Templates that only support types as generic arguments
+* Templates are specialized once per reference per entire project
+* Allocator based memory management
+* Optional garbage collecting allocator + GC marking function generator
+* All stages of the transpiler are modifiable, allowing you to write plugins for Linxc
 
-As the language is incredibly WIP, there is currently no comprehensive documentation of changes between linxc and C/C++/
-
-## Features
-Currently Supported:
-* Basic linxc transpilation to .cpp and .h
-* structs: methods, fields
-* functions
-* static variables (+in struct initialization!)
-
-WIP:
-* Transpile-time specialized templates
-
-Planned:
-* Traits
-* Constructors
-* Static reflection
-* Automatic deep copy function generation
-* Some kind of file caching and batch building
-* Allocators (Arena allocator)
-* Modify the transpiler to interpret tags
-* Operator overloading
-
-Maybe:
-* Destructors (would not be possible for a future pure C transpilation, may be implemented as a trait instead)
-* Transpilation to pure C
+## Differences to C/C++
+* No references, rvalues, lvalues
+* No move semantics
+* No typedef struct {} structname;
+* No destructors, use the more versatile and less dangerous allocator system instead
+* No inheritance(?)
+* No unsigned, long, etc. Use i8, i16, i32, i64, u8, u16 and so on instead
