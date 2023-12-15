@@ -88,7 +88,8 @@ LinxcParser::LinxcParser(IAllocator *allocator)
             }
         }
     }
-    //all numeric types can be +, -, /, *, ==, != with each other
+    //all numeric types can be +, -, /, *, ==, !=, >, <, >=, <= with each other
+    // we dont need to add +=, -=, *=, /= as those cannot be overriden and are implied by overriding the +, -, * and / operators instead
     //TODO: Settle the bitshift and bitwise comparison operators
     //because typeA + typeB = typeB + typeA, we should avoid adding the duplicates
     for (i32 i = 0; i < numNumericTypes; i++)
@@ -118,12 +119,24 @@ LinxcParser::LinxcParser(IAllocator *allocator)
 
                 LinxcOperatorFunc operatorDiv = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_Slash);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorDiv.operatorOverride, operatorDiv);
-            
+
                 LinxcOperatorFunc operatorEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_EqualEqual);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorEquals.operatorOverride, operatorEquals);
 
                 LinxcOperatorFunc operatorNotEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_BangEqual);
                 primitiveTypePtrs[i]->operatorOverloads.Add(operatorNotEquals.operatorOverride, operatorNotEquals);
+            
+                LinxcOperatorFunc operatorMoreThan = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_AngleBracketRight);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorMoreThan.operatorOverride, operatorMoreThan);
+
+                LinxcOperatorFunc operatorLessThan = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_AngleBracketLeft);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorLessThan.operatorOverride, operatorLessThan);
+
+                LinxcOperatorFunc operatorMoreThanEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_AngleBracketRightEqual);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorMoreThanEquals.operatorOverride, operatorMoreThanEquals);
+
+                LinxcOperatorFunc operatorLessThanEquals = NewDefaultOperator(primitiveTypePtrs, i, j, Linxc_AngleBracketLeftEqual);
+                primitiveTypePtrs[i]->operatorOverloads.Add(operatorLessThanEquals.operatorOverride, operatorLessThanEquals);
             }
         }
     }
@@ -331,7 +344,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     LinxcType* otherType = primitiveTypePtrs[otherTypeIndex];
     i32 returnTypeIndex = 0;
     
-    if (op == Linxc_EqualEqual || op == Linxc_BangEqual)
+    if (op == Linxc_EqualEqual || op == Linxc_BangEqual || op == Linxc_AngleBracketLeft || op == Linxc_AngleBracketRight || op == Linxc_AngleBracketLeftEqual || op == Linxc_AngleBracketRightEqual)
     {
         returnTypeIndex = 12; //== and != MUST result in bool
     }
@@ -396,6 +409,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     inputArg->type.ID = LinxcExpr_TypeRef;
     inputArg->type.data.typeRef = LinxcTypeReference(otherType);
     inputArg->type.resolvesTo.lastType = NULL;
+    inputArg->memberOf = NULL;
     inputArg->name = string(this->allocator, "other");
     opFunc.arguments = collections::Array<LinxcVar>(this->allocator, inputArg, 1);
 
@@ -1085,11 +1099,43 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
             LinxcVar **asLocalVar = state->varsInScope.Get(identifierName);
             if (asLocalVar != NULL)
             {
-                result.ID = LinxcExpr_Variable;
-                //this SHOULD point to the location of the var stored in the AST
-                result.data.variable = *asLocalVar;
-                result.resolvesTo = result.data.variable->type.AsTypeReference().value;
-                result.resolvesTo.isConst = result.data.variable->isConst;
+                LinxcVar* localVar = (*asLocalVar);
+                if (localVar->memberOf != NULL)
+                {
+                    //at this point, we insert the this-> into the ast if it is missing
+                    //this is because all member variables need the this-> reference when transpiling to C
+                    //since C does not have struct-scoped functions and thus relies on passing the
+                    //struct to be operated on as a variable called 'this'
+                    LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
+                    LinxcExpression thisExpr;
+                    thisExpr.resolvesTo.isConst = thisVar->isConst;
+                    thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
+                    thisExpr.ID = LinxcExpr_Variable;
+                    thisExpr.data.variable = thisVar;
+
+                    LinxcExpression varExpr;
+                    varExpr.ID = LinxcExpr_Variable;
+                    varExpr.data.variable = localVar;
+                    varExpr.resolvesTo = localVar->type.AsTypeReference().value;
+                    varExpr.resolvesTo.isConst = localVar->isConst;
+
+                    result.ID = LinxcExpr_OperatorCall;
+                    LinxcOperator* thisDereference = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
+                    thisDereference->leftExpr = thisExpr;
+                    thisDereference->operatorType = Linxc_Arrow;
+                    thisDereference ->rightExpr = varExpr;
+                    result.data.operatorCall = thisDereference;
+                    result.resolvesTo = localVar->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = localVar->isConst;
+                }
+                else
+                {
+                    result.ID = LinxcExpr_Variable;
+                    //this SHOULD point to the location of the var stored in the AST
+                    result.data.variable = *asLocalVar;
+                    result.resolvesTo = result.data.variable->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = result.data.variable->isConst;
+                }
             }
             else
             {
@@ -1345,6 +1391,7 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
             }
             string varName = varNameToken.ToString(this->allocator);
             LinxcVar var = LinxcVar(varName, typeExpression, option<LinxcExpression>());
+            //dont set memberOf as we are function argument, not type field
             var.isConst = typeExpression.resolvesTo.isConst;
             *necessaryArguments = *necessaryArguments + 1;
 
@@ -1755,6 +1802,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             //in a struct
                             if (state->parentType != NULL)
                             {
+                                varDecl.memberOf = state->parentType;
                                 state->parentType->variables.Add(varDecl);
                                 ptr = state->parentType->variables.Get(state->parentType->variables.count - 1);
                             }
@@ -1845,7 +1893,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             nextState.varsInScope.Add(args.data[i].name, &args.data[i]);
                         }
 
-                        LinxcVar *thisVar;
+                        LinxcVar* thisVar;
 
                         if (state->parentType != NULL)
                         {
@@ -1855,6 +1903,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             thisVar->name = this->thisKeyword;
                             thisVar->type = state->parentType->AsExpression();
                             thisVar->type.data.typeRef.pointerCount += 1;
+                            thisVar->memberOf = NULL;
                             nextState.varsInScope.Add(this->thisKeyword, thisVar);
 
                             for (usize i = 0; i < state->parentType->variables.count; i++)
@@ -1908,6 +1957,89 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             {
                 toBreak = true;
                 break;
+            }
+        }
+        break;
+        case Linxc_Keyword_if:
+        {
+            if (isComment)
+            {
+                continue;
+            }
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare an if statement const"));
+                nextIsConst = false;
+            }
+            LinxcToken hopefullyParen = state->tokenizer->NextUntilValid();
+            if (hopefullyParen.ID != Linxc_LParen)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected opening ( after if statement"));
+            }
+            LinxcExpression ifCondition;
+            ifCondition.resolvesTo.lastType = NULL;
+
+            option<LinxcExpression> primaryOpt = this->ParseExpressionPrimary(state);
+            if (primaryOpt.present)
+            {
+                ifCondition = this->ParseExpression(state, primaryOpt.value, -1);
+                if (ifCondition.resolvesTo.lastType == NULL || ifCondition.resolvesTo.lastType->name != "bool")
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expression within the if statement should resolve to a boolean"));
+                }
+
+            }
+            hopefullyParen = state->tokenizer->NextUntilValid();
+            if (hopefullyParen.ID != Linxc_RParen)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected closing ) after the expression in an if statement"));
+            }
+
+            if (state->tokenizer->PeekNextUntilValid().ID == Linxc_LBrace)
+            {
+                state->tokenizer->NextUntilValid();
+                LinxcEndOn originalEndOn = state->endOn;
+                state->endOn = LinxcEndOn_RBrace;
+                option<collections::vector<LinxcStatement>> ifStatementResult = this->ParseCompoundStmt(state);
+                
+                if (ifStatementResult.present && primaryOpt.present)
+                {
+                    LinxcIfStatement ifStatement;
+                    ifStatement.result = ifStatementResult.value;
+                    ifStatement.condition = ifCondition;
+
+                    LinxcStatement stmt;
+                    stmt.data.ifStatement = ifStatement;
+                    stmt.ID = LinxcStmt_If;
+
+                    result.Add(stmt);
+                }
+                
+                state->endOn = originalEndOn;
+            }
+            else
+            {
+                //todo
+                LinxcEndOn originalEndOn = state->endOn;
+                state->endOn = LinxcEndOn_Semicolon;
+                option<collections::vector<LinxcStatement>> stmt = ParseCompoundStmt(state);
+
+                if (stmt.present)
+                {
+                    //check
+                    //note: this is not an error of the compiler as doing if (condition) ; will throw this error, it is 100% the user's fault
+                    if (stmt.value.count == 1)
+                    {
+                        result.Add(stmt.value.ptr[0]);
+                        stmt.value.deinit();
+                    }
+                    else
+                    {
+                        errors->Add(ERR_MSG(this->allocator, "Expected something after if statement"));
+                    }
+                }
+
+                state->endOn = originalEndOn;
             }
         }
         break;
@@ -2026,8 +2158,16 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
             fprintf(fs, "\n{\n");
             for (usize j = 0; j < func->body.count; j++)
             {
-                this->TranspileStatementC(fs, func->body.Get(j));
-                fprintf(fs, ";\n");
+                LinxcStatement* stmt = func->body.Get(j);
+                this->TranspileStatementC(fs, stmt);
+                if (stmt->ID != LinxcStmt_If)
+                {
+                    fprintf(fs, ";\n");
+                }
+                else
+                {
+                    fprintf(fs, "\n");
+                }
             }
             fprintf(fs, "}\n");
         }
@@ -2133,7 +2273,7 @@ void LinxcParser::TranspileFunc(FILE *fs, LinxcFunc* func)
 
     fprintf(fs, ")");
 }
-void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr)
+void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority)
 {
     switch (expr->ID)
     {
@@ -2146,13 +2286,14 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr)
     break;
     case LinxcExpr_Variable:
     {
+        //fprintf(fs, "this->");
         fprintf(fs, "%s", expr->data.variable->name.buffer);
     }
     break;
     case LinxcExpr_Modified:
     {
         fprintf(fs, "%s", LinxcTokenIDToString(expr->data.modifiedExpression->modification));
-        this->TranspileExpr(fs, &expr->data.modifiedExpression->expression);
+        this->TranspileExpr(fs, &expr->data.modifiedExpression->expression, false);
     }
     break;
     case LinxcExpr_FuncCall:
@@ -2162,7 +2303,7 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr)
         name.deinit();
         for (usize i = 0; i < expr->data.functionCall.inputParams.length; i++)
         {
-            this->TranspileExpr(fs, &expr->data.functionCall.inputParams.data[i]);
+            this->TranspileExpr(fs, &expr->data.functionCall.inputParams.data[i], false);
             if (i < expr->data.functionCall.inputParams.length - 1)
             {
                 fprintf(fs, ", ");
@@ -2188,26 +2329,44 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr)
         //variables/functions/types contained in a using'd namespace would be improperly transpiled
         if (expr->data.operatorCall->operatorType == Linxc_ColonColon)
         {
-            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr);
+            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, false);
         }
         else
         {
             //todo: Convert custom operators to functions
             LinxcTokenID opType = expr->data.operatorCall->operatorType;
-            bool writePriority = opType != Linxc_ColonColon && opType != Linxc_Arrow && opType != Linxc_Period && opType != Linxc_Equal;
+
+            bool writePriorityForNext = true;
+                switch (opType)
+                {
+                case Linxc_ColonColon:
+                case Linxc_Arrow:
+                case Linxc_Period:
+                case Linxc_Equal:
+                    /*case Linxc_EqualEqual:
+                    case Linxc_AngleBracketRight:
+                    case Linxc_AngleBracketLeft:
+                    case Linxc_AngleBracketRightEqual:
+                    case Linxc_AngleBracketLeftEqual:*/
+                    writePriorityForNext = false;
+                    break;
+                default:
+                    break;
+                }
+
             if (writePriority)
             {
                 fprintf(fs, "(");
             }
-            this->TranspileExpr(fs, &expr->data.operatorCall->leftExpr);
+            this->TranspileExpr(fs, &expr->data.operatorCall->leftExpr, writePriorityForNext);
             //if not ::, ->, ., yes space
             if (opType != Linxc_ColonColon && opType != Linxc_Arrow && opType != Linxc_Period)
             {
                 fprintf(fs, " %s ", LinxcTokenIDToString(expr->data.operatorCall->operatorType));
-            }
-            //no space
+            }//no space
             else fprintf(fs, "%s", LinxcTokenIDToString(expr->data.operatorCall->operatorType));
-            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr);
+            
+            this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, writePriorityForNext);
             if (writePriority)
             {
                 fprintf(fs, ")");
@@ -2233,7 +2392,7 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
     if (var->defaultValue.present)
     {
         fprintf(fs, " = "); //temp
-        this->TranspileExpr(fs, &var->defaultValue.value);
+        this->TranspileExpr(fs, &var->defaultValue.value, false);
     }
     //else fprintf(fs, ";\n");
 }
@@ -2241,15 +2400,35 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
 {
     if (stmt->ID == LinxcStmt_Expr)
     {
-        this->TranspileExpr(fs, &stmt->data.expression);
+        this->TranspileExpr(fs, &stmt->data.expression, false);
     }
     else if (stmt->ID == LinxcStmt_Return)
     {
         fprintf(fs, "return ");
-        this->TranspileExpr(fs, &stmt->data.returnStatement);
+        this->TranspileExpr(fs, &stmt->data.returnStatement, false);
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
         this->TranspileVar(fs, stmt->data.varDeclaration);
+    }
+    else if (stmt->ID == LinxcStmt_If)
+    {
+        fprintf(fs, "if (");
+        this->TranspileExpr(fs, &stmt->data.ifStatement.condition, false);
+        fprintf(fs, ")\n{\n");
+        for (usize i = 0; i < stmt->data.ifStatement.result.count; i++)
+        {
+            LinxcStatement* resultStmt = stmt->data.ifStatement.result.Get(i);
+            this->TranspileStatementC(fs, resultStmt);
+            if (resultStmt->ID != LinxcStmt_If)
+            {
+                fprintf(fs, ";\n");
+            }
+            else
+            {
+                fprintf(fs, "\n");
+            }
+        }
+        fprintf(fs, "}");
     }
 }

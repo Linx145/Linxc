@@ -212,7 +212,7 @@ struct LinxcParser
     void TranspileStatementH(FILE* fs, LinxcStatement* stmt);
     void TranspileFunc(FILE* fs, LinxcFunc* func);
     void TranspileVar(FILE* fs, LinxcVar* var);
-    void TranspileExpr(FILE* fs, LinxcExpression* expr);
+    void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority);
     void TranspileStatementC(FILE* fs, LinxcStatement* stmt);
 };
 

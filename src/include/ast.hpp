@@ -184,6 +184,7 @@ struct LinxcVar
     LinxcExpression type;
     string name;
     option<LinxcExpression> defaultValue;
+    LinxcType* memberOf;
     bool isConst;
 
     LinxcVar();
@@ -274,6 +275,12 @@ struct LinxcIncludeStatement
     LinxcIncludeStatement();
 };
 
+struct LinxcIfStatement
+{
+    LinxcExpression condition;
+    collections::vector<LinxcStatement> result;
+};
+
 enum LinxcStatementID
 {
     LinxcStmt_Include,
@@ -282,8 +289,8 @@ enum LinxcStatementID
     LinxcStmt_TypeDecl,
     LinxcStmt_VarDecl,
     LinxcStmt_FuncDecl,
-    //LinxcStmt_TempVarDecl,
-    LinxcStmt_Namespace
+    LinxcStmt_Namespace,
+    LinxcStmt_If
 };
 union LinxcStatementData
 {
@@ -295,6 +302,7 @@ union LinxcStatementData
     LinxcFunc *funcDeclaration;
     //LinxcVar tempVarDeclaration;
     LinxcNamespaceScope namespaceScope;
+    LinxcIfStatement ifStatement;
 
     LinxcStatementData();
 };

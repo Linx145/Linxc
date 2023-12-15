@@ -113,6 +113,27 @@ option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
     key.otherType = this->rightExpr.resolvesTo;
     key.op = this->operatorType;
 
+    //op= operators dont exist and cannot be overriden, 
+    //we instead check for their presence with the op itself, which can be overriden and whose
+    //effects would apply to the op= operator
+    switch (this->operatorType)
+    {
+    case Linxc_PlusEqual:
+        key.op = Linxc_Plus;
+        break;
+    case Linxc_MinusEqual:
+        key.op = Linxc_MinusEqual;
+        break;
+    case Linxc_AsteriskEqual:
+        key.op = Linxc_Asterisk;
+        break;
+    case Linxc_SlashEqual:
+        key.op = Linxc_Slash;
+        break;
+    default:
+        break;
+    }
+
     result = this->leftExpr.resolvesTo.lastType->operatorOverloads.Get(key);
     if (result != NULL)
     {
@@ -325,6 +346,7 @@ LinxcVar::LinxcVar()
     this->name = string();
     this->type = LinxcExpression();
     this->defaultValue = option<LinxcExpression>();
+    this->memberOf = NULL;
 }
 LinxcVar::LinxcVar(string varName, LinxcExpression varType, option<LinxcExpression> defaultVal)
 {
@@ -332,6 +354,7 @@ LinxcVar::LinxcVar(string varName, LinxcExpression varType, option<LinxcExpressi
     this->name = varName;
     this->type = varType;
     this->defaultValue = defaultVal;
+    this->memberOf = NULL;
 }
 string LinxcVar::ToString(IAllocator *allocator)
 {

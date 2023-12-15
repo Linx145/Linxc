@@ -10,7 +10,10 @@ namespace MyNamespace
 
         void DoStuff(i32 amount, float mult)
         {
-            this->B = (this->A + amount) * mult;
+            if (amount > 5 || mult < 2.5f)
+            {
+                B += amount * mult;
+            }
         }
     };
     MyStruct NewStructure()
