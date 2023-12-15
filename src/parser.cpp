@@ -1998,9 +1998,13 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             if (state->tokenizer->PeekNextUntilValid().ID == Linxc_LBrace)
             {
                 state->tokenizer->NextUntilValid();
-                LinxcEndOn originalEndOn = state->endOn;
-                state->endOn = LinxcEndOn_RBrace;
-                option<collections::vector<LinxcStatement>> ifStatementResult = this->ParseCompoundStmt(state);
+
+                //need a new state as it is a new scope
+                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, false);
+                nextState.currentFunction = state->currentFunction;
+                nextState.varsInScope = state->varsInScope.Clone(&defaultAllocator);
+
+                option<collections::vector<LinxcStatement>> ifStatementResult = this->ParseCompoundStmt(&nextState);
                 
                 if (ifStatementResult.present && primaryOpt.present)
                 {
@@ -2014,24 +2018,86 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                     result.Add(stmt);
                 }
-                
-                state->endOn = originalEndOn;
+               
+                nextState.deinit();
+
+                if (state->tokenizer->PeekNextUntilValid().ID == Linxc_Keyword_else)
+                {
+                    state->tokenizer->NextUntilValid();
+                    //parse else statement
+                    
+                    if (state->tokenizer->PeekNextUntilValid().ID == Linxc_LBrace)
+                    {
+                        state->tokenizer->NextUntilValid();
+
+                        nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, false);
+                        nextState.currentFunction = state->currentFunction;
+                        nextState.varsInScope = state->varsInScope.Clone(&defaultAllocator);
+
+                        option<collections::vector<LinxcStatement>> elseStatementResult = this->ParseCompoundStmt(&nextState);
+                    
+                        if (elseStatementResult.present)
+                        {
+                            //elseStatementResult.value;
+                            LinxcStatement stmt;
+                            stmt.data.elseStatement = elseStatementResult.value;
+                            stmt.ID = LinxcStmt_Else;
+
+                            result.Add(stmt);
+                        }
+
+                        nextState.deinit();
+                    }
+                    else
+                    {
+                        nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_SingleStatement, false, false);
+                        nextState.currentFunction = state->currentFunction;
+                        nextState.varsInScope = state->varsInScope.Clone(&defaultAllocator);
+
+                        option<collections::vector<LinxcStatement>> elseStatementResult = this->ParseCompoundStmt(&nextState);
+
+                        if (elseStatementResult.present)
+                        {
+                            if (elseStatementResult.value.count == 1)
+                            {
+                                LinxcStatement stmt;
+                                stmt.data.elseStatement = elseStatementResult.value;
+                                stmt.ID = LinxcStmt_Else;
+
+                                result.Add(stmt);
+                            }
+                            else
+                            {
+                                errors->Add(ERR_MSG(this->allocator, "Expected something after else statement"));
+                            }
+                            //elseStatementResult.value;
+
+                        }
+
+                        nextState.deinit();
+                    }
+                }
             }
             else
             {
-                //todo
-                LinxcEndOn originalEndOn = state->endOn;
-                state->endOn = LinxcEndOn_Semicolon;
-                option<collections::vector<LinxcStatement>> stmt = ParseCompoundStmt(state);
+                LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_SingleStatement, false, false);
+                nextState.currentFunction = state->currentFunction;
+                nextState.varsInScope = state->varsInScope.Clone(&defaultAllocator);
 
-                if (stmt.present)
+                option<collections::vector<LinxcStatement>> ifStatementResult = ParseCompoundStmt(&nextState);
+
+                if (ifStatementResult.present)
                 {
                     //check
                     //note: this is not an error of the compiler as doing if (condition) ; will throw this error, it is 100% the user's fault
-                    if (stmt.value.count == 1)
+                    if (ifStatementResult.value.count == 1)
                     {
-                        result.Add(stmt.value.ptr[0]);
-                        stmt.value.deinit();
+                        LinxcStatement stmt;
+                        stmt.ID = LinxcStmt_If;
+                        stmt.data.ifStatement.condition = ifCondition;
+                        stmt.data.ifStatement.result = ifStatementResult.value;
+
+                        result.Add(stmt);
                     }
                     else
                     {
@@ -2039,7 +2105,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     }
                 }
 
-                state->endOn = originalEndOn;
+                nextState.deinit();
             }
         }
         break;
@@ -2124,7 +2190,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         default:
             break;
         }
-        if (toBreak)
+        if (toBreak || (result.count >= 1 && state->endOn == LinxcEndOn_SingleStatement))
         {
             break;
         }
@@ -2156,19 +2222,7 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
             LinxcFunc* func = parsedFile->definedFuncs.ptr[i];
             this->TranspileFunc(fs, func);
             fprintf(fs, "\n{\n");
-            for (usize j = 0; j < func->body.count; j++)
-            {
-                LinxcStatement* stmt = func->body.Get(j);
-                this->TranspileStatementC(fs, stmt);
-                if (stmt->ID != LinxcStmt_If)
-                {
-                    fprintf(fs, ";\n");
-                }
-                else
-                {
-                    fprintf(fs, "\n");
-                }
-            }
+            this->TranspileCompoundStmtC(fs, func->body);
             fprintf(fs, "}\n");
         }
         fclose(fs);
@@ -2296,6 +2350,14 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
         this->TranspileExpr(fs, &expr->data.modifiedExpression->expression, false);
     }
     break;
+    case LinxcExpr_TypeCast:
+    {
+        string typeString = expr->data.typeCast->castToType.AsTypeReference().value.GetCName(&defaultAllocator);
+        fprintf(fs, "(%s)", typeString.buffer);
+        typeString.deinit();
+        this->TranspileExpr(fs, &expr->data.typeCast->expressionToCast, false);
+    }
+    break;
     case LinxcExpr_FuncCall:
     {
         string name = expr->data.functionCall.func->GetCName(&defaultAllocator);
@@ -2396,6 +2458,22 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
     }
     //else fprintf(fs, ";\n");
 }
+void LinxcParser::TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts)
+{
+    for (usize i = 0; i < stmts.count; i++)
+    {
+        LinxcStatement* resultStmt = stmts.Get(i);
+        this->TranspileStatementC(fs, resultStmt);
+        if (resultStmt->ID != LinxcStmt_If)
+        {
+            fprintf(fs, ";\n");
+        }
+        else
+        {
+            fprintf(fs, "\n");
+        }
+    }
+}
 void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
 {
     if (stmt->ID == LinxcStmt_Expr)
@@ -2416,19 +2494,23 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
         fprintf(fs, "if (");
         this->TranspileExpr(fs, &stmt->data.ifStatement.condition, false);
         fprintf(fs, ")\n{\n");
-        for (usize i = 0; i < stmt->data.ifStatement.result.count; i++)
-        {
-            LinxcStatement* resultStmt = stmt->data.ifStatement.result.Get(i);
-            this->TranspileStatementC(fs, resultStmt);
-            if (resultStmt->ID != LinxcStmt_If)
-            {
-                fprintf(fs, ";\n");
-            }
-            else
-            {
-                fprintf(fs, "\n");
-            }
-        }
+        this->TranspileCompoundStmtC(fs, stmt->data.ifStatement.result);
         fprintf(fs, "}");
+    }
+    else if (stmt->ID == LinxcStmt_Else)
+    {
+        fprintf(fs, "else");
+        if (stmt->data.elseStatement.count > 1)
+        {
+            fprintf(fs, "\n{\n");
+            this->TranspileCompoundStmtC(fs, stmt->data.elseStatement);
+            fprintf(fs, "}");
+        }
+        else
+        {
+            fprintf(fs, "\n");
+            this->TranspileStatementC(fs, stmt->data.elseStatement.Get(0));
+            //this->TranspileCompoundStmtC(fs, stmt->data.elseStatement);
+        }
     }
 }

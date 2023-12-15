@@ -223,5 +223,23 @@ namespace collections
             }
             return false;
         }
+
+        hashmap<K, V> Clone(IAllocator *newAllocator)
+        {
+            hashmap<K, V> result = hashmap<K, V>(newAllocator, this->hashFunc, this->eqlFunc);
+
+            for (usize i = 0; i < bucketsCount; i++)
+            {
+                if (buckets[i].initialized)
+                {
+                    for (usize j = 0; j < buckets[i].entries.count; j++)
+                    {
+                        result.Add(buckets[i].entries.Get(j)->key, buckets[i].entries.Get(j)->value);
+                    }
+                }
+            }
+
+            return result;
+        }
     };
 }

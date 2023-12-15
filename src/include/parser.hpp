@@ -18,7 +18,8 @@ enum LinxcEndOn
     LinxcEndOn_Semicolon,
     LinxcEndOn_RBrace,
     LinxcEndOn_Endif,
-    LinxcEndOn_Eof
+    LinxcEndOn_Eof,
+    LinxcEndOn_SingleStatement
 };
 
 enum LinxcParseTypeState
@@ -214,6 +215,7 @@ struct LinxcParser
     void TranspileVar(FILE* fs, LinxcVar* var);
     void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority);
     void TranspileStatementC(FILE* fs, LinxcStatement* stmt);
+    void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts);
 };
 
 #endif

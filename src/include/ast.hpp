@@ -290,7 +290,8 @@ enum LinxcStatementID
     LinxcStmt_VarDecl,
     LinxcStmt_FuncDecl,
     LinxcStmt_Namespace,
-    LinxcStmt_If
+    LinxcStmt_If,
+    LinxcStmt_Else
 };
 union LinxcStatementData
 {
@@ -303,6 +304,7 @@ union LinxcStatementData
     //LinxcVar tempVarDeclaration;
     LinxcNamespaceScope namespaceScope;
     LinxcIfStatement ifStatement;
+    collections::vector<LinxcStatement> elseStatement;
 
     LinxcStatementData();
 };
