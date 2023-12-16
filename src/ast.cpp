@@ -283,6 +283,17 @@ string LinxcType::GetCName(IAllocator* allocator)
 {
     string result = string(&defaultAllocator);
 
+    LinxcType* currentParentType = this->parentType;
+    while (currentParentType != NULL)
+    {
+        if (currentParentType->name.buffer != NULL)
+        {
+            result.Prepend("_");
+            result.Prepend(currentParentType->name.buffer);
+        }
+        currentParentType = currentParentType->parentType;
+    }
+
     LinxcNamespace* currentNamespace = this->typeNamespace;
     while (currentNamespace != NULL)
     {
@@ -394,14 +405,16 @@ string LinxcFunc::GetCName(IAllocator *allocator)
         result.Prepend(typeCName.buffer);
         typeCName.deinit();
     }
-
-    /*LinxcNamespace* currentNamespace = this->funcNamespace;
-    while (currentNamespace != NULL && currentNamespace->name.buffer != NULL)
+    else
     {
-        result.Prepend("_");
-        result.Prepend(currentNamespace->name.buffer);
-        currentNamespace = currentNamespace->parentNamespace;
-    }*/
+        LinxcNamespace* currentNamespace = this->funcNamespace;
+        while (currentNamespace != NULL && currentNamespace->name.buffer != NULL)
+        {
+            result.Prepend("_");
+            result.Prepend(currentNamespace->name.buffer);
+            currentNamespace = currentNamespace->parentNamespace;
+        }
+    }
     result.Append(this->name.buffer);
 
     return result.CloneDeinit(allocator);
@@ -476,11 +489,17 @@ string LinxcExpression::ToString(IAllocator *allocator)
             return result.CloneDeinit(allocator);
         }
         case LinxcExpr_FuncCall:
+        {
             return this->data.functionCall.ToString(allocator);
+        }
         case LinxcExpr_FunctionRef:
+        {
             return string(allocator, this->data.functionRef->name.buffer);
+        }
         case LinxcExpr_Literal:
+        {
             return string(allocator, this->data.literal.buffer);
+        }
         case LinxcExpr_Modified:
         {
             string result = string(&defaultAllocator);

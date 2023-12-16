@@ -26,6 +26,7 @@ struct LinxcFunctionCall
 {
     LinxcFunc *func;
     collections::Array<LinxcExpression> inputParams;
+    LinxcExpression* thisAsParam;
     collections::Array<LinxcTypeReference> templateSpecializations;
 
     string ToString(IAllocator *allocator);
@@ -145,6 +146,7 @@ struct LinxcExpression
     LinxcExpressionID ID;
     //what this expression returns. Can be any primitive type, void, or NULL (which is what variable type name expressions resolve to)
     LinxcTypeReference resolvesTo;
+    bool priority;
 
     string ToString(IAllocator *allocator);
     //In the case that ID is a LinxcTypeReference or operator that eventually resolves to one,

@@ -97,7 +97,15 @@ LinxcParser::LinxcParser(IAllocator *allocator)
         LinxcOperatorFunc operatorSet = NewDefaultOperator(primitiveTypePtrs, i, i, Linxc_Equal);
         primitiveTypePtrs[i]->operatorOverloads.Add(operatorSet.operatorOverride, operatorSet);
 
-        for (i32 j = 0; j < numNumericTypes; j++)
+        //int + float = not possible
+        //float + int = possible
+        i32 iterateUntil = numNumericTypes;
+        if (i < numIntegerTypes)
+        {
+            iterateUntil = numIntegerTypes;
+        }
+
+        for (i32 j = 0; j < iterateUntil; j++)
         {
             LinxcOperatorImpl opposite;
             opposite.implicit = false;
@@ -183,11 +191,11 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "false"), Linxc_Keyword_false);
     nameToToken.Add(string(nameToToken.allocator, "float"), Linxc_Keyword_float);
     nameToToken.Add(string(nameToToken.allocator, "for"), Linxc_Keyword_for);
-    nameToToken.Add(string(nameToToken.allocator, "goto"), Linxc_Keyword_goto);
+    //nameToToken.Add(string(nameToToken.allocator, "goto"), Linxc_Keyword_goto);
+    nameToToken.Add(string(nameToToken.allocator, "i8"), Linxc_Keyword_i8);
     nameToToken.Add(string(nameToToken.allocator, "i16"), Linxc_Keyword_i16);
     nameToToken.Add(string(nameToToken.allocator, "i32"), Linxc_Keyword_i32);
     nameToToken.Add(string(nameToToken.allocator, "i64"), Linxc_Keyword_i64);
-    nameToToken.Add(string(nameToToken.allocator, "i8"), Linxc_Keyword_i8);
     nameToToken.Add(string(nameToToken.allocator, "if"), Linxc_Keyword_if);
     nameToToken.Add(string(nameToToken.allocator, "ifdef"), Linxc_Keyword_ifdef);
     nameToToken.Add(string(nameToToken.allocator, "ifndef"), Linxc_Keyword_ifndef);
@@ -210,19 +218,19 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "struct"), Linxc_Keyword_struct);
     nameToToken.Add(string(nameToToken.allocator, "switch"), Linxc_Keyword_switch);
     nameToToken.Add(string(nameToToken.allocator, "template"), Linxc_Keyword_template);
-    nameToToken.Add(string(nameToToken.allocator, "thread_local"), Linxc_Keyword_thread_local);
-    nameToToken.Add(string(nameToToken.allocator, "trait"), Linxc_Keyword_trait);
+    //nameToToken.Add(string(nameToToken.allocator, "thread_local"), Linxc_Keyword_thread_local);
+    //nameToToken.Add(string(nameToToken.allocator, "trait"), Linxc_Keyword_trait);
     nameToToken.Add(string(nameToToken.allocator, "true"), Linxc_Keyword_true);
     nameToToken.Add(string(nameToToken.allocator, "typedef"), Linxc_Keyword_typedef);
     nameToToken.Add(string(nameToToken.allocator, "typename"), Linxc_Keyword_typename);
     nameToToken.Add(string(nameToToken.allocator, "typeof"), Linxc_Keyword_typeof);
+    nameToToken.Add(string(nameToToken.allocator, "u8"), Linxc_Keyword_u8);
     nameToToken.Add(string(nameToToken.allocator, "u16"), Linxc_Keyword_u16);
     nameToToken.Add(string(nameToToken.allocator, "u32"), Linxc_Keyword_u32);
     nameToToken.Add(string(nameToToken.allocator, "u64"), Linxc_Keyword_u64);
-    nameToToken.Add(string(nameToToken.allocator, "u8"), Linxc_Keyword_u8);
     nameToToken.Add(string(nameToToken.allocator, "union"), Linxc_Keyword_union);
     nameToToken.Add(string(nameToToken.allocator, "void"), Linxc_Keyword_void);
-    nameToToken.Add(string(nameToToken.allocator, "volatile"), Linxc_Keyword_volatile);
+    //nameToToken.Add(string(nameToToken.allocator, "volatile"), Linxc_Keyword_volatile);
     nameToToken.Add(string(nameToToken.allocator, "while"), Linxc_Keyword_while);
     nameToToken.Add(string(nameToToken.allocator, "attribute"), Linxc_keyword_attribute);
 }
@@ -326,6 +334,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultCast(LinxcType** primitiveTypePtrs, i32
     returnType.resolvesTo.lastType = NULL;
     returnType.data.typeRef = toType;
     returnType.ID = LinxcExpr_TypeRef; //what we're casting into
+    returnType.priority = false;
     LinxcFunc castFunc = LinxcFunc(string(), returnType); //these functions don't need names
     
     //cast functions don't have arguments, eg: (float)integer has no argument
@@ -400,6 +409,7 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     LinxcExpression returnTypeExpr;
     returnTypeExpr.resolvesTo.lastType = NULL;
     returnTypeExpr.data.typeRef = returnType;
+    returnTypeExpr.priority = false;
     returnTypeExpr.ID = LinxcExpr_TypeRef; //what we're returning after the operation
 
     LinxcFunc opFunc = LinxcFunc(string(), returnTypeExpr); //these functions don't need names
@@ -793,6 +803,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         typeCast->expressionToCast = nextExpression;
 
                         LinxcExpression result;
+                        result.priority = false;
                         result.data.typeCast = typeCast;//expression.ToHeap(this->allocator);
                         result.ID = LinxcExpr_TypeCast;
                         result.resolvesTo = expression.AsTypeReference().value;
@@ -800,6 +811,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     }
                     else //If not, it's a nested expression
                     {
+                        expression.priority = true;
                         return option<LinxcExpression>(expression);
                     }
                 }
@@ -817,7 +829,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 //we have to handle it here as a primary expression
                 if (!result.present)
                 {
-                    ERR_MSG msg = ERR_MSG(this->allocator, "No type or variable of name ");
+                    ERR_MSG msg = ERR_MSG(this->allocator, "No type, function or variable of name ");
                     msg.AppendDeinit(token.ToString(&defaultAllocator));
                     msg.Append(" exists");
                     if (prevScopeIfAny.present)
@@ -935,7 +947,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         return option<LinxcExpression>(result);
                     }
                 }
-                return result;
+                return option<LinxcExpression>(result);
             }
             break;
         case Linxc_CharLiteral:
@@ -946,6 +958,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
         case Linxc_Keyword_false:
             {
                 LinxcExpression result;
+                result.priority = false;
                 result.data.literal = token.ToString(this->allocator);
                 result.ID = LinxcExpr_Literal;
 
@@ -1066,6 +1079,7 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
 option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride)
 {
     LinxcExpression result;
+    result.priority = false;
     result.ID = LinxcExpr_None;
     LinxcToken token = state->tokenizer->NextUntilValid();
     string identifierName = token.ToString(&defaultAllocator);
@@ -1108,12 +1122,14 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                     //struct to be operated on as a variable called 'this'
                     LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
                     LinxcExpression thisExpr;
+                    thisExpr.priority = false;
                     thisExpr.resolvesTo.isConst = thisVar->isConst;
                     thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
                     thisExpr.ID = LinxcExpr_Variable;
                     thisExpr.data.variable = thisVar;
 
                     LinxcExpression varExpr;
+                    varExpr.priority = false;
                     varExpr.ID = LinxcExpr_Variable;
                     varExpr.data.variable = localVar;
                     varExpr.resolvesTo = localVar->type.AsTypeReference().value;
@@ -1256,12 +1272,16 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                 }
             }
         }
-        else if (parentScopeOverride.value.ID == LinxcExpr_TypeRef || parentScopeOverride.value.ID == LinxcExpr_Variable)
+        else if (parentScopeOverride.value.ID == LinxcExpr_TypeRef || parentScopeOverride.value.ID == LinxcExpr_Variable || parentScopeOverride.value.ID == LinxcExpr_FuncCall)
         {
             LinxcType* toCheck;
             if (parentScopeOverride.value.ID == LinxcExpr_Variable)
             {
                 toCheck = parentScopeOverride.value.data.variable->type.AsTypeReference().value.lastType;
+            }
+            else if (parentScopeOverride.value.ID == LinxcExpr_FuncCall)
+            {
+                toCheck = parentScopeOverride.value.data.functionCall.func->returnType.AsTypeReference().value.lastType;
             }
             else
             {
@@ -2267,22 +2287,7 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
     }
     else if (stmt->ID == LinxcStmt_TypeDecl)
     {
-        fprintf(fs, "typedef struct {\n");
-        string typeName = stmt->data.typeDeclaration->GetCName(&defaultAllocator);
-        for (usize i = 0; i < stmt->data.typeDeclaration->variables.count; i++)
-        {
-            fprintf(fs, "   ");
-            this->TranspileVar(fs, stmt->data.typeDeclaration->variables.Get(i));
-            fprintf(fs, ";\n");
-        }
-        fprintf(fs, "} %s;\n", typeName.buffer);
-        typeName.deinit();
-
-        for (usize i = 0; i < stmt->data.typeDeclaration->functions.count; i++)
-        {
-            this->TranspileFunc(fs, stmt->data.typeDeclaration->functions.Get(i));
-            fprintf(fs, ";\n");
-        }
+        TranspileTypeH(fs, stmt->data.typeDeclaration);
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
@@ -2291,6 +2296,31 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
     else if (stmt->ID == LinxcStmt_FuncDecl)
     {
         this->TranspileFunc(fs, stmt->data.funcDeclaration);
+        fprintf(fs, ";\n");
+    }
+}
+void LinxcParser::TranspileTypeH(FILE* fs, LinxcType* type)
+{
+    //transpile subtypes first
+    for (usize i = 0; i < type->subTypes.count; i++)
+    {
+        TranspileTypeH(fs, type->subTypes.Get(i));
+    }
+
+    fprintf(fs, "typedef struct {\n");
+    string typeName = type->GetCName(&defaultAllocator);
+    for (usize i = 0; i < type->variables.count; i++)
+    {
+        fprintf(fs, "   ");
+        this->TranspileVar(fs, type->variables.Get(i));
+        fprintf(fs, ";\n");
+    }
+    fprintf(fs, "} %s;\n", typeName.buffer);
+    typeName.deinit();
+
+    for (usize i = 0; i < type->functions.count; i++)
+    {
+        this->TranspileFunc(fs, type->functions.Get(i));
         fprintf(fs, ";\n");
     }
 }
@@ -2363,6 +2393,14 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
         string name = expr->data.functionCall.func->GetCName(&defaultAllocator);
         fprintf(fs, "%s(", name.buffer);
         name.deinit();
+        if (expr->data.functionCall.thisAsParam != NULL)
+        {
+            this->TranspileExpr(fs, expr->data.functionCall.thisAsParam, false);
+            if (expr->data.functionCall.inputParams.length > 0)
+            {
+                fprintf(fs, ", ");
+            }
+        }
         for (usize i = 0; i < expr->data.functionCall.inputParams.length; i++)
         {
             this->TranspileExpr(fs, &expr->data.functionCall.inputParams.data[i], false);
@@ -2371,13 +2409,14 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
                 fprintf(fs, ", ");
             }
         }
-        fprintf(fs, "}");
+        fprintf(fs, ")");
         //expr->data.functionCall.func->
     }
+    break;
     case LinxcExpr_FunctionRef:
     {
         string name = expr->data.functionRef->GetCName(&defaultAllocator);
-        fprintf(fs, "%s(", name.buffer);
+        fprintf(fs, "%s", name.buffer);
         name.deinit();
     }
     break;
@@ -2416,7 +2455,7 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
                     break;
                 }
 
-            if (writePriority)
+            if (writePriority || expr->priority)
             {
                 fprintf(fs, "(");
             }
@@ -2429,7 +2468,7 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
             else fprintf(fs, "%s", LinxcTokenIDToString(expr->data.operatorCall->operatorType));
             
             this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, writePriorityForNext);
-            if (writePriority)
+            if (writePriority || expr->priority)
             {
                 fprintf(fs, ")");
             }
@@ -2454,9 +2493,91 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var)
     if (var->defaultValue.present)
     {
         fprintf(fs, " = "); //temp
-        this->TranspileExpr(fs, &var->defaultValue.value, false);
+        LinxcExpression* expr = &var->defaultValue.value;
+        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->TranspileExpr(fs, expr, false);
     }
     //else fprintf(fs, ";\n");
+}
+void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression* exprRoot, LinxcExpression* parent, LinxcExpression* grandParent)
+{
+    if (expr->ID == LinxcExpr_FuncCall && expr->data.functionCall.func->methodOf != NULL)
+    {
+        if (parent != NULL && parent->ID == LinxcExpr_OperatorCall && (parent->data.operatorCall->operatorType == Linxc_Period || parent->data.operatorCall->operatorType == Linxc_Arrow))
+        {
+            if (grandParent != NULL && grandParent->ID == LinxcExpr_OperatorCall && (grandParent->data.operatorCall->operatorType == Linxc_Period || grandParent->data.operatorCall->operatorType == Linxc_Arrow))
+            {
+                if (&parent->data.operatorCall->leftExpr == expr)
+                {
+                    //if grandParent is exprRoot
+                    if (grandParent == exprRoot)
+                    {
+                        printf("Parent becomes root\n");
+                        //parent becomes root
+                        //(left, due to precedence) sibling of parent becomes our first input
+                        //because sibling of parent would have lived in the exprRoot, which is now replaced by parent, we need to reallocate it
+                        LinxcExpression* siblingOfParentHeap = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
+                        *siblingOfParentHeap = grandParent->data.operatorCall->leftExpr;
+                        *exprRoot = *parent;
+                        expr->data.functionCall.thisAsParam = siblingOfParentHeap;
+                    }
+                    else
+                    {
+                        LinxcExpression* originalRootHeap = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
+                        *originalRootHeap = *exprRoot;
+                        *grandParent = grandParent->data.operatorCall->leftExpr;
+                        *exprRoot = *parent;
+                        expr->data.functionCall.thisAsParam = originalRootHeap;
+                    }
+                    
+                    //dont reference parent anymore as it now lives in exprRoot, can dispose parent actually
+                    //this->RotateFuncCallExpression(&expr->data.operatorCall->rightExpr, exprRoot, expr, parent);
+                }
+                else //we are right
+                {
+                    if (parent == grandParent)
+                    {
+                        //parent gets disposed of as we are now the root
+                        LinxcExpression* newInput = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
+                        *newInput = parent->data.operatorCall->leftExpr;
+                        //whatever was to the left of our parent becomes our input
+                        //we need to heap allocate the thing on the left now
+                        //since our parent is getting nuked, there would be no place for it to live on otherwise
+
+                        expr->data.functionCall.thisAsParam = newInput;
+                        *exprRoot = *expr;
+                    }
+                    else
+                    {
+                        //parent becomes sibling
+                        //root becomes param
+                        LinxcExpression* newInput = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
+                        *newInput = *exprRoot;
+                        grandParent->data.operatorCall->rightExpr = parent->data.operatorCall->leftExpr;
+                        expr->data.functionCall.thisAsParam = newInput;
+                        *exprRoot = *expr;
+                    }
+                    //nothing to rotate as we are at end of chain due to precedence parsing
+                }
+            }
+            //else this shouldnt be possible
+        }
+        else if (parent != NULL)
+        {
+            if (&parent->data.operatorCall->rightExpr == expr)
+            {
+                expr->data.functionCall.inputParams.data[0] = parent->data.operatorCall->leftExpr;
+            }
+            //else do nothing as function().A is correct
+        }
+        //else do nothing as we are a standalone function call = cannot possibly be member function
+    }
+    else if (expr->ID == LinxcExpr_OperatorCall)
+    {
+        this->RotateFuncCallExpression(&expr->data.operatorCall->leftExpr, exprRoot, expr, parent);
+        this->RotateFuncCallExpression(&expr->data.operatorCall->rightExpr, exprRoot, expr, parent);
+    }
+    //else leave the expression alone
 }
 void LinxcParser::TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts)
 {
@@ -2478,12 +2599,16 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
 {
     if (stmt->ID == LinxcStmt_Expr)
     {
-        this->TranspileExpr(fs, &stmt->data.expression, false);
+        LinxcExpression *expr = &stmt->data.expression;
+        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->TranspileExpr(fs, expr, false);
     }
     else if (stmt->ID == LinxcStmt_Return)
     {
         fprintf(fs, "return ");
-        this->TranspileExpr(fs, &stmt->data.returnStatement, false);
+        LinxcExpression *expr = &stmt->data.returnStatement;
+        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->TranspileExpr(fs, expr, false);
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
@@ -2492,7 +2617,9 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt)
     else if (stmt->ID == LinxcStmt_If)
     {
         fprintf(fs, "if (");
-        this->TranspileExpr(fs, &stmt->data.ifStatement.condition, false);
+        LinxcExpression *expr = &stmt->data.ifStatement.condition;
+        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->TranspileExpr(fs, expr, false);
         fprintf(fs, ")\n{\n");
         this->TranspileCompoundStmtC(fs, stmt->data.ifStatement.result);
         fprintf(fs, "}");
