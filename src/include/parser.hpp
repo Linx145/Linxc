@@ -217,7 +217,7 @@ struct LinxcParser
     void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority);
     void TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempIndex);
     void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts, i32* tempIndex);
-    void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression* exprRoot, LinxcExpression* parent, LinxcExpression* grandParent);
+    void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent);
     void SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotatedExpr, i32* tempIndex);
 };
 

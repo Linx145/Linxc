@@ -1,12 +1,11 @@
 #include <Linxc.h>
 
-namespace MyNamespace
-{
 struct structE
 {
-    void FunctionX()
+    structE FunctionX()
     {
-
+        structE result;
+        return result;
     }
 };
 struct structD
@@ -21,11 +20,11 @@ struct structC
         return result;
     }
 };
-}
 
 i32 Main()
 {
-    MyNamespace::structC C;
-    C.FunctionD(2).E.FunctionX();
+    structE instance;
+    instance.FunctionX().FunctionX().FunctionX().FunctionX().FunctionX();
+    //FunctionX()
     return 0;
 }

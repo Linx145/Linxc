@@ -427,10 +427,6 @@ LinxcOperatorFunc LinxcParser::NewDefaultOperator(LinxcType** primitiveTypePtrs,
     result.operatorOverride = operation;
     result.function = opFunc;
 
-    //string debug = result.ToString(&defaultAllocator);
-    //printf("%s\n", debug.buffer);
-    //debug.deinit();
-
     return result;
 }
 
@@ -2490,7 +2486,7 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex)
     if (var->memberOf == NULL && var->defaultValue.present)
     {
         LinxcExpression* expr = &var->defaultValue.value;
-        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->RotateFuncCallExpression(expr, &expr, NULL, NULL);
         this->SegregateFuncCallExpression(fs, expr, tempIndex);
     }
     if (var->isConst)
@@ -2509,8 +2505,9 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex)
     }
     //else fprintf(fs, ";\n");
 }
-void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression* exprRoot, LinxcExpression* parent, LinxcExpression* grandParent)
+void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent)
 {
+    LinxcExpression* exprRoot = *exprRootMutable;
     if (expr->ID == LinxcExpr_FuncCall && expr->data.functionCall.func->methodOf != NULL)
     {
         if (parent != NULL && parent->ID == LinxcExpr_OperatorCall && (parent->data.operatorCall->operatorType == Linxc_Period || parent->data.operatorCall->operatorType == Linxc_Arrow))
@@ -2536,15 +2533,18 @@ void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpressio
                         *originalRootHeap = *exprRoot;
                         *grandParent = grandParent->data.operatorCall->leftExpr;
                         *exprRoot = *parent;
+                        //since we set exprRoot to parent, we must change the address of exprRoot to become parent
+                        //if we want to check parent = exprRoot in the future
                         expr->data.functionCall.thisAsParam = originalRootHeap;
                     }
-                    
+                    *exprRootMutable = parent;
+
                     //dont reference parent anymore as it now lives in exprRoot, can dispose parent actually
                     //this->RotateFuncCallExpression(&expr->data.operatorCall->rightExpr, exprRoot, expr, parent);
                 }
                 else //we are right
                 {
-                    if (parent == grandParent)
+                    if (parent == exprRoot)
                     {
                         //parent gets disposed of as we are now the root
                         LinxcExpression* newInput = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
@@ -2573,6 +2573,7 @@ void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpressio
                     //nothing to rotate as we are at end of chain due to precedence parsing
                 }
             }
+            else printf("Invalid operation\n");
             //else this shouldnt be possible
         }
         else if (parent != NULL)
@@ -2587,8 +2588,8 @@ void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpressio
     }
     else if (expr->ID == LinxcExpr_OperatorCall)
     {
-        this->RotateFuncCallExpression(&expr->data.operatorCall->leftExpr, exprRoot, expr, parent);
-        this->RotateFuncCallExpression(&expr->data.operatorCall->rightExpr, exprRoot, expr, parent);
+        this->RotateFuncCallExpression(&expr->data.operatorCall->leftExpr, exprRootMutable, expr, parent);
+        this->RotateFuncCallExpression(&expr->data.operatorCall->rightExpr, exprRootMutable, expr, parent);
     }
     //else leave the expression alone
 }
@@ -2606,7 +2607,6 @@ void LinxcParser::SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotated
         if (rotatedExpr->data.functionCall.thisAsParam != NULL)
         {
             LinxcTypeReference thisType = rotatedExpr->data.functionCall.thisAsParam->resolvesTo;
-            printf("%s\n", thisType.GetCName(this->allocator).buffer);
             //cannot be more than 1
             //if functionA() returns A**, we cannot do functionA()->functionB() as pointer types have no methods
             if (thisType.pointerCount == 0)
@@ -2717,7 +2717,7 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempI
     if (stmt->ID == LinxcStmt_Expr)
     {
         LinxcExpression *expr = &stmt->data.expression;
-        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->RotateFuncCallExpression(expr, &expr, NULL, NULL);
         this->SegregateFuncCallExpression(fs, expr, tempIndex);
         
         this->TranspileExpr(fs, expr, false);
@@ -2726,7 +2726,7 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempI
     {
         fprintf(fs, "return ");
         LinxcExpression *expr = &stmt->data.returnStatement;
-        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->RotateFuncCallExpression(expr, &expr, NULL, NULL);
         this->TranspileExpr(fs, expr, false);
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
@@ -2737,7 +2737,7 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempI
     {
         fprintf(fs, "if (");
         LinxcExpression *expr = &stmt->data.ifStatement.condition;
-        this->RotateFuncCallExpression(expr, expr, NULL, NULL);
+        this->RotateFuncCallExpression(expr, &expr, NULL, NULL);
         this->TranspileExpr(fs, expr, false);
         fprintf(fs, ")\n{\n");
         this->TranspileCompoundStmtC(fs, stmt->data.ifStatement.result, tempIndex); //use same tempIndex
