@@ -23,8 +23,9 @@ struct structC
 
 i32 Main()
 {
-    structE instance;
-    instance.FunctionX().FunctionX().FunctionX().FunctionX().FunctionX();
+    structC C;
+    C.FunctionD(2);
+    //C.FunctionD(2).E.FunctionX();
     //FunctionX()
     return 0;
 }

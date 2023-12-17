@@ -19,7 +19,8 @@ project "Linxcc"
     kind "ConsoleApp"
     language "C++"
     targetdir "bin/linxcc/%{cfg.buildcfg}"
-    includedirs {"src/include", "src/linxcstd"}
+    includedirs {"src/include", "src/linxcstd", "src/libclang"}
+    links {"src/libclang/libclang"}
     location "src"
 
     files { "src/**.h", "src/**.c", "src/**.hpp", "src/**.cpp", "src/**.linxc" }

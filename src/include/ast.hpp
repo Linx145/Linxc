@@ -105,8 +105,6 @@ enum LinxcExpressionID
 {
     LinxcExpr_None,
     LinxcExpr_OperatorCall, 
-    LinxcExpr_IncrementVar, 
-    LinxcExpr_DecrementVar, 
     LinxcExpr_Literal,
     LinxcExpr_Variable,
     LinxcExpr_FunctionRef,
@@ -123,8 +121,6 @@ enum LinxcExpressionID
 union LinxcExpressionData
 {
     LinxcOperator *operatorCall; //Eg: X + Y
-    LinxcVar *incrementVariable; //Eg: varName++
-    LinxcVar *decrementVariable; //Eg: varName--
     string literal; //Eg: "Hello World"
     LinxcVar *variable; //Eg: varName
     LinxcFunc *functionRef; //Eg: funcName <- is incomplete
@@ -257,7 +253,7 @@ struct LinxcParsedFile
 struct LinxcModifiedExpression
 {
     LinxcExpression expression;
-    //either *, -, !, ~, &
+    //either *, -, !, ~, &, ++, --
     LinxcTokenID modification;
 };
 //An operator is an expression containing two sub-expressions connected with a token, normally an operator

@@ -474,20 +474,6 @@ string LinxcExpression::ToString(IAllocator *allocator)
 {
     switch (this->ID)
     {
-        case LinxcExpr_DecrementVar:
-        {
-            string result = string(&defaultAllocator);
-            result.AppendDeinit(this->data.decrementVariable->ToString(&defaultAllocator)); // this->data.decrementVariable.ToString(allocator));
-            result.Append("--");
-            return result.CloneDeinit(allocator);
-        }
-        case LinxcExpr_IncrementVar:
-        {
-            string result = string(&defaultAllocator);
-            result.AppendDeinit(this->data.incrementVariable->ToString(&defaultAllocator));
-            result.Append("++");
-            return result.CloneDeinit(allocator);
-        }
         case LinxcExpr_FuncCall:
         {
             return this->data.functionCall.ToString(allocator);

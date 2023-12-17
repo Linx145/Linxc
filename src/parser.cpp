@@ -1442,7 +1442,6 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
 
                 if (CanAssign(typeExpression.AsTypeReference().value, defaultValueExpression.resolvesTo))
                 {
-
                     var.defaultValue = option<LinxcExpression>(defaultValueExpression);
                 }
                 else
@@ -1475,7 +1474,6 @@ collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *st
     }
     return variables.ToOwnedArray();
 }
-
 option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(LinxcParserState* state)
 {
     bool isComment = false;
@@ -2573,18 +2571,22 @@ void LinxcParser::RotateFuncCallExpression(LinxcExpression* expr, LinxcExpressio
                     //nothing to rotate as we are at end of chain due to precedence parsing
                 }
             }
-            else printf("Invalid operation\n");
-            //else this shouldnt be possible
-        }
-        else if (parent != NULL)
-        {
-            if (&parent->data.operatorCall->rightExpr == expr)
+            else
             {
-                //expr->data.functionCall.thisAsParam = parent->data.operatorCall->leftExpr;
+                //possible in the case of A.function()
+
+                if (&parent->data.operatorCall->rightExpr == expr)
+                {
+                    LinxcExpression* newInput = (LinxcExpression*)this->allocator->Allocate(sizeof(LinxcExpression));
+                    *newInput = parent->data.operatorCall->leftExpr;
+                    expr->data.functionCall.thisAsParam = newInput;
+
+                    *parent = *expr;
+                    //expr->data.functionCall.thisAsParam = parent->data.operatorCall->leftExpr;
+                }
+                //else do nothing as function().A is correct
             }
-            //else do nothing as function().A is correct
         }
-        //else do nothing as we are a standalone function call = cannot possibly be member function
     }
     else if (expr->ID == LinxcExpr_OperatorCall)
     {
