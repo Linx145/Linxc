@@ -18,9 +18,9 @@ bool io::FileExists(const char *path)
     return access(path, 0) == 0;
 }
 
-string io::ReadFile(const char *path)
+string io::ReadFile(IAllocator *allocator, const char *path)
 {
-    string result = string();
+    string result = string(allocator);
 
     FILE *fs;
     if (fopen_s(&fs, path, "r") == 0)
@@ -35,7 +35,7 @@ string io::ReadFile(const char *path)
         //fseek(fs, 0, SEEK_SET);
         fseek(fs, 0, SEEK_SET);
 
-        char *buffer = (char*)malloc(size + 1);
+        char* buffer = (char*)allocator->Allocate(size + 1);
         if (buffer != NULL)
         {
             fread(buffer, sizeof(char), size, fs);
@@ -69,7 +69,8 @@ collections::Array<string> io::GetFilesInDirectory(IAllocator *allocator, const 
         if (strcmp(findFileResult.cFileName, ".") != 0 && strcmp(findFileResult.cFileName, "..") != 0)
         {
             //printf("%s\n", &findFileResult.cFileName[0]);
-            results.Add(string(allocator, &findFileResult.cFileName[0]));
+            string replaced = ReplaceChar(allocator, &findFileResult.cFileName[0], '\\', '/');
+            results.Add(replaced);
         }
         if (!FindNextFileA(handle, &findFileResult))
         {

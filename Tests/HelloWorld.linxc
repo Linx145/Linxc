@@ -1,11 +1,5 @@
 #include <Linxc.h>
-
-enum TestEnum
-{
-    A,
-    B,
-    C
-};
+#include <Declarations.linxc>
 
 i32 Main()
 {

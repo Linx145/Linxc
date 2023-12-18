@@ -31,13 +31,15 @@ i32 main()
     }
     filePath.deinit();*/
 
-    string fileFullName = string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
-    string fileIncludeName = string("HelloWorld.linxc");
-    string fileContents = io::ReadFile(fileFullName.buffer);
-    printf("Parsing file\n");
-    LinxcParsedFile* result = parser.ParseFile(fileFullName, fileIncludeName, fileContents);
+    //string fileFullName = string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
+    //string fileIncludeName = string("HelloWorld.linxc");
+    //string fileContents = io::ReadFile(fileFullName.buffer);
+    //printf("Parsing file\n");
+    //LinxcParsedFile* result = parser.ParseFile(fileFullName, fileIncludeName, fileContents);
 
-    if (result->errors.count == 0)
+
+
+    /*if (result->errors.count == 0)
     {
         printf("No Error!\n__\n");
 
@@ -56,10 +58,18 @@ i32 main()
 
     fileFullName.deinit();
     fileIncludeName.deinit();
-    fileContents.deinit();
+    fileContents.deinit();*/
+
+    parser.AddAllFilesFromDirectory(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
+    if (!parser.Compile("C:/Users/Linus/source/repos/Linxc/linxc-out"))
+    {
+        parser.PrintAllErrors();
+        printf("Compilation failed!\n");
+    }
+    else printf("Compilation success!\n");
 
     parser.deinit();
-    printf("Program finish, freeing remainding %i allocations\n", (i32)arena.ptrs.count);
+    printf("Program finish, freeing remaining %i allocations\n", (i32)arena.ptrs.count);
     arena.deinit();
     getchar();
 

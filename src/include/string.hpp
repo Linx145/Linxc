@@ -38,6 +38,10 @@ struct string
         this->deinit();
         return result;
     }
+    inline string Clone(IAllocator* allocator)
+    {
+        return string(allocator, this->buffer);
+    }
 
     bool operator==(const char* other);
     bool operator!=(const char* other);
@@ -53,7 +57,7 @@ option<usize> FindFirst(const char *buffer, char character);
 
 option<usize> FindLast(const char *buffer, char character);
 
-string ReplaceChar(IAllocator *allocator, string input, char toReplace, char replaceWith);
+string ReplaceChar(IAllocator *allocator, const char* input, char toReplace, char replaceWith);
 
 inline const char* digits2(usize value)
 {

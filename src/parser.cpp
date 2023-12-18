@@ -163,7 +163,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
 
     this->parsedFiles = collections::hashmap<string, LinxcParsedFile>(allocator, &stringHash, &stringEql);
     this->parsingFiles = collections::hashset<string>(allocator, &stringHash, &stringEql);
-    this->includedFiles = collections::vector<string>(allocator);
+    this->includedFiles = collections::hashmap<string, LinxcIncludedFile>(allocator, &stringHash, &stringEql);
     this->includeDirectories = collections::vector<string>(allocator);
     this->nameToToken = collections::hashmap<string, LinxcTokenID>(allocator, &stringHash, &stringEql);
 
@@ -240,29 +240,110 @@ void LinxcParserState::deinit()
 }
 void LinxcParser::deinit()
 {
-    for (usize i = 0; i < this->includedFiles.count; i++)
-    {
-        this->includedFiles.Get(i)->deinit();
-    }
     this->includedFiles.deinit();
-
-    for (usize i = 0; i < this->includeDirectories.count; i++)
-    {
-        this->includeDirectories.Get(i)->deinit();
-    }
     this->includeDirectories.deinit();
-
+    this->parsedFiles.deinit();
+    this->parsingFiles.deinit();
     //TODO: deinit parsedFiles, parsingFiles
+}
+void LinxcParser::PrintAllErrors()
+{
+    for (usize i = 0; i < this->parsedFiles.bucketsCount; i++)
+    {
+        if (this->parsedFiles.buckets[i].initialized)
+        {
+            for (usize j = 0; j < this->parsedFiles.buckets[i].entries.count; j++)
+            {
+                for (usize c = 0; c < this->parsedFiles.buckets[i].entries.ptr[j].value.errors.count; c++)
+                {
+                    printf("%s: %s\n", this->parsedFiles.buckets[i].entries.ptr[j].value.includeName.buffer, this->parsedFiles.buckets[i].entries.ptr[j].value.errors.ptr[c].buffer);
+                }
+            }
+        }
+    }
+}
+bool LinxcParser::Compile(const char* outputDirectory)
+{
+    bool foundError = false;
+    for (usize i = 0; i < this->includedFiles.bucketsCount; i++)
+    {
+        if (this->includedFiles.buckets[i].initialized)
+        {
+            for (usize j = 0; j < this->includedFiles.buckets[i].entries.count; j++)
+            {
+                LinxcIncludedFile includedFile = this->includedFiles.buckets[i].entries.Get(j)->value;
+                if (!this->parsedFiles.Contains(includedFile.includeName))
+                {
+                    string contents = io::ReadFile(&defaultAllocator, includedFile.fullNameAndPath.buffer);
+                    if (contents.buffer != NULL)
+                    {
+                        LinxcParsedFile* result = this->ParseFile(includedFile.fullNameAndPath, includedFile.includeName, contents.buffer);
+                        contents.deinit();
+                        if (result->errors.count > 0)
+                        {
+                            foundError = true;
+                        }
+                    }
+                    else
+                    {
+                        printf("Error reading file %s\n", includedFile.fullNameAndPath.buffer);
+                        foundError = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (foundError)
+        {
+            break;
+        }
+    }
+    if (foundError)
+    {
+        return false;
+    }
+    for (usize i = 0; i < this->parsedFiles.bucketsCount; i++)
+    {
+        if (this->parsedFiles.buckets[i].initialized)
+        {
+            for (usize j = 0; j < this->parsedFiles.buckets[i].entries.count; j++)
+            {
+                string outputPath = this->parsedFiles.buckets[i].entries.Get(j)->value.includeName.Clone(&defaultAllocator);
+
+                outputPath.Prepend("/");
+                outputPath.Prepend(outputDirectory);
+
+                string pathC = path::SwapExtension(&defaultAllocator, outputPath, ".c");
+                string pathH = path::SwapExtension(&defaultAllocator, outputPath, ".h");
+
+                this->TranspileFile(&this->parsedFiles.buckets[i].entries.ptr[j].value, pathC.buffer, pathH.buffer);
+            
+                outputPath.deinit();
+                pathC.deinit();
+                pathH.deinit();
+            }
+        }
+    }
+    return true;
 }
 void LinxcParser::AddAllFilesFromDirectory(string directoryPath)
 {
-    collections::Array<string> result = io::GetFilesInDirectory(this->allocator, directoryPath.buffer);
+    collections::Array<string> result = io::GetFilesInDirectory(&defaultAllocator, directoryPath.buffer);
 
     for (usize i = 0; i < result.length; i++)
     {
-        result.data[i].Prepend("/");
-        result.data[i].Prepend(directoryPath.buffer);
-        this->includedFiles.Add(result.data[i]);
+        string fullPathAndName = string(&defaultAllocator, directoryPath.buffer);
+        fullPathAndName.Append("/");
+        fullPathAndName.Append(result.data[i].buffer);
+
+        printf("%s\n", fullPathAndName.buffer);
+
+        LinxcIncludedFile includedFile;
+        includedFile.includeName = result.data[i];
+        includedFile.fullNameAndPath = fullPathAndName.CloneDeinit(this->allocator);
+        //result.data[i].Prepend("/");
+        //result.data[i].Prepend(directoryPath.buffer);
+        this->includedFiles.Add(result.data[i], includedFile);
     }
     result.deinit();
 }
@@ -271,6 +352,10 @@ LinxcParsedFile *LinxcParser::ParseFile(string fileFullPath, string includeName,
     if (this->parsedFiles.Contains(includeName)) //already parsed
     {
         return this->parsedFiles.Get(includeName);
+    }
+    if (this->parsingFiles.Contains(includeName))
+    {
+        return NULL;
     }
     bool parsingLinxci = false;
     string extension = path::GetExtension(&defaultAllocator, fileFullPath);
@@ -1577,15 +1662,79 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 //-2 because its - (next.start + 1)
                 string macroString = string(this->allocator, tokenizer->buffer + next.start + 1, next.end - 2 - next.start);
 
-                LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
-                includeStatement.includedFile = NULL;
-                includeStatement.includeString = macroString;
+                string extension = path::GetExtension(&defaultAllocator, macroString);
 
-                LinxcStatement stmt;
-                stmt.data.includeStatement = includeStatement;
-                stmt.ID = LinxcStmt_Include;
-                result.Add(stmt);
-                //printf("included %s\n", macroString.buffer);
+                //if its a .h file, we attempt to parse it like a C header via libclang and the C reflection API
+                if (extension == ".h")
+                {
+                    if (macroString != "Linxc.h")
+                    {
+                        //only if it isnt actually Linxc.h
+                    }
+                    LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
+                    includeStatement.includedFile = NULL;
+                    includeStatement.includeString = macroString;
+
+                    LinxcStatement stmt;
+                    stmt.data.includeStatement = includeStatement;
+                    stmt.ID = LinxcStmt_Include;
+                    result.Add(stmt);
+                }
+                else if (extension == ".linxc")
+                {
+                    //parse that file, if we can find it
+                    //and it hasnt been parsed yet
+                    LinxcParsedFile* alreadyParsed = this->parsedFiles.Get(macroString);
+                    if (alreadyParsed != NULL)
+                    {
+                        LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
+                        includeStatement.includedFile = alreadyParsed;
+                        includeStatement.includeString = macroString;
+
+                        LinxcStatement stmt;
+                        stmt.data.includeStatement = includeStatement;
+                        stmt.ID = LinxcStmt_Include;
+                        result.Add(stmt);
+                    }
+                    else
+                    {
+                        //search files
+                        LinxcIncludedFile* includedFile = this->includedFiles.Get(macroString);
+                        if (includedFile != NULL)
+                        {
+                            //need the results now!!
+                            string fileContents = io::ReadFile(&defaultAllocator, includedFile->fullNameAndPath.buffer);
+                            LinxcParsedFile* parsedInclude = this->ParseFile(includedFile->fullNameAndPath, includedFile->includeName, fileContents);
+                            if (parsedInclude->errors.count > 0)
+                            {
+                                errors->Add(ERR_MSG(this->allocator, "Included file has errors, stopping compilation for this file"));
+                                toBreak = true;
+                                break;
+                            }
+                            else
+                            {
+                                LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
+                                includeStatement.includedFile = alreadyParsed;
+                                includeStatement.includeString = path::SwapExtension(this->allocator, macroString, ".h");
+
+                                LinxcStatement stmt;
+                                stmt.data.includeStatement = includeStatement;
+                                stmt.ID = LinxcStmt_Include;
+                                result.Add(stmt);
+                                macroString.deinit();
+                            }
+                            fileContents.deinit();
+                        }
+                        else
+                        {
+                            ERR_MSG msg = ERR_MSG(this->allocator, "Could not find included file ");
+                            msg.Append(macroString.buffer);
+                            errors->Add(msg);
+                        }
+                    }
+                }
+
+                extension.deinit();
             }
 
             //let's not deal with #includes until we're ready
@@ -2421,7 +2570,7 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
         }
 
         //make sure no harpy brain programmer uses '\' to specify include paths 
-        string replaced = ReplaceChar(&defaultAllocator, includeName, '\\', '/');
+        string replaced = ReplaceChar(&defaultAllocator, includeName.buffer, '\\', '/');
         fprintf(fs, "#include <%s>\n", includeName.buffer);
         replaced.deinit();
 

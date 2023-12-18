@@ -95,7 +95,10 @@ namespace collections
         {
             for (usize i = 0; i < bucketsCount; i++)
             {
-                buckets[i].entries.deinit();
+                if (buckets[i].initialized)
+                {
+                    buckets[i].entries.deinit();
+                }
                 //buckets[i].entries.~();
             }
             allocator->Free((void**)&buckets);

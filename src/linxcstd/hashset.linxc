@@ -70,9 +70,12 @@ namespace collections
         {
             for (usize i = 0; i < bucketsCount; i++)
             {
-                buckets[i].entries.deinit();
+                if (buckets[i].initialized)
+                {
+                    buckets[i].entries.deinit();
+                }
             }
-            this->allocator->Free(buckets);
+            this->allocator->Free((void**)&buckets);
         }
         void EnsureCapacity()
         {

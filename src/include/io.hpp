@@ -6,7 +6,7 @@
 
 namespace io
 {
-    string ReadFile(const char *path);
+    string ReadFile(IAllocator* allocator, const char* path);
 
     bool FileExists(const char *path);
 

@@ -133,6 +133,12 @@ inline LinxcTokenID GetOperationResult(LinxcTokenID num1, LinxcTokenID num2)
     else return Linxc_Invalid;
 }
 
+struct LinxcIncludedFile
+{
+    string includeName;
+    string fullNameAndPath;
+};
+
 struct LinxcParserState
 {
     LinxcParser *parser;
@@ -160,7 +166,7 @@ struct LinxcParser
     ///or .linxch static libraries
     collections::vector<string> includeDirectories;
     ///The actual .linxc files to be included in the compilation.
-    collections::vector<string> includedFiles;
+    collections::hashmap<string, LinxcIncludedFile> includedFiles;
     /// Maps includeName to parsed file and data.
     collections::hashset<string> parsingFiles;
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
@@ -218,4 +224,7 @@ struct LinxcParser
     void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts, i32* tempIndex);
     void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent);
     void SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotatedExpr, i32* tempIndex);
+
+    bool Compile(const char* outputDirectory);
+    void PrintAllErrors();
 };
