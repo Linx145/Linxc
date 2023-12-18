@@ -1,5 +1,4 @@
-#ifndef linxccstring
-#define linxccstring
+#pragma once
 
 #include "Linxc.h"
 #include "stdlib.h"
@@ -64,5 +63,3 @@ inline const char* digits2(usize value)
         "6061626364656667686970717273747576777879"
         "8081828384858687888990919293949596979899"[value * 2];
 }
-
-#endif

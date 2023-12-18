@@ -1,5 +1,4 @@
-#ifndef linxccallocators
-#define linxccallocators
+#pragma once
 
 #include <Linxc.h>
 #include <stdlib.h>
@@ -33,5 +32,3 @@ extern IAllocator defaultAllocator;
 
 void *CAllocator_Allocate(void *instance, usize bytes);
 void CAllocator_Free(void *instance, void *ptr);
-
-#endif

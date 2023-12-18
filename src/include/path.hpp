@@ -1,5 +1,4 @@
-#ifndef linxccpath
-#define linxccpath
+#pragma once
 
 #include <Linxc.h>
 #include <string.hpp>
@@ -12,5 +11,3 @@ namespace path
     //Including the '.'
     string GetExtension(IAllocator *allocator, string path);
 }
-
-#endif

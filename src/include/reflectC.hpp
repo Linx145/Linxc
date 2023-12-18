@@ -27,6 +27,8 @@ struct LinxcReflectCState
 	LinxcReflectCState(IAllocator *myAllocator);
 };
 
+void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, IAllocator* allocator, LinxcCursor* cursor);
+
 CXChildVisitResult CursorVisitor(CXCursor current_cursor, CXCursor parent, CXClientData client_data);
 
 LinxcParsedFile Linxc_ReflectC(LinxcNamespace* globalNamespace, IAllocator* allocator, string fileFullName);

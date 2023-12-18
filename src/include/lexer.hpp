@@ -1,5 +1,4 @@
-#ifndef linxcclexer
-#define linxcclexer
+#pragma once
 
 #include <Linxc.h>
 #include <stdbool.h>
@@ -264,15 +263,4 @@ struct LinxcTokenizer
 
 bool LinxcIsPrimitiveType(LinxcTokenID ID);
 
-// LinxcToken LinxcTokenizerNext(LinxcTokenizer *self);
-
-// LinxcToken LinxcTokenizerPeekNext(LinxcTokenizer *self);
-
-// LinxcToken LinxcTokenizerNextUntilValid(LinxcTokenizer *self);
-
-// LinxcToken LinxcTokenizerPeekNextUntilValid(LinxcTokenizer *self);
-
 LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective, collections::hashmap<string, LinxcTokenID>* nameToToken);
-
-
-#endif

@@ -11,16 +11,16 @@ i32 main()
     //CIMGUI_DEFINE_ENUMS_AND_STRUCTS
     //"C:/Users/Linus/source/repos/Linxc/linxc-out/HelloWorld.h"
     //"C:/Users/Linus/Downloads/cimgui.h"
-    string filePath = string(&arena.asAllocator, "C:/Users/Linus/Downloads/cimgui.h");
+    //"C:/VulkanSDK/1.3.239.0/Include/vulkan/vulkan_core.h"
+    string filePath = string(&arena.asAllocator, "C:/Users/Linus/Downloads/vulkan_core.h");
 
 
     printf("Program started\n");
     LinxcParser parser = LinxcParser(&arena.asAllocator);
     
-    LinxcParsedFile file = Linxc_ReflectC(&parser.globalNamespace, &arena.asAllocator, filePath.buffer);
+    /*LinxcParsedFile file = Linxc_ReflectC(&parser.globalNamespace, &arena.asAllocator, filePath.buffer);
     for (usize i = 0; i < file.definedTypes.count; i++)
     {
-        
         printf("C file defines type %s\n", file.definedTypes.ptr[i]->name.buffer);
         for (usize j = 0; j < file.definedTypes.ptr[i]->variables.count; j++)
         {
@@ -29,9 +29,9 @@ i32 main()
             typeName.deinit();
         }
     }
-    filePath.deinit();
+    filePath.deinit();*/
 
-    /*string fileFullName = string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
+    string fileFullName = string("C:/Users/Linus/source/repos/Linxc/Tests/HelloWorld.linxc");
     string fileIncludeName = string("HelloWorld.linxc");
     string fileContents = io::ReadFile(fileFullName.buffer);
     printf("Parsing file\n");
@@ -58,7 +58,7 @@ i32 main()
     fileIncludeName.deinit();
     fileContents.deinit();
 
-    parser.deinit();*/
+    parser.deinit();
     printf("Program finish, freeing remainding %i allocations\n", (i32)arena.ptrs.count);
     arena.deinit();
     getchar();

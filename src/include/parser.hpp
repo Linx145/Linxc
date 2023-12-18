@@ -1,5 +1,4 @@
-#ifndef linxccparser
-#define linxccparser
+#pragma once
 
 #include <Linxc.h>
 #include <ast.hpp>
@@ -220,5 +219,3 @@ struct LinxcParser
     void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent);
     void SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotatedExpr, i32* tempIndex);
 };
-
-#endif

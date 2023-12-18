@@ -1,5 +1,4 @@
-#ifndef linxccio
-#define linxccio
+#pragma once
 
 #include <Linxc.h>
 #include <string.hpp>
@@ -13,5 +12,3 @@ namespace io
 
     collections::Array<string> GetFilesInDirectory(IAllocator *allocator, const char *dirPath);
 }
-
-#endif

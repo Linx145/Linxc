@@ -1,5 +1,4 @@
-#ifndef linxccast
-#define linxccast
+#pragma once
 
 #include <string.hpp>
 #include <vector.linxc>
@@ -32,6 +31,12 @@ struct LinxcFunctionCall
     string ToString(IAllocator *allocator);
 };
 
+struct LinxcEnumMember
+{
+    string name;
+    i32 value;
+};
+
 /// Represents a type (struct) in Linxc.
 struct LinxcType
 {
@@ -43,6 +48,7 @@ struct LinxcType
     collections::vector<LinxcFunc> functions;
     collections::vector<LinxcType> subTypes;
     collections::vector<string> templateArgs;
+    collections::vector<LinxcEnumMember> enumMembers;
     collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc> operatorOverloads;
 
     LinxcType();
@@ -51,6 +57,7 @@ struct LinxcType
     LinxcType *FindSubtype(string name);
     LinxcFunc *FindFunction(string name);
     LinxcVar *FindVar(string name);
+    LinxcEnumMember* FindEnumMember(string name);
 
     string GetFullName(IAllocator *allocator);
     string GetCName(IAllocator* allocator);
@@ -109,6 +116,7 @@ enum LinxcExpressionID
     LinxcExpr_Variable,
     LinxcExpr_FunctionRef,
     LinxcExpr_TypeRef,
+    LinxcExpr_EnumMemberRef,
     LinxcExpr_NamespaceRef,
     LinxcExpr_TypeCast,
     LinxcExpr_Modified,
@@ -125,6 +133,7 @@ union LinxcExpressionData
     LinxcVar *variable; //Eg: varName
     LinxcFunc *functionRef; //Eg: funcName <- is incomplete
     LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
+    LinxcEnumMember* enumMemberRef;
     LinxcNamespace *namespaceRef; //Eg: namespaceName <- is incomplete
     LinxcTypeCast *typeCast; //Eg: (typeName)
     LinxcModifiedExpression *modifiedExpression; //Eg: *varName
@@ -343,4 +352,3 @@ struct LinxcOperatorFunc
 
     string ToString(IAllocator* allocator);
 };
-#endif

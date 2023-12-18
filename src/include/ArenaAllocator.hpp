@@ -1,5 +1,4 @@
-#ifndef linxcarenaallocator
-#define linxcarenaallocator
+#pragma once
 
 #include <vector.linxc>
 #include <allocators.hpp>
@@ -17,5 +16,3 @@ struct ArenaAllocator
 
 void* ArenaAllocator_Allocate(void* instance, usize bytes);
 void ArenaAllocator_Free(void* instance, void* ptr);
-
-#endif

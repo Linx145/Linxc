@@ -1161,6 +1161,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                         result.ID = LinxcExpr_FunctionRef;
                         result.data.functionRef = asFunction;
                         result.resolvesTo = asFunction->returnType.AsTypeReference().value;
+                        break;
                     }
                     else
                     {
@@ -1172,6 +1173,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                             //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
                             result.resolvesTo = asVar->type.AsTypeReference().value;
                             result.resolvesTo.isConst = asVar->isConst;
+                            break;
                         }
                         else
                         {
@@ -1181,6 +1183,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                                 result.ID = LinxcExpr_TypeRef;
                                 result.data.typeRef = asType;
                                 result.resolvesTo.lastType = NULL;
+                                break;
                             }
                             else
                             {
@@ -1191,6 +1194,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                                     
                                     result.data.namespaceRef = asNamespace;
                                     result.resolvesTo.lastType = NULL;
+                                    break;
                                 }
                             }
                         }
@@ -1309,6 +1313,16 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                         result.ID = LinxcExpr_TypeRef;
                         result.data.typeRef = asType;
                         result.resolvesTo.lastType = NULL;
+                    }
+                    else
+                    {
+                        LinxcEnumMember* asEnumMember = toCheck->FindEnumMember(identifierName);
+                        if (asEnumMember != NULL)
+                        {
+                            result.ID = LinxcExpr_EnumMemberRef;
+                            result.data.enumMemberRef = asEnumMember;
+                            result.resolvesTo.lastType = toCheck;
+                        }
                     }
                 }
             }
@@ -1643,6 +1657,154 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             }
         }
         break;
+        case Linxc_Keyword_enum:
+        {
+            if (isComment)
+            {
+                continue;
+            }
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare an enum as const in Linxc"));
+                nextIsConst = false;
+            }
+            LinxcToken enumName = tokenizer->NextUntilValid();
+            //printf("STRUCT FOUND: %s\n", structName.ToString(this->allocator).buffer);
+
+            if (enumName.ID != Linxc_Identifier)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected a valid enum name after enum keyword!"));
+            }
+            else
+            {
+                if (tokenizer->NextUntilValid().ID != Linxc_LBrace)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expected { after enum name"));
+                }
+
+                LinxcType enumType = LinxcType(allocator, enumName.ToString(allocator), state->currentNamespace, state->parentType);
+                //LinxcEnum enumerable = LinxcEnum(this->allocator, enumName.ToString(allocator));
+
+                if (tokenizer->PeekNextUntilValid().ID != Linxc_RBrace)
+                {
+                    collections::hashmap<string, LinxcEnumMember> nameToEnumMember = collections::hashmap<string, LinxcEnumMember>(this->allocator, &stringHash, &stringEql);
+
+                    i32 maxCount = 0;
+                    while (true)
+                    {
+                        LinxcToken nextToken = tokenizer->NextUntilValid();
+                        if (nextToken.ID != Linxc_Identifier)
+                        {
+                            errors->Add(ERR_MSG(this->allocator, "Expected enum item name to be valid identifier"));
+                            break;
+                        }
+                        string memberName = nextToken.ToString(this->allocator);
+                        LinxcToken next = tokenizer->NextUntilValid();
+                        if (next.ID == Linxc_Equal)
+                        {
+                            next = tokenizer->NextUntilValid();
+                            string literalString = next.ToString(&defaultAllocator);
+                            i32 value = 0;
+                            if (next.ID == Linxc_Identifier)
+                            {
+                                LinxcEnumMember* memberRef = nameToEnumMember.Get(literalString);
+                                if (memberRef != NULL)
+                                {
+                                    value = memberRef->value;
+                                }
+                                else
+                                {
+                                    errors->Add(ERR_MSG(this->allocator, "Expected enum member to equate to a constant expression"));
+                                }
+                            }
+                            else if (next.ID != Linxc_IntegerLiteral)
+                            {
+                                errors->Add(ERR_MSG(this->allocator, "Expected enum member to have an integer literal!"));
+                            }
+                            else
+                            {
+                                value = atoi(literalString.buffer);
+                            }
+                            literalString.deinit();
+
+                            LinxcEnumMember member;
+                            member.name = memberName;
+                            member.value = value;
+                            if (nameToEnumMember.Contains(memberName))
+                            {
+                                ERR_MSG msg = ERR_MSG(this->allocator, "Enum already has member of name ");
+                                msg.Append(memberName.buffer);
+                                errors->Add(msg);
+                                memberName.deinit();
+                            }
+                            else nameToEnumMember.Add(memberName, member);
+                            maxCount = value + 1;
+
+                            next = tokenizer->NextUntilValid();
+                            if (next.ID == Linxc_RBrace)
+                            {
+                                break;
+                            }
+                            else if (next.ID == Linxc_Comma)
+                            {
+                                continue;
+                            }
+                            else
+                            {
+                                errors->Add(ERR_MSG(this->allocator, "Expected , or } after enum member declaration"));
+                            }
+                        }
+                        else if (next.ID == Linxc_RBrace || next.ID == Linxc_Comma)
+                        {
+                            LinxcEnumMember member;
+                            member.name = memberName;
+                            member.value = maxCount;
+                            if (nameToEnumMember.Contains(memberName))
+                            {
+                                ERR_MSG msg = ERR_MSG(this->allocator, "Enum already has member of name ");
+                                msg.Append(memberName.buffer);
+                                errors->Add(msg);
+                                memberName.deinit();
+                            }
+                            else nameToEnumMember.Add(memberName, member);
+                            maxCount += 1;
+                            if (next.ID == Linxc_RBrace)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            errors->Add(ERR_MSG(this->allocator, "Expected }, = or , after enum member name"));
+                            break;
+                        }
+                    }
+
+                    for (usize i = 0; i < nameToEnumMember.bucketsCount; i++)
+                    {
+                        if (nameToEnumMember.buckets[i].initialized)
+                        {
+                            for (usize j = 0; j < nameToEnumMember.buckets[i].entries.count; j++)
+                            {
+                                enumType.enumMembers.Add(nameToEnumMember.buckets[i].entries.ptr[j].value);
+                            }
+                        }
+                    }
+
+                    state->currentNamespace->types.Add(enumType.name, enumType);
+                    LinxcType* ptr = state->currentNamespace->types.Get(enumType.name);
+
+                    LinxcStatement stmt;
+                    stmt.ID = LinxcStmt_TypeDecl;
+                    stmt.data.typeDeclaration = ptr;
+                    result.Add(stmt);
+
+                    nameToEnumMember.deinit();
+                    expectSemicolon = true;
+                }
+            }
+        }
+        break;
         case Linxc_Keyword_struct:
         {
             if (isComment)
@@ -1655,7 +1817,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 nextIsConst = false;
             }
 
-            LinxcToken structName = tokenizer->Next();
+            LinxcToken structName = tokenizer->NextUntilValid();
 
             //printf("STRUCT FOUND: %s\n", structName.ToString(this->allocator).buffer);
 
@@ -1671,7 +1833,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 LinxcToken next = tokenizer->PeekNextUntilValid();
                 if (next.ID != Linxc_LBrace)
                 {
-                    errors->Add(ERR_MSG(this->allocator, "Expected { after struct name!"));
+                    errors->Add(ERR_MSG(this->allocator, "Expected { after struct name"));
                     //toBreak = true;
                     //break;
                 }
@@ -2299,28 +2461,46 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
 }
 void LinxcParser::TranspileTypeH(FILE* fs, LinxcType* type)
 {
-    //transpile subtypes first
-    for (usize i = 0; i < type->subTypes.count; i++)
+    if (type->enumMembers.count > 0)
     {
-        TranspileTypeH(fs, type->subTypes.Get(i));
+        fprintf(fs, "typedef enum {\n");
+        for (usize i = 0; i < type->enumMembers.count; i++)
+        {
+            fprintf(fs, "%s = %i", type->enumMembers.ptr[i].name.buffer, type->enumMembers.ptr[i].value);
+            if (i < type->enumMembers.count - 1)
+            {
+                fprintf(fs, ",\n");
+            }
+        }
+        string typeName = type->GetCName(&defaultAllocator);
+        fprintf(fs, "\n} %s;\n", typeName.buffer);
+        typeName.deinit();
     }
-
-    fprintf(fs, "typedef struct {\n");
-    string typeName = type->GetCName(&defaultAllocator);
-    for (usize i = 0; i < type->variables.count; i++)
+    else
     {
-        fprintf(fs, "   ");
-        i32 typeIndex = 0;
-        this->TranspileVar(fs, type->variables.Get(i), &typeIndex);
-        fprintf(fs, ";\n");
-    }
-    fprintf(fs, "} %s;\n", typeName.buffer);
-    typeName.deinit();
+        //transpile subtypes first
+        for (usize i = 0; i < type->subTypes.count; i++)
+        {
+            TranspileTypeH(fs, type->subTypes.Get(i));
+        }
 
-    for (usize i = 0; i < type->functions.count; i++)
-    {
-        this->TranspileFunc(fs, type->functions.Get(i));
-        fprintf(fs, ";\n");
+        fprintf(fs, "typedef struct {\n");
+        string typeName = type->GetCName(&defaultAllocator);
+        for (usize i = 0; i < type->variables.count; i++)
+        {
+            fprintf(fs, "   ");
+            i32 typeIndex = 0;
+            this->TranspileVar(fs, type->variables.Get(i), &typeIndex);
+            fprintf(fs, ";\n");
+        }
+        fprintf(fs, "} %s;\n", typeName.buffer);
+        typeName.deinit();
+
+        for (usize i = 0; i < type->functions.count; i++)
+        {
+            this->TranspileFunc(fs, type->functions.Get(i));
+            fprintf(fs, ";\n");
+        }
     }
 }
 void LinxcParser::TranspileFunc(FILE *fs, LinxcFunc* func)
@@ -2366,6 +2546,11 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
     case LinxcExpr_Literal:
     {
         fprintf(fs, "%s", expr->data.literal.buffer);
+    }
+    break;
+    case LinxcExpr_EnumMemberRef:
+    {
+        fprintf(fs, "%s", expr->data.enumMemberRef->name.buffer);
     }
     break;
     case LinxcExpr_Variable:

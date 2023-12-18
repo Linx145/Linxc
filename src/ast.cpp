@@ -249,6 +249,7 @@ LinxcType::LinxcType()
     this->subTypes = collections::vector<LinxcType>();
     this->templateArgs = collections::vector<string>();
     this->variables = collections::vector<LinxcVar>();
+    this->enumMembers = collections::vector<LinxcEnumMember>();
     this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>();
 }
 LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent)
@@ -261,6 +262,7 @@ LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNames
     this->subTypes = collections::vector<LinxcType>(allocator);
     this->templateArgs = collections::vector<string>(allocator);
     this->variables = collections::vector<LinxcVar>(allocator);
+    this->enumMembers = collections::vector<LinxcEnumMember>(allocator);
     this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>(allocator, &LinxcOperatorImplHash, &LinxcOperatorImplEql);
 }
 string LinxcType::GetFullName(IAllocator *allocator)
@@ -307,6 +309,17 @@ string LinxcType::GetCName(IAllocator* allocator)
     result.Append(this->name.buffer);
 
     return result.CloneDeinit(allocator);
+}
+LinxcEnumMember* LinxcType::FindEnumMember(string name)
+{
+    for (usize i = 0; i < this->enumMembers.count; i++)
+    {
+        if (this->enumMembers.Get(i)->name.eql(name.buffer))
+        {
+            return this->enumMembers.Get(i);
+        }
+    }
+    return NULL;
 }
 LinxcFunc *LinxcType::FindFunction(string name)
 {

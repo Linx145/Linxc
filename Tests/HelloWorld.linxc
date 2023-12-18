@@ -1,31 +1,15 @@
 #include <Linxc.h>
 
-struct structE
+enum TestEnum
 {
-    structE FunctionX()
-    {
-        structE result;
-        return result;
-    }
-};
-struct structD
-{
-    structE E;
-};
-struct structC
-{
-    structD FunctionD(i32 something)
-    {
-        structD result;
-        return result;
-    }
+    A,
+    B,
+    C
 };
 
 i32 Main()
 {
-    structC C;
-    C.FunctionD(2);
-    //C.FunctionD(2).E.FunctionX();
-    //FunctionX()
+    TestEnum enumVar = TestEnum::A;
+
     return 0;
 }
