@@ -5,6 +5,7 @@
 #include "allocators.hpp"
 #include "string.h"
 #include "option.linxc"
+#include "array.linxc"
 
 struct string
 {
@@ -58,6 +59,8 @@ option<usize> FindFirst(const char *buffer, char character);
 option<usize> FindLast(const char *buffer, char character);
 
 string ReplaceChar(IAllocator *allocator, const char* input, char toReplace, char replaceWith);
+
+collections::Array<string> SplitString(IAllocator *allocator, const char* input, char toSplitOn);
 
 inline const char* digits2(usize value)
 {

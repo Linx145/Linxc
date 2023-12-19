@@ -1,6 +1,7 @@
 #include "string.hpp"
 #include "stdio.h"
 #include "math.h"
+#include "vector.linxc"
 
 string::string()
 {
@@ -327,4 +328,31 @@ string ReplaceChar(IAllocator *allocator, const char* input, char toReplace, cha
 
     str.buffer = buffer;
     return str;
+}
+
+collections::Array<string> SplitString(IAllocator* allocator, const char* input, char toSplitOn)
+{
+    collections::vector<string> results = collections::vector<string>(&defaultAllocator);
+
+    usize lastIndex = 0;
+    usize i = 0;
+    while (true)
+    {
+        if (input[i] == toSplitOn || input[i] == '\0')
+        {
+            if (lastIndex < i)
+            {
+                string element = string(allocator, input + lastIndex, i - lastIndex);
+                results.Add(element);
+                lastIndex = i + 1;
+            }
+        }
+        if (input[i] == '\0')
+        {
+            break;
+        }
+        i += 1;
+    }
+
+    return results.ToOwnedArrayWith(allocator);
 }

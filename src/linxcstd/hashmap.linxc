@@ -141,7 +141,7 @@ namespace collections
             }
         }
 
-        void Add(K key, V value)
+        V* Add(K key, V value)
         {
             EnsureCapacity();
             u32 hash = hashFunc(key);
@@ -159,7 +159,7 @@ namespace collections
                 if (eqlFunc(buckets[index].entries.Get(i)->key, key))
                 {
                     buckets[index].entries.Get(i)->value = value;
-                    return;
+                    return &buckets[index].entries.Get(i)->value;
                 }
             }
             Count++;
@@ -167,6 +167,7 @@ namespace collections
             Entry newEntry = Entry(key, value);
 
             buckets[index].entries.Add(newEntry);
+            return &buckets[index].entries.Get(buckets[index].entries.count - 1)->value;
         }
 
         bool Remove(K key)

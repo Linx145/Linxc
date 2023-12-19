@@ -316,6 +316,8 @@ bool LinxcParser::Compile(const char* outputDirectory)
                 string pathC = path::SwapExtension(&defaultAllocator, outputPath, ".c");
                 string pathH = path::SwapExtension(&defaultAllocator, outputPath, ".h");
 
+                printf("Transpiling file %s\n", outputPath.buffer);
+
                 this->TranspileFile(&this->parsedFiles.buckets[i].entries.ptr[j].value, pathC.buffer, pathH.buffer);
             
                 outputPath.deinit();
@@ -1700,6 +1702,27 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     {
                         //search files
                         LinxcIncludedFile* includedFile = this->includedFiles.Get(macroString);
+                        if (includedFile == NULL)
+                        {
+                            //search include directories for file
+                            for (usize i = 0; i < this->includeDirectories.count; i++)
+                            {
+                                string filePath = this->includeDirectories.ptr[i].Clone(&defaultAllocator);
+                                filePath.Append("/");
+                                filePath.Append(macroString.buffer);
+
+                                if (io::FileExists(filePath.buffer))
+                                {
+                                    LinxcIncludedFile newIncludedFile;
+                                    newIncludedFile.fullNameAndPath = filePath.CloneDeinit(this->allocator);
+                                    newIncludedFile.includeName = macroString.Clone(this->allocator);
+                                    includedFile = this->includedFiles.Add(newIncludedFile.includeName, newIncludedFile);
+                                    break;
+                                }
+                                else filePath.deinit();
+                            }
+                        }
+
                         if (includedFile != NULL)
                         {
                             //need the results now!!
@@ -2525,10 +2548,10 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
 void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputPathC, const char* outputPathH)
 {
-    FILE* fs;
-    if (fopen_s(&fs, outputPathH, "w") == 0)
+    FILE* fs = io::CreateDirectoriesAndFile(outputPathH);
+    //transpile header
+    if (fs != NULL)
     {
-        //transpile header
         for (usize i = 0; i < parsedFile->ast.count; i++)
         {
             TranspileStatementH(fs, parsedFile->ast.Get(i));
@@ -2536,7 +2559,8 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
         fclose(fs);
     }
     //transpile source
-    if (fopen_s(&fs, outputPathC, "w") == 0)
+    fs = io::CreateDirectoriesAndFile(outputPathC);
+    if (fs != NULL)
     {
         string swappedExtension = path::SwapExtension(&defaultAllocator, parsedFile->includeName, ".h");
         fprintf(fs, "#include <%s>\n", swappedExtension.buffer);

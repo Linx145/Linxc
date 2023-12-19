@@ -1,9 +1,9 @@
 #include <Linxc.h>
-#include <Declarations.linxc>
+#include <stdio.h>
+#include <Folder/DataTypes.linxc>
 
 i32 Main()
 {
-    TestEnum enumVar = TestEnum::A;
-
+    TestEnum enumValue = TestEnum::C;
     return 0;
 }
