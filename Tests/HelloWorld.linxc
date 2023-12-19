@@ -1,9 +1,8 @@
 #include <Linxc.h>
-#include <stdio.h>
-#include <Folder/DataTypes.linxc>
+#include <stdio.linxci>
 
 i32 Main()
 {
-    TestEnum enumValue = TestEnum::C;
+    printf("Hello World!");
     return 0;
 }

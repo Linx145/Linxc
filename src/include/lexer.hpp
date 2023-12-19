@@ -151,7 +151,8 @@ enum LinxcTokenID
     Linxc_Keyword_ifdef,
     Linxc_Keyword_ifndef,
     Linxc_Keyword_error,
-    Linxc_Keyword_pragma
+    Linxc_Keyword_pragma,
+    Linxc_Keyword_endif,
 };
 
 const char *LinxcTokenIDToString(LinxcTokenID ID);

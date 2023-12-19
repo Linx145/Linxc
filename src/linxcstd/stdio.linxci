@@ -1,5 +1,13 @@
 #include <Linxc.h>
 
+LINXCC_COPY
+
+#include <stdio.h>
+
+LINXCC_ENDCOPY
+
+#ifdef LINXC_COMPILING
+
 #define SEEK_CUR 1
 #define SEEK_END 2
 #define SEEK_SET 0
@@ -26,3 +34,5 @@ i64 ftell(FILE* stream);
 void fseek(FILE* stream, i64 position, i32 origin);
 
 i32 fputs(const u8* str, FILE* stream);
+
+#endif

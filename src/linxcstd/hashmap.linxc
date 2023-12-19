@@ -208,6 +208,24 @@ namespace collections
             return NULL;
         }
 
+        V GetCopyOr(K key, V valueOnNotFound)
+        {
+            u32 hash = hashFunc(key);
+            usize index = hash % bucketsCount;
+
+            if (buckets[index].initialized)
+            {
+                for (usize i = 0; i < buckets[index].entries.count; i++)
+                {
+                    if (eqlFunc(buckets[index].entries.Get(i)->key, key))
+                    {
+                        return buckets[index].entries.Get(i)->value;
+                    }
+                }
+            }
+            return valueOnNotFound;
+        }
+
         bool Contains(K key)
         {
             u32 hash = hashFunc(key);

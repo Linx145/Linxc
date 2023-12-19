@@ -145,7 +145,7 @@ struct LinxcParserState
     /// We keep a pointer to a tokenizer for each parser state in case multiple files are parsed at once or in a call stack
     LinxcTokenizer *tokenizer;
     LinxcParsedFile *parsingFile;
-    LinxcNamespace *currentNamespace;
+    LinxcPhoneyNamespace *currentNamespace;
     LinxcType *parentType;
     LinxcFunc *currentFunction;
     bool isToplevel;

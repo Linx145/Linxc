@@ -162,8 +162,8 @@ LinxcParsedFile::LinxcParsedFile()
 {
     this->definedFuncs = collections::vector<LinxcFunc *>();
     this->definedMacros = collections::vector<LinxcMacro>();
-    this->definedTypes = collections::vector<LinxcType *>();
-    this->definedVars = collections::vector<LinxcVar *>();
+    //this->definedTypes = collections::vector<LinxcType *>();
+    //this->definedVars = collections::vector<LinxcVar *>();
     this->errors = collections::vector<ERR_MSG>();
     this->fullPath = string();
     this->includeName = string();
@@ -173,8 +173,8 @@ LinxcParsedFile::LinxcParsedFile(IAllocator *allocator, string fullPath, string 
 {
     this->definedFuncs = collections::vector<LinxcFunc *>(allocator);
     this->definedMacros = collections::vector<LinxcMacro>(allocator);
-    this->definedTypes = collections::vector<LinxcType *>(allocator);
-    this->definedVars = collections::vector<LinxcVar *>(allocator);
+    //this->definedTypes = collections::vector<LinxcType *>(allocator);
+    //this->definedVars = collections::vector<LinxcVar *>(allocator);
     this->errors = collections::vector<ERR_MSG>(allocator);
     this->fullPath = fullPath;
     this->includeName = includeName;
@@ -228,6 +228,83 @@ LinxcNamespace::LinxcNamespace(IAllocator *allocator, string name)
     this->subNamespaces = collections::hashmap<string, LinxcNamespace>(allocator, &stringHash, &stringEql);
     this->types = collections::hashmap<string, LinxcType>(allocator, &stringHash, &stringEql);
     this->variables = collections::hashmap<string, LinxcVar>(allocator, &stringHash, &stringEql);
+}
+LinxcPhoneyNamespace::LinxcPhoneyNamespace()
+{
+    this->allocator = &defaultAllocator;
+    this->parentNamespace = NULL;
+    this->actualNamespace = NULL;
+    this->name = string();
+    this->functionRefs = collections::hashmap<string, LinxcFunc*>();
+    this->subNamespaces = collections::hashmap<string, LinxcPhoneyNamespace>();
+    this->typeRefs = collections::hashmap<string, LinxcType*>();
+    this->variableRefs = collections::hashmap<string, LinxcVar*>();
+}
+LinxcPhoneyNamespace::LinxcPhoneyNamespace(IAllocator* allocator, LinxcNamespace* thisActualNamespace)
+{
+    this->allocator = allocator;
+    this->parentNamespace = NULL;
+    this->actualNamespace = thisActualNamespace;
+    this->name = thisActualNamespace->name;
+    this->functionRefs = collections::hashmap<string, LinxcFunc*>(allocator, &stringHash, &stringEql);
+    this->subNamespaces = collections::hashmap<string, LinxcPhoneyNamespace>(allocator, &stringHash, &stringEql);
+    this->typeRefs = collections::hashmap<string, LinxcType*>(allocator, &stringHash, &stringEql);
+    this->variableRefs = collections::hashmap<string, LinxcVar*>(allocator, &stringHash, &stringEql);
+}
+void LinxcPhoneyNamespace::Add(LinxcPhoneyNamespace* other)
+{
+    for (usize i = 0; i < other->functionRefs.bucketsCount; i++)
+    {
+        if (other->functionRefs.buckets[i].initialized)
+        {
+            for (usize j = 0; j < other->functionRefs.buckets[i].entries.count; j++)
+            {
+                this->functionRefs.Add(other->functionRefs.buckets[i].entries.ptr[j].key, other->functionRefs.buckets[i].entries.ptr[j].value);
+            }
+        }
+    }
+    for (usize i = 0; i < other->typeRefs.bucketsCount; i++)
+    {
+        if (other->typeRefs.buckets[i].initialized)
+        {
+            for (usize j = 0; j < other->typeRefs.buckets[i].entries.count; j++)
+            {
+                this->typeRefs.Add(other->typeRefs.buckets[i].entries.ptr[j].key, other->typeRefs.buckets[i].entries.ptr[j].value);
+            }
+        }
+    }
+    for (usize i = 0; i < other->variableRefs.bucketsCount; i++)
+    {
+        if (other->variableRefs.buckets[i].initialized)
+        {
+            for (usize j = 0; j < other->variableRefs.buckets[i].entries.count; j++)
+            {
+                this->variableRefs.Add(other->variableRefs.buckets[i].entries.ptr[j].key, other->variableRefs.buckets[i].entries.ptr[j].value);
+            }
+        }
+    }
+
+    for (usize i = 0; i < other->subNamespaces.bucketsCount; i++)
+    {
+        if (other->subNamespaces.buckets[i].initialized)
+        {
+            for (usize j = 0; j < other->subNamespaces.buckets[i].entries.count; j++)
+            {
+                LinxcPhoneyNamespace* phoneyNamespaceEquivalent = this->subNamespaces.Get(other->subNamespaces.buckets[i].entries.ptr[j].key);
+                if (phoneyNamespaceEquivalent != NULL)
+                {
+                    phoneyNamespaceEquivalent->Add(&other->subNamespaces.buckets[i].entries.ptr[j].value);
+                }
+                else
+                {
+                    //clone it, if not, any modification to this namespace would modify the other as well
+                    LinxcPhoneyNamespace newEquivalent = LinxcPhoneyNamespace(this->allocator, this->actualNamespace);
+                    newEquivalent.Add(&other->subNamespaces.buckets[i].entries.ptr[j].value);
+                    this->subNamespaces.Add(other->subNamespaces.buckets[i].entries.ptr[j].key, newEquivalent);
+                }
+            }
+        }
+    }
 }
 LinxcNamespaceScope::LinxcNamespaceScope()
 {

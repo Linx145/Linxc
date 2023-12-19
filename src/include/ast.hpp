@@ -220,6 +220,45 @@ struct LinxcNamespace
     LinxcNamespace();
     LinxcNamespace(IAllocator *allocator, string name);
 };
+struct LinxcPhoneyNamespace
+{
+    IAllocator* allocator;
+    LinxcNamespace* actualNamespace;
+    LinxcPhoneyNamespace* parentNamespace;
+    string name;
+    collections::hashmap<string, LinxcVar*> variableRefs;
+    collections::hashmap<string, LinxcFunc*> functionRefs;
+    collections::hashmap<string, LinxcType*> typeRefs;
+    collections::hashmap<string, LinxcPhoneyNamespace> subNamespaces; //dont need pointer here as internal is pointer already
+
+    LinxcPhoneyNamespace();
+    LinxcPhoneyNamespace(IAllocator* allocator, LinxcNamespace* thisActualNamespace);
+
+    inline LinxcVar* AddVariableToOrigin(string name, LinxcVar variable)
+    {
+        LinxcVar* result = this->actualNamespace->variables.Add(name, variable);
+        this->variableRefs.Add(name, result);
+        return result;
+    }
+    inline LinxcFunc* AddFunctionToOrigin(string name, LinxcFunc func)
+    {
+        LinxcFunc* result = this->actualNamespace->functions.Add(name, func);
+        this->functionRefs.Add(name, result);
+        return result;
+    }
+    inline LinxcType* AddTypeToOrigin(string name, LinxcType type)
+    {
+        LinxcType* result = this->actualNamespace->types.Add(name, type);
+        this->typeRefs.Add(name, result);
+        return result;
+    }
+    inline LinxcPhoneyNamespace* AddNamespaceToOrigin(string name, LinxcNamespace linxcNamespace)
+    {
+        LinxcNamespace *actualSubNamespace = actualNamespace->subNamespaces.Add(name, linxcNamespace);
+        return this->subNamespaces.Add(name, LinxcPhoneyNamespace(actualNamespace->functions.allocator, actualSubNamespace));
+    }
+    void Add(LinxcPhoneyNamespace* other);
+};
 struct LinxcNamespaceScope
 {
     LinxcNamespace* referencedNamespace;
@@ -239,20 +278,14 @@ struct LinxcParsedFile
     /// Macros within are owned by LinxcParsedFile instance itself. (Makes no sense for it to be under namespaces)
     collections::vector<LinxcMacro> definedMacros;
 
-    collections::vector<LinxcMacro> definedAttributes;
-
-    /// A list of all defined or included types in this file. Points to actual type storage location within a namespace.
-    collections::vector<LinxcType *> definedTypes;
-
-    /// A list of all defined or included functions in this file. Points to actual function storage location within a namespace.
-    collections::vector<LinxcFunc *> definedFuncs;
-
-    /// A list of all defined or included global variables in this file. Points to actual variable storage location within a namespace.
-    collections::vector<LinxcVar *> definedVars;
+    //Needed so we can keep track of what functions to transpile when transpiling this file
+    collections::vector<LinxcFunc*> definedFuncs;
 
     collections::vector<ERR_MSG> errors;
 
     collections::vector<LinxcStatement> ast;
+
+    LinxcPhoneyNamespace fileNamespace;
 
     LinxcParsedFile();
     LinxcParsedFile(IAllocator *allocator, string fullPath, string includeName);

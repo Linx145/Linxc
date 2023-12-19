@@ -23,12 +23,13 @@ struct LinxcReflectCState
 {
 	IAllocator* allocator;
 	collections::vector<CXCursor> tokens;
+	LinxcNamespace* fileNamespace;
 
 	LinxcReflectCState(IAllocator *myAllocator);
 };
 
-void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, IAllocator* allocator, LinxcCursor* cursor);
+void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* localNamespace, IAllocator* allocator, LinxcCursor* cursor);
 
 CXChildVisitResult CursorVisitor(CXCursor current_cursor, CXCursor parent, CXClientData client_data);
 
-LinxcParsedFile Linxc_ReflectC(LinxcNamespace* globalNamespace, IAllocator* allocator, string fileFullName);
+LinxcParsedFile LinxcParseCFile(LinxcNamespace* globalNamespace, IAllocator* allocator, string fileFullName, string fileIncludeName);

@@ -8,6 +8,8 @@
 #define trait struct
 #define impl_trait(name)
 #define IsAttribute
+#define LINXCC_COPY
+#define LINXCC_ENDCOPY
 
 typedef signed char i8;
 typedef short i16;

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <path.hpp>
 #include <ArenaAllocator.hpp>
+#include <reflectC.hpp>
 
 LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel, bool isParsingLinxci)
 {
@@ -10,7 +11,7 @@ LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *curre
     this->parsingFile = currentFile;
     this->endOn = endsOn;
     this->isToplevel = isTopLevel;
-    this->currentNamespace = &myParser->globalNamespace;
+    this->currentNamespace = NULL;
     this->currentFunction = NULL;
     this->parentType = NULL;
     this->varsInScope = collections::hashmap<string, LinxcVar *>(&defaultAllocator, &stringHash, &stringEql);
@@ -233,6 +234,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     //nameToToken.Add(string(nameToToken.allocator, "volatile"), Linxc_Keyword_volatile);
     nameToToken.Add(string(nameToToken.allocator, "while"), Linxc_Keyword_while);
     nameToToken.Add(string(nameToToken.allocator, "attribute"), Linxc_keyword_attribute);
+    nameToToken.Add(string(nameToToken.allocator, "endif"), Linxc_Keyword_endif);
 }
 void LinxcParserState::deinit()
 {
@@ -316,8 +318,6 @@ bool LinxcParser::Compile(const char* outputDirectory)
                 string pathC = path::SwapExtension(&defaultAllocator, outputPath, ".c");
                 string pathH = path::SwapExtension(&defaultAllocator, outputPath, ".h");
 
-                printf("Transpiling file %s\n", outputPath.buffer);
-
                 this->TranspileFile(&this->parsedFiles.buckets[i].entries.ptr[j].value, pathC.buffer, pathH.buffer);
             
                 outputPath.deinit();
@@ -337,9 +337,7 @@ void LinxcParser::AddAllFilesFromDirectory(string directoryPath)
         string fullPathAndName = string(&defaultAllocator, directoryPath.buffer);
         fullPathAndName.Append("/");
         fullPathAndName.Append(result.data[i].buffer);
-
-        printf("%s\n", fullPathAndName.buffer);
-
+        
         LinxcIncludedFile includedFile;
         includedFile.includeName = result.data[i];
         includedFile.fullNameAndPath = fullPathAndName.CloneDeinit(this->allocator);
@@ -374,6 +372,8 @@ LinxcParsedFile *LinxcParser::ParseFile(string fileFullPath, string includeName,
     if (this->TokenizeFile(&tokenizer, allocator, &file))
     {
         LinxcParserState parserState = LinxcParserState(this, &file, &tokenizer, LinxcEndOn_Eof, true, parsingLinxci);
+        file.fileNamespace = LinxcPhoneyNamespace(this->allocator, &this->globalNamespace);
+        parserState.currentNamespace = &file.fileNamespace;
         option<collections::vector<LinxcStatement>> ast = this->ParseCompoundStmt(&parserState);
 
         if (ast.present)
@@ -522,9 +522,23 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
     collections::hashmap<string, LinxcMacro*> identifierToMacro = collections::hashmap<string, LinxcMacro*>(&defaultAllocator, &stringHash, &stringEql);
     tokenizer->tokenStream = collections::vector<LinxcToken>(allocator);
     bool nextMacroIsAttribute = false;
+    bool skipUntilEndif = false;
+    i32 expectEndif = 0;
     while (true)
     {
         LinxcToken token = tokenizer->TokenizeAdvance();
+
+        if (token.ID == Linxc_Eof && expectEndif > 0)
+        {
+            parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected #endif before end of file"));
+            identifierToMacro.deinit();
+            return false;
+        }
+
+        if (skipUntilEndif && token.ID != Linxc_Hash)
+        {
+            continue;
+        }
 
         if (token.ID == Linxc_keyword_attribute)
         {
@@ -533,130 +547,174 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
         else if (token.ID == Linxc_Hash)
         {
             LinxcToken preprocessorDirective = tokenizer->TokenizeAdvance();
-            if (preprocessorDirective.ID == Linxc_Keyword_define)
-            {
-                LinxcToken name = tokenizer->TokenizeAdvance();
-                if (name.ID == Linxc_Identifier)
-                {
-                    LinxcToken next = tokenizer->TokenizeAdvance();
-                    if (next.ID == Linxc_LParen)
-                    {
-                        collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
-                        collections::vector<LinxcToken> macroArgs = collections::vector<LinxcToken>(&defaultAllocator);
-                        bool foundEllipsis = false;
 
-                        LinxcToken macroArg = tokenizer->TokenizeAdvance();
-                        if (macroArg.ID != Linxc_RParen)
+            if (!skipUntilEndif)
+            {
+                if (preprocessorDirective.ID == Linxc_Keyword_define)
+                {
+                    LinxcToken name = tokenizer->TokenizeAdvance();
+                    if (name.ID == Linxc_Identifier)
+                    {
+                        LinxcToken next = tokenizer->TokenizeAdvance();
+                        if (next.ID == Linxc_LParen)
                         {
-                            while (true)
+                            collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
+                            collections::vector<LinxcToken> macroArgs = collections::vector<LinxcToken>(&defaultAllocator);
+                            bool foundEllipsis = false;
+
+                            LinxcToken macroArg = tokenizer->TokenizeAdvance();
+                            if (macroArg.ID != Linxc_RParen)
                             {
-                                if (macroArg.ID == Linxc_Ellipsis)
+                                while (true)
                                 {
-                                    macroArgs.Add(macroArg);
-                                    foundEllipsis = true;
-                                }
-                                if (macroArg.ID == Linxc_Identifier)
-                                {
-                                    if (foundEllipsis)
+                                    if (macroArg.ID == Linxc_Ellipsis)
                                     {
-                                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: No macro arguments allowed after open-ended argument ... !"));
-                                        identifierToMacro.deinit();
-                                        return false;
+                                        macroArgs.Add(macroArg);
+                                        foundEllipsis = true;
+                                    }
+                                    if (macroArg.ID == Linxc_Identifier)
+                                    {
+                                        if (foundEllipsis)
+                                        {
+                                            parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: No macro arguments allowed after open-ended argument ... !"));
+                                            identifierToMacro.deinit();
+                                            return false;
+                                        }
+                                        else
+                                        {
+                                            macroArgs.Add(macroArg);
+                                        }
+                                    }
+                                    LinxcToken afterMacroArg = tokenizer->TokenizeAdvance();
+                                    if (afterMacroArg.ID == Linxc_RParen)
+                                    {
+                                        break;
+                                    }
+                                    else if (afterMacroArg.ID == Linxc_Comma)
+                                    {
+                                        macroArg = tokenizer->TokenizeAdvance();
                                     }
                                     else
                                     {
-                                        macroArgs.Add(macroArg);
+                                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Unexpected token after macro argument. Token after macro argument must be either , or )"));
+                                        return false;
                                     }
                                 }
-                                LinxcToken afterMacroArg = tokenizer->TokenizeAdvance();
-                                if (afterMacroArg.ID == Linxc_RParen)
-                                {
-                                    break;
-                                }
-                                else if (afterMacroArg.ID == Linxc_Comma)
-                                {
-                                    macroArg = tokenizer->TokenizeAdvance();
-                                }
-                                else
-                                {
-                                    parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Unexpected token after macro argument. Token after macro argument must be either , or )"));
-                                    return false;
-                                }
                             }
-                        }
 
-                        LinxcToken bodyToken = tokenizer->TokenizeAdvance();
-                        while (bodyToken.ID != Linxc_Eof && bodyToken.ID != Linxc_Nl)
-                        {
-                            macroBody.Add(bodyToken);
-                            bodyToken = tokenizer->TokenizeAdvance();
+                            LinxcToken bodyToken = tokenizer->TokenizeAdvance();
+                            while (bodyToken.ID != Linxc_Eof && bodyToken.ID != Linxc_Nl)
+                            {
+                                macroBody.Add(bodyToken);
+                                bodyToken = tokenizer->TokenizeAdvance();
+                            }
+                            LinxcMacro macro;
+                            macro.name = name.ToString(allocator);
+                            macro.arguments = macroArgs.ToOwnedArrayWith(allocator);
+                            macro.body = macroBody;
+                            macro.isFunctionMacro = true;
+                            parsingFile->definedMacros.Add(macro);
+
+                            /*if (nextMacroIsAttribute)
+                            {
+                                parsingFile->definedAttributes.Add(macro);
+                                nextMacroIsAttribute = false;
+                            }
+                            else */identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
                         }
-                        LinxcMacro macro;
-                        macro.name = name.ToString(allocator);
-                        macro.arguments = macroArgs.ToOwnedArrayWith(allocator);
-                        macro.body = macroBody;
-                        macro.isFunctionMacro = true;
-                        parsingFile->definedMacros.Add(macro);
-                        
-                        if (nextMacroIsAttribute)
+                        else
                         {
-                            parsingFile->definedAttributes.Add(macro);
-                            nextMacroIsAttribute = false;
+                            collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
+
+                            while (next.ID != Linxc_Eof && next.ID != Linxc_Nl)
+                            {
+                                macroBody.Add(next);
+                                next = tokenizer->TokenizeAdvance();
+                            }
+                            LinxcMacro macro;
+                            macro.name = name.ToString(allocator);
+                            macro.arguments = collections::Array<LinxcToken>();
+                            macro.body = macroBody;
+                            macro.isFunctionMacro = false;
+                            parsingFile->definedMacros.Add(macro);
+                            /*if (nextMacroIsAttribute)
+                            {
+                                parsingFile->definedAttributes.Add(macro);
+                                nextMacroIsAttribute = false;
+                            }
+                            else */identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
                         }
-                        else identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
                     }
                     else
                     {
-                        collections::vector<LinxcToken> macroBody = collections::vector<LinxcToken>(allocator);
-
-                        while (next.ID != Linxc_Eof && next.ID != Linxc_Nl)
-                        {
-                            macroBody.Add(next);
-                            next = tokenizer->TokenizeAdvance();
-                        }
-                        LinxcMacro macro;
-                        macro.name = name.ToString(allocator);
-                        macro.arguments = collections::Array<LinxcToken>();
-                        macro.body = macroBody;
-                        macro.isFunctionMacro = false;
-                        parsingFile->definedMacros.Add(macro);
-                        if (nextMacroIsAttribute)
-                        {
-                            parsingFile->definedAttributes.Add(macro);
-                            nextMacroIsAttribute = false;
-                        }
-                        else identifierToMacro.Add(macro.name, parsingFile->definedMacros.Get(parsingFile->definedMacros.count - 1));
+                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Expected non-reserved identifier name after #define directive"));
+                        return false;
                     }
                 }
-                else
+                else if (preprocessorDirective.ID == Linxc_Keyword_ifdef)
                 {
-                    parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Expected non-reserved identifier name after #define directive"));
-                    return false;
+                    LinxcToken macroToCheck = tokenizer->TokenizeAdvance();
+                    string macroToCheckString = macroToCheck.ToString(&defaultAllocator);
+
+                    expectEndif += 1;
+                    if (!identifierToMacro.Contains(macroToCheckString))
+                    {
+                        skipUntilEndif = true;
+                    }
+                    macroToCheckString.deinit();
+                }
+                else if (preprocessorDirective.ID == Linxc_Keyword_ifndef)
+                {
+                    LinxcToken macroToCheck = tokenizer->TokenizeAdvance();
+                    string macroToCheckString = macroToCheck.ToString(&defaultAllocator);
+
+                    expectEndif += 1;
+                    if (identifierToMacro.Contains(macroToCheckString))
+                    {
+                        skipUntilEndif = true;
+                    }
+                    macroToCheckString.deinit();
+                }
+                else if (preprocessorDirective.ID == Linxc_Keyword_include)
+                {
+                    //parser doesn't care about the opening # so dont need to add that
+
+                    tokenizer->tokenStream.Add(preprocessorDirective);
+
+                    LinxcToken next = tokenizer->TokenizeAdvance();
+                    if (next.ID != Linxc_MacroString)
+                    {
+                        parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected <file to be included> after #include declaration"));
+                        identifierToMacro.deinit();
+                        return false;
+                    }
+
+                    if (next.end - 1 <= next.start + 1)
+                    {
+                        parsingFile->errors.Add(ERR_MSG(this->allocator, "#include directive is empty!"));
+                    }
+                    else
+                    {
+                        tokenizer->tokenStream.Add(next);
+                    }
                 }
             }
-            else if (preprocessorDirective.ID == Linxc_Keyword_include)
+            else if (preprocessorDirective.ID == Linxc_Keyword_endif)
             {
-                //parser doesn't care about the opening # so dont need to add that
-
-                tokenizer->tokenStream.Add(preprocessorDirective);
-
-                LinxcToken next = tokenizer->TokenizeAdvance();
-                if (next.ID != Linxc_MacroString)
+                if (expectEndif > 0)
                 {
-                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected <file to be included> after #include declaration"));
-                    identifierToMacro.deinit();
-                    return false;
-                }
-
-                if (next.end - 1 <= next.start + 1)
-                {
-                    parsingFile->errors.Add(ERR_MSG(this->allocator, "#include directive is empty!"));
+                    if (skipUntilEndif)
+                    {
+                        skipUntilEndif = false;
+                    }
+                    expectEndif -= 1;
                 }
                 else
                 {
-                    tokenizer->tokenStream.Add(next);
+                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Unexpected #endif statement"));
                 }
             }
+            //else if (preprocessorDirective.ID == Linxc_Keyword)
         }
         else
         {
@@ -1239,10 +1297,10 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
             else
             {
                 //check state namespaces
-                LinxcNamespace* toCheck = state->currentNamespace;
+                LinxcPhoneyNamespace* toCheck = state->currentNamespace;
                 while (toCheck != NULL)
                 {
-                    LinxcFunc* asFunction = toCheck->functions.Get(identifierName);
+                    LinxcFunc* asFunction = toCheck->functionRefs.GetCopyOr(identifierName, NULL);
                     if (asFunction != NULL)
                     {
                         result.ID = LinxcExpr_FunctionRef;
@@ -1252,7 +1310,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                     }
                     else
                     {
-                        LinxcVar* asVar = toCheck->variables.Get(identifierName);
+                        LinxcVar* asVar = toCheck->variableRefs.GetCopyOr(identifierName, NULL);
                         if (asVar != NULL)
                         {
                             result.ID = LinxcExpr_Variable;
@@ -1264,7 +1322,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                         }
                         else
                         {
-                            LinxcType* asType = toCheck->types.Get(identifierName);
+                            LinxcType* asType = toCheck->typeRefs.GetCopyOr(identifierName, NULL);
                             if (asType != NULL)
                             {
                                 result.ID = LinxcExpr_TypeRef;
@@ -1274,12 +1332,12 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                             }
                             else
                             {
-                                LinxcNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
+                                LinxcPhoneyNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
                                 if (asNamespace != NULL)
                                 {
                                     result.ID = LinxcExpr_NamespaceRef;
                                     
-                                    result.data.namespaceRef = asNamespace;
+                                    result.data.namespaceRef = asNamespace->actualNamespace;
                                     result.resolvesTo.lastType = NULL;
                                     break;
                                 }
@@ -1666,23 +1724,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
                 string extension = path::GetExtension(&defaultAllocator, macroString);
 
-                //if its a .h file, we attempt to parse it like a C header via libclang and the C reflection API
-                if (extension == ".h")
-                {
-                    if (macroString != "Linxc.h")
-                    {
-                        //only if it isnt actually Linxc.h
-                    }
-                    LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
-                    includeStatement.includedFile = NULL;
-                    includeStatement.includeString = macroString;
-
-                    LinxcStatement stmt;
-                    stmt.data.includeStatement = includeStatement;
-                    stmt.ID = LinxcStmt_Include;
-                    result.Add(stmt);
-                }
-                else if (extension == ".linxc")
+                if (extension == ".linxc" || (extension == ".h" && macroString != "Linxc.h"))
                 {
                     //parse that file, if we can find it
                     //and it hasnt been parsed yet
@@ -1726,27 +1768,46 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         if (includedFile != NULL)
                         {
                             //need the results now!!
-                            string fileContents = io::ReadFile(&defaultAllocator, includedFile->fullNameAndPath.buffer);
-                            LinxcParsedFile* parsedInclude = this->ParseFile(includedFile->fullNameAndPath, includedFile->includeName, fileContents);
-                            if (parsedInclude->errors.count > 0)
+                            if (extension == ".h")
                             {
-                                errors->Add(ERR_MSG(this->allocator, "Included file has errors, stopping compilation for this file"));
-                                toBreak = true;
-                                break;
-                            }
-                            else
-                            {
+                                /*LinxcParsedFile parsedInclude = LinxcParseCFile(&this->globalNamespace, this->allocator, includedFile->fullNameAndPath, includedFile->includeName);
+                                LinxcParsedFile *ptr = this->parsedFiles.Add(includedFile->includeName, parsedInclude);
+                            
                                 LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
-                                includeStatement.includedFile = alreadyParsed;
-                                includeStatement.includeString = path::SwapExtension(this->allocator, macroString, ".h");
+                                includeStatement.includedFile = ptr;
+                                includeStatement.includeString = macroString.CloneDeinit(this->allocator);
 
                                 LinxcStatement stmt;
                                 stmt.data.includeStatement = includeStatement;
                                 stmt.ID = LinxcStmt_Include;
-                                result.Add(stmt);
-                                macroString.deinit();
+                                result.Add(stmt);*/
                             }
-                            fileContents.deinit();
+                            else
+                            {
+                                string fileContents = io::ReadFile(&defaultAllocator, includedFile->fullNameAndPath.buffer);
+                                LinxcParsedFile* parsedInclude = this->ParseFile(includedFile->fullNameAndPath, includedFile->includeName, fileContents);
+                                if (parsedInclude->errors.count > 0)
+                                {
+                                    errors->Add(ERR_MSG(this->allocator, "Included file has errors, stopping compilation for this file"));
+                                    toBreak = true;
+                                    break;
+                                }
+                                else
+                                {
+                                    LinxcIncludeStatement includeStatement = LinxcIncludeStatement();
+                                    includeStatement.includedFile = parsedInclude;
+                                    includeStatement.includeString = path::SwapExtension(this->allocator, macroString, ".h");
+
+                                    state->currentNamespace->Add(&parsedInclude->fileNamespace);
+
+                                    LinxcStatement stmt;
+                                    stmt.data.includeStatement = includeStatement;
+                                    stmt.ID = LinxcStmt_Include;
+                                    result.Add(stmt);
+                                    macroString.deinit();
+                                }
+                                fileContents.deinit();
+                            }
                         }
                         else
                         {
@@ -1787,15 +1848,15 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             else
             {
                 string namespaceNameStrTemp = namespaceName.ToString(&defaultAllocator);
-                LinxcNamespace* thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStrTemp);
+                //LinxcNamespace* thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStrTemp);
+                LinxcPhoneyNamespace* thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStrTemp);
 
                 if (thisNamespace == NULL)
                 {
                     string namespaceNameStr = namespaceName.ToString(this->allocator);
                     LinxcNamespace newNamespace = LinxcNamespace(this->allocator, namespaceNameStr);
-                    newNamespace.parentNamespace = state->currentNamespace;
-                    state->currentNamespace->subNamespaces.Add(namespaceNameStr, newNamespace);
-                    thisNamespace = state->currentNamespace->subNamespaces.Get(namespaceNameStr);
+                    newNamespace.parentNamespace = state->currentNamespace->actualNamespace;
+                    thisNamespace = state->currentNamespace->AddNamespaceToOrigin(namespaceNameStr, newNamespace);
                 }
 
                 LinxcToken next = tokenizer->PeekNextUntilValid();
@@ -1814,7 +1875,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 option<collections::vector<LinxcStatement>> namespaceScopeBody = this->ParseCompoundStmt(&nextState);
 
                 LinxcNamespaceScope namespaceScope = LinxcNamespaceScope();
-                namespaceScope.referencedNamespace = thisNamespace;
+                namespaceScope.referencedNamespace = thisNamespace->actualNamespace;
                 if (namespaceScopeBody.present)
                 {
                     namespaceScope.body = namespaceScopeBody.value;
@@ -1854,7 +1915,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     errors->Add(ERR_MSG(this->allocator, "Expected { after enum name"));
                 }
 
-                LinxcType enumType = LinxcType(allocator, enumName.ToString(allocator), state->currentNamespace, state->parentType);
+                LinxcType enumType = LinxcType(allocator, enumName.ToString(allocator), state->currentNamespace->actualNamespace, state->parentType);
                 //LinxcEnum enumerable = LinxcEnum(this->allocator, enumName.ToString(allocator));
 
                 if (tokenizer->PeekNextUntilValid().ID != Linxc_RBrace)
@@ -1962,18 +2023,16 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             }
                         }
                     }
-
-                    state->currentNamespace->types.Add(enumType.name, enumType);
-                    LinxcType* ptr = state->currentNamespace->types.Get(enumType.name);
-
-                    LinxcStatement stmt;
-                    stmt.ID = LinxcStmt_TypeDecl;
-                    stmt.data.typeDeclaration = ptr;
-                    result.Add(stmt);
-
                     nameToEnumMember.deinit();
-                    expectSemicolon = true;
                 }
+                LinxcType* ptr = state->currentNamespace->AddTypeToOrigin(enumType.name, enumType);//types.Add(enumType.name, enumType);
+
+                LinxcStatement stmt;
+                stmt.ID = LinxcStmt_TypeDecl;
+                stmt.data.typeDeclaration = ptr;
+                result.Add(stmt);
+
+                expectSemicolon = true;
             }
         }
         break;
@@ -2000,7 +2059,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             else
             {
                 //declare new struct
-                LinxcType type = LinxcType(allocator, structName.ToString(allocator), state->currentNamespace, state->parentType);
+                LinxcType type = LinxcType(allocator, structName.ToString(allocator), state->currentNamespace->actualNamespace, state->parentType);
 
                 LinxcToken next = tokenizer->PeekNextUntilValid();
                 if (next.ID != Linxc_LBrace)
@@ -2019,15 +2078,14 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 }
                 else
                 {
-                    state->currentNamespace->types.Add(type.name, type);
-                    ptr = state->currentNamespace->types.Get(type.name);
+                    ptr = state->currentNamespace->AddTypeToOrigin(type.name, type);
                 }
 
                 LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
                 nextState.parentType = ptr;
                 nextState.endOn = LinxcEndOn_RBrace;
                 nextState.currentNamespace = state->currentNamespace;
-                state->parsingFile->definedTypes.Add(ptr);
+                //state->parsingFile->definedTypes.Add(ptr);
 
                 option<collections::vector<LinxcStatement>> structBody = this->ParseCompoundStmt(&nextState);
 
@@ -2156,10 +2214,9 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             }
                             else //else add to namespace
                             {
-                                state->currentNamespace->variables.Add(varDecl.name, varDecl);
-                                ptr = state->currentNamespace->variables.Get(varDecl.name);
+                                ptr = state->currentNamespace->AddVariableToOrigin(varDecl.name, varDecl);//variables.Add(varDecl.name, varDecl);
 
-                                state->parsingFile->definedVars.Add(ptr);
+                                //state->parsingFile->definedVars.Add(ptr);
                             }
 
                             LinxcStatement stmt;
@@ -2215,7 +2272,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         }
                         else
                         {
-                            newFunc.funcNamespace = state->currentNamespace;
+                            newFunc.funcNamespace = state->currentNamespace->actualNamespace;
                         }
 
                         LinxcFunc* ptr = NULL;
@@ -2227,8 +2284,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         }
                         else
                         {
-                            state->currentNamespace->functions.Add(newFunc.name, newFunc);
-                            ptr = state->currentNamespace->functions.Get(newFunc.name);
+                            ptr = state->currentNamespace->AddFunctionToOrigin(newFunc.name, newFunc);
                         }
 
                         LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
@@ -2564,6 +2620,7 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
     {
         string swappedExtension = path::SwapExtension(&defaultAllocator, parsedFile->includeName, ".h");
         fprintf(fs, "#include <%s>\n", swappedExtension.buffer);
+        fprintf(fs, "#include <Linxc.h>\n");
         swappedExtension.deinit();
         //we only care about functions atm
         for (usize i = 0; i < parsedFile->definedFuncs.count; i++)

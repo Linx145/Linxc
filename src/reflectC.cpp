@@ -64,15 +64,14 @@ LinxcReflectCState::LinxcReflectCState(IAllocator * myAllocator)
     allocator = myAllocator;
     this->tokens = collections::vector<CXCursor>(myAllocator);
 }
-void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, IAllocator* allocator, LinxcCursor* cursor, collections::hashmap<string, LinxcType*>* typeMap)
+void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* localNamespace, IAllocator* allocator, LinxcCursor* cursor)
 {
     string structName = cursor->GetSpelling(&defaultAllocator);
-    if (!typeMap->Contains(structName))
+    if (!localNamespace->types.Contains(structName))
     {
         //printf("struct %s\n", structName.buffer);
         string structNamePersistent = structName.CloneDeinit(allocator);
 
-        LinxcType* typePtr = (LinxcType*)allocator->Allocate(sizeof(LinxcType));
         LinxcType type = LinxcType(allocator, structNamePersistent, NULL, NULL);
 
         for (usize j = 0; j < cursor->body.count; j++)
@@ -149,10 +148,9 @@ void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, IAllocator* allocat
                 }
                 else
                 {
-                    LinxcType** typeMapContains = typeMap->Get(searchString);
-                    if (typeMapContains != NULL)
+                    LinxcType* varType = localNamespace->types.Get(searchString);
+                    if (varType != NULL)
                     {
-                        varType = *typeMapContains;
                         LinxcExpression typeExpr;
                         typeExpr.ID = LinxcExpr_TypeRef;
                         typeExpr.resolvesTo.lastType = NULL;
@@ -169,11 +167,10 @@ void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, IAllocator* allocat
                 clang_disposeString(varCXTypeSpelling);
             }
         }
-
-        //by default, the types in the definedType of the file live within the namespaces.
-        //However, c types from a c file ain't concatenated into the namespace for obvious reasons
-        *typePtr = type;
-        typeMap->Add(structNamePersistent, typePtr);
+        //*typePtr = type;
+        localNamespace->types.Add(structNamePersistent, type);
+        
+        //typeMap->Add(structNamePersistent, typePtr);
 
         structName.deinit();
     }
@@ -197,11 +194,11 @@ CXChildVisitResult CursorVisitor(CXCursor current, CXCursor parent, CXClientData
 
     return CXChildVisit_Continue;
 }
-LinxcParsedFile Linxc_ReflectC(LinxcNamespace* globalNamespace, IAllocator *allocator, string fileFullName)
+LinxcParsedFile LinxcParseCFile(LinxcNamespace* globalNamespace, IAllocator *allocator, string fileFullName, string fileIncludeName)
 {
-    LinxcParsedFile file = LinxcParsedFile(allocator, fileFullName, string(allocator));
+    LinxcParsedFile file = LinxcParsedFile(allocator, fileFullName, fileIncludeName);
 
-    collections::hashmap<string, LinxcType*> typeMap = collections::hashmap<string, LinxcType*>(&defaultAllocator, &stringHash, &stringEql);
+    LinxcNamespace localNamespace = LinxcNamespace(allocator, string(allocator));
 
 	CXIndex index = clang_createIndex(0, 0);
     const char** args = NULL;//(const char**)allocator->Allocate(sizeof(void*));
@@ -236,7 +233,7 @@ LinxcParsedFile Linxc_ReflectC(LinxcNamespace* globalNamespace, IAllocator *allo
             }
             else*/ if (cursor->kind == CXCursor_StructDecl)
             {
-                LinxcGetStructDeclInfo(globalNamespace, allocator, cursor, &typeMap);
+                LinxcGetStructDeclInfo(globalNamespace, &localNamespace, allocator, cursor);
             }
             else if (cursor->kind == CXCursor_EnumDecl)
             {
@@ -247,17 +244,6 @@ LinxcParsedFile Linxc_ReflectC(LinxcNamespace* globalNamespace, IAllocator *allo
         clang_disposeTranslationUnit(tu);
         clang_disposeIndex(index);
 
-        for (usize i = 0; i < typeMap.bucketsCount; i++)
-        {
-            if (typeMap.buckets[i].initialized)
-            {
-                for (usize j = 0; j < typeMap.buckets[i].entries.count; j++)
-                {
-                    file.definedTypes.Add(typeMap.buckets[i].entries.ptr[j].value);
-                }
-            }
-        }
-        typeMap.deinit();
         return file;
 	}
 }

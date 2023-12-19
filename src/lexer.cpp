@@ -1281,7 +1281,7 @@ LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocesso
     if (tokenIDPtr != NULL)
     {
         LinxcTokenID tokenID = *tokenIDPtr;
-        if (tokenID == Linxc_Keyword_include || tokenID == Linxc_Keyword_define || tokenID == Linxc_Keyword_ifdef || tokenID == Linxc_Keyword_ifndef || tokenID == Linxc_Keyword_error || tokenID == Linxc_Keyword_pragma)
+        if (tokenID == Linxc_Keyword_endif || tokenID == Linxc_Keyword_include || tokenID == Linxc_Keyword_define || tokenID == Linxc_Keyword_ifdef || tokenID == Linxc_Keyword_ifndef || tokenID == Linxc_Keyword_error || tokenID == Linxc_Keyword_pragma)
         {
             if (!isPreprocessorDirective)
             {
