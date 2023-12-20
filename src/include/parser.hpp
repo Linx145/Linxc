@@ -174,6 +174,7 @@ struct LinxcParser
     LinxcType* typeofU8;
     LinxcNamespace globalNamespace;
     string thisKeyword;
+    string linxcstdLocation;
 
     LinxcParser(IAllocator *allocator);
 
@@ -192,6 +193,7 @@ struct LinxcParser
     option<LinxcExpression> ParseIdentifier(LinxcParserState *state, option<LinxcExpression> parentScopeOverride);
 
     void deinit();
+    void SetLinxcStdLocation(string path);
     void AddAllFilesFromDirectory(string directoryPath);
     string FullPathFromIncludeName(string includeName);
 

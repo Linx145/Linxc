@@ -160,6 +160,8 @@ option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
 
 LinxcParsedFile::LinxcParsedFile()
 {
+    this->isLinxcH = false;
+    this->mustTranspileC = false;
     this->definedFuncs = collections::vector<LinxcFunc *>();
     this->definedMacros = collections::vector<LinxcMacro>();
     //this->definedTypes = collections::vector<LinxcType *>();
@@ -171,6 +173,8 @@ LinxcParsedFile::LinxcParsedFile()
 }
 LinxcParsedFile::LinxcParsedFile(IAllocator *allocator, string fullPath, string includeName)
 {
+    this->isLinxcH = false;
+    this->mustTranspileC = false;
     this->definedFuncs = collections::vector<LinxcFunc *>(allocator);
     this->definedMacros = collections::vector<LinxcMacro>(allocator);
     //this->definedTypes = collections::vector<LinxcType *>(allocator);

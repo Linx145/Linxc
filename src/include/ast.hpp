@@ -287,6 +287,9 @@ struct LinxcParsedFile
 
     LinxcPhoneyNamespace fileNamespace;
 
+    bool mustTranspileC;
+    bool isLinxcH;
+
     LinxcParsedFile();
     LinxcParsedFile(IAllocator *allocator, string fullPath, string includeName);
 };
@@ -321,6 +324,12 @@ struct LinxcIfStatement
     collections::vector<LinxcStatement> result;
 };
 
+struct LinxcUseLang
+{
+    string languageUsed;
+    collections::vector<LinxcToken> body;
+};
+
 enum LinxcStatementID
 {
     LinxcStmt_Include,
@@ -331,7 +340,8 @@ enum LinxcStatementID
     LinxcStmt_FuncDecl,
     LinxcStmt_Namespace,
     LinxcStmt_If,
-    LinxcStmt_Else
+    LinxcStmt_Else,
+    LinxcStmt_UseLang,
 };
 union LinxcStatementData
 {
@@ -345,6 +355,7 @@ union LinxcStatementData
     LinxcNamespaceScope namespaceScope;
     LinxcIfStatement ifStatement;
     collections::vector<LinxcStatement> elseStatement;
+    LinxcUseLang useLang;
 
     LinxcStatementData();
 };

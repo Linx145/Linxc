@@ -111,6 +111,8 @@ enum LinxcTokenID
 
     Linxc_keyword_attribute,
     Linxc_Keyword_trait,
+    Linxc_keyword_uselang,
+    Linxc_keyword_enduselang,
 
     Linxc_Keyword_switch,
     Linxc_Keyword_typedef,

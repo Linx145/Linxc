@@ -1,8 +1,8 @@
 #include <Linxc.h>
-#include <stdio.linxci>
+#include <stdio.linxch>
 
-i32 Main()
+i32 main()
 {
-    printf("Hello World!");
+    printf("Hello %s\n", "World!");
     return 0;
 }

@@ -17,17 +17,16 @@ i32 main()
 
     printf("Program started\n");
     LinxcParser parser = LinxcParser(&arena.asAllocator);
-
-    LinxcParseCFile(&parser.globalNamespace, &arena.asAllocator, );
-
-    /*parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
+    parser.SetLinxcStdLocation(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/src/linxcstd"));
+    
+    //parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
     parser.AddAllFilesFromDirectory(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
     if (!parser.Compile("C:/Users/Linus/source/repos/Linxc/linxc-out"))
     {
         parser.PrintAllErrors();
         printf("Compilation failed!\n");
     }
-    else printf("Compilation success!\n");*/
+    else printf("Compilation success!\n");
 
     parser.deinit();
     printf("Program finish, freeing remaining %i allocations\n", (i32)arena.ptrs.count);

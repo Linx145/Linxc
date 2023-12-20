@@ -39,6 +39,7 @@
         "filesystem": "cpp",
         "system_error": "cpp",
         "helloworld.h": "c",
-        "*.linxci": "cpp"
+        "*.linxci": "cpp",
+        "*.linxch": "cpp"
     }
 }
