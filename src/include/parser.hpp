@@ -175,6 +175,7 @@ struct LinxcParser
     LinxcNamespace globalNamespace;
     string thisKeyword;
     string linxcstdLocation;
+    string appName;
 
     LinxcParser(IAllocator *allocator);
 

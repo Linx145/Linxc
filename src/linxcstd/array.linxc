@@ -18,17 +18,23 @@ namespace collections
             this->data = NULL;
             this->length = 0;
         }
-        Array(T *data, usize length)
+        Array(T *data, usize itemsCount)
         {
             this->allocator = &defaultAllocator;
             this->data = data;
-            this->length = length;
+            this->length = itemsCount;
         }
-        Array(IAllocator *allocator, T *data, usize length)
+        Array(IAllocator* allocator, usize itemsCount)
+        {
+            this->allocator = allocator;
+            this->data = (T*)allocator->Allocate(sizeof(T) * itemsCount);
+            this->length = itemsCount;
+        }
+        Array(IAllocator *allocator, T *data, usize itemsCount)
         {
             this->allocator = allocator;
             this->data = data;
-            this->length = length;
+            this->length = itemsCount;
         }
         void deinit()
         {

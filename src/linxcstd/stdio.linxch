@@ -26,3 +26,5 @@ i64 ftell(FILE* stream);
 void fseek(FILE* stream, i64 position, i32 origin);
 
 i32 fputs(const u8* str, FILE* stream);
+
+void fprintf(FILE* stream, const u8* format, ...);

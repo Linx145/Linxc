@@ -26,7 +26,7 @@ struct LinxcFunctionCall
     LinxcFunc *func;
     collections::Array<LinxcExpression> inputParams;
     LinxcExpression* thisAsParam;
-    collections::Array<LinxcTypeReference> templateSpecializations;
+    collections::Array<LinxcExpression> templateArgs;
 
     string ToString(IAllocator *allocator);
 };
@@ -47,7 +47,8 @@ struct LinxcType
     collections::vector<LinxcVar> variables;
     collections::vector<LinxcFunc> functions;
     collections::vector<LinxcType> subTypes;
-    collections::vector<string> templateArgs;
+    collections::Array<string> templateArgs;
+    collections::hashset<collections::Array<LinxcTypeReference>> templateSpecializations;
     collections::vector<LinxcEnumMember> enumMembers;
     collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc> operatorOverloads;
 
@@ -71,7 +72,7 @@ struct LinxcTypeReference
     //We only need to store 1 LinxcType as it is a linked list that leads to parent types if any, and the namespace chain.
     LinxcType *lastType;
 
-    collections::Array<LinxcTypeReference> templateArgs;
+    collections::Array<LinxcExpression> templateArgs;
 
     u32 pointerCount;
 
@@ -87,25 +88,25 @@ struct LinxcTypeReference
     //we parse that within EvaluatePossible
     bool operator==(LinxcTypeReference B)
     {
-        bool templatesEqual = true;
-        if (this->templateArgs.length != B.templateArgs.length)
+        if (this->lastType != B.lastType || this->isConst != B.isConst || this->pointerCount != B.pointerCount || this->templateArgs.length != B.templateArgs.length)
         {
-            templatesEqual = false;
+            return false;
         }
-        if (templatesEqual)
+        for (usize i = 0; i < this->templateArgs.length; i++)
         {
-            for (usize i = 0; i < this->templateArgs.length; i++)
+            if (this->templateArgs.data[i].AsTypeReference().value != B.templateArgs.data[i].AsTypeReference().value)
             {
-                templatesEqual = this->templateArgs.data[i] == B.templateArgs.data[i];
+                return false;
             }
         }
-        return this->lastType == B.lastType && templatesEqual && this->pointerCount == B.pointerCount;
+        return true;
     }
     inline bool operator!=(LinxcTypeReference B)
     {
         return !(*this==B);
     }
 };
+bool LinxcTypeReferenceEql(LinxcTypeReference A, LinxcTypeReference B);
 u32 LinxcTypeReferenceHash(LinxcTypeReference A);
 
 enum LinxcExpressionID

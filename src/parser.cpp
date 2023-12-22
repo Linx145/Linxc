@@ -24,7 +24,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     this->thisKeyword = string(allocator, "this");
 
     const i32 numIntegerTypes = 8;
-    const i32 numNumericTypes = 10;// 11; TODO: Deal with char, probably will remove it
+    const i32 numNumericTypes = 10;
     const i32 numPrimitiveTypes = 13;
 
     //every numeric type can be explicitly compared to every other numeric type
@@ -340,17 +340,30 @@ bool LinxcParser::Compile(const char* outputDirectory)
         }
     }
 
-    //compile
-    cmd.Prepend("clang");
-    cmd.Append(" -I");
-    cmd.Append(this->linxcstdLocation.buffer);
-    cmd.Append(" -I");
-    cmd.Append(outputDirectory);
-    cmd.Append(" -o");
-    cmd.Append(outputDirectory);
-    cmd.Append("/Test.exe");
+    i32 result = 0;
 
-    i32 result = system(cmd.buffer);
+    //compile
+    if (this->appName.buffer != NULL)
+    {
+        cmd.Prepend("clang");
+        cmd.Append(" -I");
+        cmd.Append(this->linxcstdLocation.buffer);
+        cmd.Append(" -I");
+        cmd.Append(outputDirectory);
+        cmd.Append(" -o");
+
+        string outputFile = string(&defaultAllocator, outputDirectory);
+        outputFile.Append("/\"");
+        outputFile.Append(this->appName.buffer);
+        outputFile.Append("\".exe");
+
+        cmd.Append(outputFile.buffer);
+
+        result = system(cmd.buffer);
+        outputFile.deinit();
+    }
+    //i32 run = system(outputFile.buffer);
+    printf("\n");
 
     cmd.deinit();
     
@@ -1022,13 +1035,106 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 ERR_MSG msg = ERR_MSG(this->allocator, "No type, function or variable of name ");
                 msg.AppendDeinit(token.ToString(&defaultAllocator));
                 msg.Append(" exists");
-                if (prevScopeIfAny.present)
+                if (prevScopeIfAny.present && (prevScopeIfAny.value.ID != LinxcExpr_NamespaceRef || prevScopeIfAny.value.data.namespaceRef->name.buffer != NULL))
                 {
                     msg.Append(" within scope ");
                     msg.AppendDeinit(prevScopeIfAny.value.ToString(&defaultAllocator));
                 }
                 state->parsingFile->errors.Add(msg);
                 return option<LinxcExpression>();
+            }
+            collections::Array<LinxcExpression> potentialTemplateArgs;
+            if ((result.value.ID == LinxcExpr_TypeRef || result.value.ID == LinxcExpr_FunctionRef) && state->tokenizer->PeekNextUntilValid().ID == Linxc_AngleBracketLeft)
+            {
+                if ((result.value.ID == LinxcExpr_TypeRef && result.value.data.typeRef.lastType->templateArgs.length > 0) || (result.value.ID == LinxcExpr_FunctionRef && result.value.data.functionRef->templateArgs.length > 0))
+                {
+                    collections::vector<LinxcExpression> templateArgs = collections::vector<LinxcExpression>(&defaultAllocator);
+                    state->tokenizer->NextUntilValid();
+                    bool expectComma = false;
+                    while (true)
+                    {
+                        LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
+                        if (peekNext.ID == Linxc_AngleBracketRight)
+                        {
+                            break;
+                        }
+                        else if (peekNext.ID == Linxc_Comma)
+                        {
+                            if (expectComma)
+                            {
+                                state->tokenizer->NextUntilValid();
+                                expectComma = false;
+                            }
+                            else
+                            {
+                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Unexpected comma"));
+                            }
+                        }
+                        option<LinxcExpression> primaryExprOpt = this->ParseExpressionPrimary(state);
+                        if (primaryExprOpt.present)
+                        {
+                            LinxcExpression expr = this->ParseExpression(state, primaryExprOpt.value, -1);
+                            if (expr.resolvesTo.lastType != NULL)
+                            {
+                                state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Invalid type as template argument"));
+                            }
+                            else
+                            {
+                                templateArgs.Add(expr);
+                                expectComma = true;
+                            }
+                        }
+                        else break;
+                    }
+
+                    if (result.value.ID == LinxcExpr_TypeRef)
+                    {
+                        if (result.value.data.typeRef.lastType->templateArgs.length != templateArgs.count)
+                        {
+                            ERR_MSG msg = ERR_MSG(this->allocator, "Type expects ");
+                            msg.Append((u64)result.value.data.typeRef.lastType->templateArgs.length);
+                            msg.Append(" template arguments, but provided ");
+                            msg.Append((u64)templateArgs.count);
+                            state->parsingFile->errors.Add(msg);
+                        }
+                        else
+                        {
+                            result.value.data.typeRef.templateArgs = templateArgs.ToOwnedArrayWith(this->allocator);
+                            //add reference to type
+                            collections::Array<LinxcTypeReference> templateArgsTyperef = collections::Array<LinxcTypeReference>(this->allocator, result.value.data.typeRef.templateArgs.length);
+                            for (usize i = 0; i < result.value.data.typeRef.templateArgs.length; i++)
+                            {
+                                templateArgsTyperef.data[i] = result.value.data.typeRef.templateArgs.data[i].AsTypeReference().value;
+                            }
+                            if (!result.value.data.typeRef.lastType->templateSpecializations.Add(templateArgsTyperef))
+                            {
+                                //if the specializations list already contains such a specialization, dispose of the specialization
+                                templateArgsTyperef.deinit();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        potentialTemplateArgs = templateArgs.ToOwnedArrayWith(this->allocator);
+                    }
+                }
+                else
+                {
+                    if (result.value.ID == LinxcExpr_TypeRef)
+                    {
+                        ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
+                        msg.AppendDeinit(token.ToString(&defaultAllocator));
+                        msg.Append(" is not generic and is not accepting template types");
+                        state->parsingFile->errors.Add(msg);
+                    }
+                    else
+                    {
+                        ERR_MSG msg = ERR_MSG(this->allocator, "Function ");
+                        msg.AppendDeinit(token.ToString(&defaultAllocator));
+                        msg.Append(" is not generic and is not accepting template types");
+                        state->parsingFile->errors.Add(msg);
+                    }
+                }
             }
             if (result.value.ID == LinxcExpr_FunctionRef)
             {
@@ -1127,7 +1233,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     finalResult.data.functionCall.thisAsParam = NULL;
                     finalResult.data.functionCall.func = result.value.data.functionRef;
                     finalResult.data.functionCall.inputParams = inputArgs.ToOwnedArrayWith(this->allocator);
-                    finalResult.data.functionCall.templateSpecializations = collections::Array<LinxcTypeReference>(); //todo
+                    finalResult.data.functionCall.templateArgs = potentialTemplateArgs;
                     finalResult.resolvesTo = result.value.data.functionRef->returnType.AsTypeReference().value;
 
                     return option<LinxcExpression>(finalResult);
@@ -1281,7 +1387,6 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
         LinxcTypeReference reference;
         reference.isConst = false;
         reference.lastType = type;
-        reference.templateArgs = collections::Array<LinxcTypeReference>();
 
         result.ID = LinxcExpr_TypeRef;
         result.data.typeRef = reference;

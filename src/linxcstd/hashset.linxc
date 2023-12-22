@@ -103,7 +103,7 @@ namespace collections
                 bucketsCount = newSize;
             }
         }
-        void Add(T value)
+        bool Add(T value)
         {
             EnsureCapacity();
             u32 hash = hashFunc(value);
@@ -122,11 +122,12 @@ namespace collections
             {
                 if (eqlFunc(*buckets[index].entries.Get(i), value))
                 {
-                    return;
+                    return false;
                 }
             }
             Count++;
             buckets[index].entries.Add(value);
+            return true;
         }
         bool Remove(T value)
         {

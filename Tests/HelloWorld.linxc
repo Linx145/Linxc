@@ -1,8 +1,20 @@
 #include <Linxc.h>
 #include <stdio.linxch>
+#include <stdlib.linxch>
+
+struct structA
+{
+    float value;
+    void PrintValue()
+    {
+        printf("%f\n", value);
+    }
+};
 
 i32 main()
 {
-    printf("Hello %s\n", "World!");
+    structA instance;
+    instance.value = 2.5f;
+    instance.PrintValue();
     return 0;
 }

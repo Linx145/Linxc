@@ -1,5 +1,20 @@
 #include <ast.hpp>
 
+bool LinxcTypeReferenceEql(LinxcTypeReference A, LinxcTypeReference B)
+{
+    if (A.lastType != B.lastType || A.isConst != B.isConst || A.pointerCount != B.pointerCount || A.templateArgs.length != B.templateArgs.length)
+    {
+        return false;
+    }
+    for (usize i = 0; i < A.templateArgs.length; i++)
+    {
+        if (A.templateArgs.data[i].AsTypeReference().value != B.templateArgs.data[i].AsTypeReference().value)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 u32 LinxcTypeReferenceHash(LinxcTypeReference A)
 {
     //dont bother with the full name
@@ -11,7 +26,7 @@ u32 LinxcTypeReferenceHash(LinxcTypeReference A)
     u32 h2 = 0;
     for (usize i = 0; i < A.templateArgs.length; i++)
     {
-        h2 = LinxcTypeReferenceHash(A.templateArgs.data[i]);
+        h2 = LinxcTypeReferenceHash(A.templateArgs.data[i].AsTypeReference().value);
         h1 = ((h1 << 5) + h1) ^ h2;
         //result *= 11 + LinxcTypeReferenceHash(A.templateArgs.data[i]);
     }
@@ -328,7 +343,7 @@ LinxcType::LinxcType()
     this->typeNamespace = NULL;
     this->functions = collections::vector<LinxcFunc>();
     this->subTypes = collections::vector<LinxcType>();
-    this->templateArgs = collections::vector<string>();
+    this->templateArgs = collections::Array<string>();
     this->variables = collections::vector<LinxcVar>();
     this->enumMembers = collections::vector<LinxcEnumMember>();
     this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>();
@@ -341,7 +356,7 @@ LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNames
     this->typeNamespace = myNamespace;
     this->functions = collections::vector<LinxcFunc>(allocator);
     this->subTypes = collections::vector<LinxcType>(allocator);
-    this->templateArgs = collections::vector<string>(allocator);
+    this->templateArgs = collections::Array<string>();
     this->variables = collections::vector<LinxcVar>(allocator);
     this->enumMembers = collections::vector<LinxcEnumMember>(allocator);
     this->operatorOverloads = collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc>(allocator, &LinxcOperatorImplHash, &LinxcOperatorImplEql);
