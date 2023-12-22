@@ -757,11 +757,11 @@ LinxcToken LinxcTokenizer::TokenizeAdvance()
                 }
                 break;
             case Linxc_State_AngleBracketRight:
-                if (c == '>')
+                /*if (c == '>')
                 {
                     state = Linxc_State_AngleBracketAngleBracketRight;
                 }
-                else if (c == '=')
+                else */if (c == '=')
                 {
                     result.ID = Linxc_AngleBracketRightEqual;
                     self->index += 1;

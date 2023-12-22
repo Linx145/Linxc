@@ -1,0 +1,17 @@
+#include <Linxc.h>
+#include <stdlib.linxch>
+
+namespace collections
+{
+    template<typename T>
+    struct TestArray
+    {
+        T *data;
+        u64 length;
+
+        void deinit()
+        {
+            free(data);
+        }
+    };
+}

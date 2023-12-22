@@ -1056,6 +1056,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
                         if (peekNext.ID == Linxc_AngleBracketRight)
                         {
+                            state->tokenizer->NextUntilValid();
                             break;
                         }
                         else if (peekNext.ID == Linxc_Comma)
@@ -1073,7 +1074,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         option<LinxcExpression> primaryExprOpt = this->ParseExpressionPrimary(state);
                         if (primaryExprOpt.present)
                         {
-                            LinxcExpression expr = this->ParseExpression(state, primaryExprOpt.value, -1);
+                            LinxcExpression expr = this->ParseExpression(state, primaryExprOpt.value, GetPrecedence(Linxc_ColonColon));
                             if (expr.resolvesTo.lastType != NULL)
                             {
                                 state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Invalid type as template argument"));
@@ -1089,15 +1090,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
 
                     if (result.value.ID == LinxcExpr_TypeRef)
                     {
-                        if (result.value.data.typeRef.lastType->templateArgs.length != templateArgs.count)
-                        {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Type expects ");
-                            msg.Append((u64)result.value.data.typeRef.lastType->templateArgs.length);
-                            msg.Append(" template arguments, but provided ");
-                            msg.Append((u64)templateArgs.count);
-                            state->parsingFile->errors.Add(msg);
-                        }
-                        else
+                        if (result.value.data.typeRef.lastType->templateArgs.length == templateArgs.count)
                         {
                             result.value.data.typeRef.templateArgs = templateArgs.ToOwnedArrayWith(this->allocator);
                             //add reference to type
@@ -1111,6 +1104,14 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 //if the specializations list already contains such a specialization, dispose of the specialization
                                 templateArgsTyperef.deinit();
                             }
+                        }
+                        else
+                        {
+                            ERR_MSG msg = ERR_MSG(this->allocator, "Type expects ");
+                            msg.Append((u64)result.value.data.typeRef.lastType->templateArgs.length);
+                            msg.Append(" template arguments, but provided ");
+                            msg.Append((u64)templateArgs.count);
+                            state->parsingFile->errors.Add(msg);
                         }
                     }
                     else
@@ -1164,7 +1165,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                             }
                             LinxcExpression fullExpression = this->ParseExpression(state, primaryOpt.value, -1);
 
-                            if (fullExpression.resolvesTo.lastType == NULL)
+                            if (fullExpression.resolvesTo.lastType == NULL && fullExpression.resolvesTo.genericTypeName.buffer == NULL)
                             {
                                 state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Cannot parse a type name as a variable. Did you mean sizeof(), nameof() or typeof() instead?"));
                             }
@@ -1404,138 +1405,148 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
 
         if (!parentScopeOverride.present)
         {
-            //check local variables
-
-            LinxcVar **asLocalVar = state->varsInScope.Get(identifierName);
-            if (asLocalVar != NULL)
+            if (state->parentType != NULL && state->parentType->templateArgs.Contains(identifierName, &stringEql).present)
             {
-                LinxcVar* localVar = (*asLocalVar);
-                if (localVar->memberOf != NULL)
-                {
-                    //at this point, we insert the this-> into the ast if it is missing
-                    //this is because all member variables need the this-> reference when transpiling to C
-                    //since C does not have struct-scoped functions and thus relies on passing the
-                    //struct to be operated on as a variable called 'this'
-                    LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
-                    LinxcExpression thisExpr;
-                    thisExpr.priority = false;
-                    thisExpr.resolvesTo.isConst = thisVar->isConst;
-                    thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
-                    thisExpr.ID = LinxcExpr_Variable;
-                    thisExpr.data.variable = thisVar;
-
-                    LinxcExpression varExpr;
-                    varExpr.priority = false;
-                    varExpr.ID = LinxcExpr_Variable;
-                    varExpr.data.variable = localVar;
-                    varExpr.resolvesTo = localVar->type.AsTypeReference().value;
-                    varExpr.resolvesTo.isConst = localVar->isConst;
-
-                    result.ID = LinxcExpr_OperatorCall;
-                    LinxcOperator* thisDereference = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
-                    thisDereference->leftExpr = thisExpr;
-                    thisDereference->operatorType = Linxc_Arrow;
-                    thisDereference ->rightExpr = varExpr;
-                    result.data.operatorCall = thisDereference;
-                    result.resolvesTo = localVar->type.AsTypeReference().value;
-                    result.resolvesTo.isConst = localVar->isConst;
-                }
-                else
-                {
-                    result.ID = LinxcExpr_Variable;
-                    //this SHOULD point to the location of the var stored in the AST
-                    result.data.variable = *asLocalVar;
-                    result.resolvesTo = result.data.variable->type.AsTypeReference().value;
-                    result.resolvesTo.isConst = result.data.variable->isConst;
-                }
+                result.ID = LinxcExpr_TypeRef;
+                result.data.typeRef = LinxcTypeReference(NULL);
+                result.data.typeRef.genericTypeName = identifierName.Clone(this->allocator);
+                result.resolvesTo.lastType = NULL;
             }
             else
             {
-                //check state namespaces
-                LinxcPhoneyNamespace* toCheck = state->currentNamespace;
-                while (toCheck != NULL)
+                //check local variables
+
+                LinxcVar** asLocalVar = state->varsInScope.Get(identifierName);
+                if (asLocalVar != NULL)
                 {
-                    LinxcFunc* asFunction = toCheck->functionRefs.GetCopyOr(identifierName, NULL);
-                    if (asFunction != NULL)
+                    LinxcVar* localVar = *asLocalVar;
+                    if (localVar->memberOf != NULL)
                     {
-                        result.ID = LinxcExpr_FunctionRef;
-                        result.data.functionRef = asFunction;
-                        result.resolvesTo = asFunction->returnType.AsTypeReference().value;
-                        break;
+                        //at this point, we insert the this-> into the ast if it is missing
+                        //this is because all member variables need the this-> reference when transpiling to C
+                        //since C does not have struct-scoped functions and thus relies on passing the
+                        //struct to be operated on as a variable called 'this'
+                        LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
+                        LinxcExpression thisExpr;
+                        thisExpr.priority = false;
+                        thisExpr.resolvesTo.isConst = thisVar->isConst;
+                        thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
+                        thisExpr.ID = LinxcExpr_Variable;
+                        thisExpr.data.variable = thisVar;
+
+                        LinxcExpression varExpr;
+                        varExpr.priority = false;
+                        varExpr.ID = LinxcExpr_Variable;
+                        varExpr.data.variable = localVar;
+                        varExpr.resolvesTo = localVar->type.AsTypeReference().value;
+                        varExpr.resolvesTo.isConst = localVar->isConst;
+
+                        result.ID = LinxcExpr_OperatorCall;
+                        LinxcOperator* thisDereference = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
+                        thisDereference->leftExpr = thisExpr;
+                        thisDereference->operatorType = Linxc_Arrow;
+                        thisDereference->rightExpr = varExpr;
+                        result.data.operatorCall = thisDereference;
+                        result.resolvesTo = localVar->type.AsTypeReference().value;
+                        result.resolvesTo.isConst = localVar->isConst;
                     }
                     else
                     {
-                        LinxcVar* asVar = toCheck->variableRefs.GetCopyOr(identifierName, NULL);
-                        if (asVar != NULL)
+                        result.ID = LinxcExpr_Variable;
+                        //this SHOULD point to the location of the var stored in the AST
+                        result.data.variable = *asLocalVar;
+                        result.resolvesTo = result.data.variable->type.AsTypeReference().value;
+                        result.resolvesTo.isConst = result.data.variable->isConst;
+                    }
+                }
+                else
+                {
+                    //check state namespaces
+                    LinxcPhoneyNamespace* toCheck = state->currentNamespace;
+                    while (toCheck != NULL)
+                    {
+                        LinxcFunc* asFunction = toCheck->functionRefs.GetCopyOr(identifierName, NULL);
+                        if (asFunction != NULL)
                         {
-                            result.ID = LinxcExpr_Variable;
-                            result.data.variable = asVar;
-                            //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
-                            result.resolvesTo = asVar->type.AsTypeReference().value;
-                            result.resolvesTo.isConst = asVar->isConst;
+                            result.ID = LinxcExpr_FunctionRef;
+                            result.data.functionRef = asFunction;
+                            result.resolvesTo = asFunction->returnType.AsTypeReference().value;
                             break;
                         }
                         else
                         {
-                            LinxcType* asType = toCheck->typeRefs.GetCopyOr(identifierName, NULL);
-                            if (asType != NULL)
+                            LinxcVar* asVar = toCheck->variableRefs.GetCopyOr(identifierName, NULL);
+                            if (asVar != NULL)
                             {
-                                result.ID = LinxcExpr_TypeRef;
-                                result.data.typeRef = asType;
-                                result.resolvesTo.lastType = NULL;
+                                result.ID = LinxcExpr_Variable;
+                                result.data.variable = asVar;
+                                //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
+                                result.resolvesTo = asVar->type.AsTypeReference().value;
+                                result.resolvesTo.isConst = asVar->isConst;
                                 break;
                             }
                             else
                             {
-                                LinxcPhoneyNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
-                                if (asNamespace != NULL)
+                                LinxcType* asType = toCheck->typeRefs.GetCopyOr(identifierName, NULL);
+                                if (asType != NULL)
                                 {
-                                    result.ID = LinxcExpr_NamespaceRef;
-                                    
-                                    result.data.namespaceRef = asNamespace->actualNamespace;
+                                    result.ID = LinxcExpr_TypeRef;
+                                    result.data.typeRef = asType;
                                     result.resolvesTo.lastType = NULL;
                                     break;
                                 }
+                                else
+                                {
+                                    LinxcPhoneyNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
+                                    if (asNamespace != NULL)
+                                    {
+                                        result.ID = LinxcExpr_NamespaceRef;
+                                        result.data.namespaceRef = asNamespace->actualNamespace;
+                                        result.resolvesTo.lastType = NULL;
+                                        break;
+                                    }
+                                }
                             }
                         }
+
+                        toCheck = toCheck->parentNamespace;
                     }
 
-                    toCheck = toCheck->parentNamespace;
-                }
-
-                LinxcType* typeCheck = state->parentType;
-                if (typeCheck != NULL)
-                {
-                    LinxcFunc* asFunction = typeCheck->FindFunction(identifierName);
-                    if (asFunction != NULL)
+                    LinxcType* typeCheck = state->parentType;
+                    if (typeCheck != NULL)
                     {
-                        result.ID = LinxcExpr_FunctionRef;
-                        result.data.functionRef = asFunction;
-                        result.resolvesTo = asFunction->returnType.AsTypeReference().value;
-                    }
-                    else
-                    {
-                        LinxcVar* asVar = typeCheck->FindVar(identifierName);
-                        if (asVar != NULL)
+                        LinxcFunc* asFunction = typeCheck->FindFunction(identifierName);
+                        if (asFunction != NULL)
                         {
-                            result.ID = LinxcExpr_Variable;
-                            result.data.variable = asVar;
-                            result.resolvesTo = asVar->type.AsTypeReference().value;
-                            result.resolvesTo.isConst = asVar->isConst;
+                            result.ID = LinxcExpr_FunctionRef;
+                            result.data.functionRef = asFunction;
+                            result.resolvesTo = asFunction->returnType.AsTypeReference().value;
                         }
                         else
                         {
-                            LinxcType* asType = typeCheck->FindSubtype(identifierName);
-                            if (asType != NULL)
+                            LinxcVar* asVar = typeCheck->FindVar(identifierName);
+                            if (asVar != NULL)
                             {
-                                result.ID = LinxcExpr_TypeRef;
-                                result.data.typeRef = asType;
-                                result.resolvesTo.lastType = NULL;
+                                result.ID = LinxcExpr_Variable;
+                                result.data.variable = asVar;
+                                result.resolvesTo = asVar->type.AsTypeReference().value;
+                                result.resolvesTo.isConst = asVar->isConst;
+                            }
+                            else
+                            {
+                                LinxcType* asType = typeCheck->FindSubtype(identifierName);
+                                if (asType != NULL)
+                                {
+                                    result.ID = LinxcExpr_TypeRef;
+                                    result.data.typeRef = asType;
+                                    result.resolvesTo.lastType = NULL;
+                                }
                             }
                         }
+
+                        typeCheck = typeCheck->parentType;
                     }
 
-                    typeCheck = typeCheck->parentType;
                 }
             }
         }
@@ -1796,6 +1807,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
     //when flagged to true (upon encountering an error), skip parsing the entire file until a semicolon is reached.
     //this is to avoid causing even more errors because the first member of an expression is invalid.
     bool errorSkipUntilSemicolon = false;
+    collections::Array<string> nextTemplateArgs = collections::Array<string>();
     collections::vector<ERR_MSG>* errors = &state->parsingFile->errors;
     collections::vector<LinxcStatement> result = collections::vector<LinxcStatement>(this->allocator);
     //collections::vector<ERR_MSG> errors = collections::vector<ERR_MSG>(this->allocator);
@@ -2015,6 +2027,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     LinxcNamespace newNamespace = LinxcNamespace(this->allocator, namespaceNameStr);
                     newNamespace.parentNamespace = state->currentNamespace->actualNamespace;
                     thisNamespace = state->currentNamespace->AddNamespaceToOrigin(namespaceNameStr, newNamespace);
+                    thisNamespace->parentNamespace = state->currentNamespace;
+                    thisNamespace->name = namespaceNameStr;
                 }
 
                 LinxcToken next = tokenizer->PeekNextUntilValid();
@@ -2048,6 +2062,67 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             }
         }
         break;
+        case Linxc_Keyword_template:
+        {
+            if (isComment)
+            {
+                continue;
+            }
+            if (nextIsConst)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Cannot declare a template as const in Linxc"));
+                nextIsConst = false;
+            }
+            if (tokenizer->PeekNextUntilValid().ID != Linxc_AngleBracketLeft)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected <"));
+            }
+            else tokenizer->NextUntilValid();
+
+            collections::vector<string> templateArgs = collections::vector<string>(&defaultAllocator);
+
+            bool expectComma = false;
+            while (true)
+            {
+                LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
+                if (peekNext.ID == Linxc_AngleBracketRight)
+                {
+                    break;
+                }
+                else if (peekNext.ID == Linxc_Comma)
+                {
+                    if (expectComma)
+                    {
+                        state->tokenizer->NextUntilValid();
+                        expectComma = false;
+                    }
+                    else
+                    {
+                        state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Unexpected comma"));
+                    }
+                }
+                else if (peekNext.ID == Linxc_Keyword_typename)
+                {
+                    state->tokenizer->NextUntilValid();
+                    LinxcToken genericTypeName = state->tokenizer->NextUntilValid();
+                    if (genericTypeName.ID != Linxc_Identifier)
+                    {
+                        state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected valid identifier"));
+                    }
+                    string genericTypeNameStr = genericTypeName.ToString(this->allocator);
+                    templateArgs.Add(genericTypeNameStr);
+                }
+                else
+                {
+                    state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected keyword 'typename'"));
+                }
+
+                expectComma = true;
+            }
+
+            nextTemplateArgs = templateArgs.ToOwnedArrayWith(this->allocator);
+        }
+        break;
         case Linxc_Keyword_enum:
         {
             if (isComment)
@@ -2058,6 +2133,11 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             {
                 errors->Add(ERR_MSG(this->allocator, "Cannot declare an enum as const in Linxc"));
                 nextIsConst = false;
+            }
+            if (nextTemplateArgs.data != NULL)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Enum type cannot have templates"));
+                nextTemplateArgs = collections::Array<string>();
             }
             LinxcToken enumName = tokenizer->NextUntilValid();
             //printf("STRUCT FOUND: %s\n", structName.ToString(this->allocator).buffer);
@@ -2237,6 +2317,13 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 else
                 {
                     ptr = state->currentNamespace->AddTypeToOrigin(type.name, type);
+                }
+
+                if (nextTemplateArgs.data != NULL)
+                {
+                    ptr->templateArgs = nextTemplateArgs;
+                    ptr->templateSpecializations = collections::hashset<collections::Array<LinxcTypeReference>>(this->allocator, &LinxcTemplateSpecializationsHash, &LinxcTemplateSpecializationsEql);
+                    nextTemplateArgs = collections::Array<string>();
                 }
 
                 LinxcParserState nextState = LinxcParserState(state->parser, state->parsingFile, state->tokenizer, LinxcEndOn_RBrace, false, state->parsingLinxci);
@@ -2904,12 +2991,27 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
     }
     else if (stmt->ID == LinxcStmt_TypeDecl)
     {
-        TranspileTypeH(fs, stmt->data.typeDeclaration);
+        if (stmt->data.typeDeclaration->templateArgs.length > 0 )
+        {
+            collections::hashset<collections::Array<LinxcTypeReference>>* specializations = &stmt->data.typeDeclaration->templateSpecializations;
+            for (usize i = 0; i < specializations->bucketsCount; i++)
+            {
+                if (specializations->buckets[i].initialized)
+                {
+                    for (usize j = 0; j < specializations->buckets[i].entries.count; j++)
+                    {
+                        collections::Array<LinxcTypeReference> array = *specializations->buckets[i].entries.Get(j);
+                        TranspileTypeH(fs, stmt->data.typeDeclaration, array);
+                    }
+                }
+            }
+        }
+        else TranspileTypeH(fs, stmt->data.typeDeclaration, collections::Array<LinxcTypeReference>());
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
         i32 tempIndex = 0;
-        this->TranspileVar(fs, stmt->data.varDeclaration, &tempIndex);
+        this->TranspileVar(fs, stmt->data.varDeclaration, &tempIndex, collections::Array<LinxcTypeReference>());
     }
     else if (stmt->ID == LinxcStmt_FuncDecl)
     {
@@ -2917,7 +3019,7 @@ void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt)
         fprintf(fs, ";\n");
     }
 }
-void LinxcParser::TranspileTypeH(FILE* fs, LinxcType* type)
+void LinxcParser::TranspileTypeH(FILE* fs, LinxcType* type, collections::Array<LinxcTypeReference> templateSpecialization)
 {
     if (type->enumMembers.count > 0)
     {
@@ -2939,20 +3041,28 @@ void LinxcParser::TranspileTypeH(FILE* fs, LinxcType* type)
         //transpile subtypes first
         for (usize i = 0; i < type->subTypes.count; i++)
         {
-            TranspileTypeH(fs, type->subTypes.Get(i));
+            TranspileTypeH(fs, type->subTypes.Get(i), templateSpecialization);
         }
 
         fprintf(fs, "typedef struct {\n");
-        string typeName = type->GetCName(&defaultAllocator);
         for (usize i = 0; i < type->variables.count; i++)
         {
             fprintf(fs, "   ");
             i32 typeIndex = 0;
-            this->TranspileVar(fs, type->variables.Get(i), &typeIndex);
+            this->TranspileVar(fs, type->variables.Get(i), &typeIndex, templateSpecialization);
             fprintf(fs, ";\n");
         }
-        fprintf(fs, "} %s;\n", typeName.buffer);
+        string typeName = type->GetCName(&defaultAllocator);
+        fprintf(fs, "} %s", typeName.buffer);
         typeName.deinit();
+
+        for (usize i = 0; i < templateSpecialization.length; i++)
+        {
+            string genericTypeName = templateSpecialization.data[i].GetCName(&defaultAllocator, true);
+            fprintf(fs, "_%s", genericTypeName.buffer);
+            genericTypeName.deinit();
+        }
+        fprintf(fs, ";\n");
 
         for (usize i = 0; i < type->functions.count; i++)
         {
@@ -2990,7 +3100,7 @@ void LinxcParser::TranspileFunc(FILE *fs, LinxcFunc* func)
         {
             fprintf(fs, "...");
         }
-        else this->TranspileVar(fs, &func->arguments.data[i], &typeIndex);
+        else this->TranspileVar(fs, &func->arguments.data[i], &typeIndex, collections::Array<LinxcTypeReference>());
         if (i < func->arguments.length - 1)
         {
             fprintf(fs, ", ");
@@ -3005,6 +3115,13 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
     {
     case LinxcExpr_None:
         break;
+    case LinxcExpr_TypeRef:
+    {
+        string typeString = expr->data.typeRef.GetCName(&defaultAllocator);
+        fprintf(fs, "%s", typeString);
+        typeString.deinit();
+    }
+    break;
     case LinxcExpr_Literal:
     {
         fprintf(fs, "%s", expr->data.literal.buffer);
@@ -3126,7 +3243,7 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
         break;
     }
 }
-void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex)
+void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex, collections::Array<LinxcTypeReference> templateSpecialization)
 {
     if (var->memberOf == NULL && var->defaultValue.present)
     {
@@ -3139,9 +3256,25 @@ void LinxcParser::TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex)
         fprintf(fs, "const ");
     }
     LinxcTypeReference typeRef = var->type.AsTypeReference().value;
-    string fullName = typeRef.GetCName(&defaultAllocator);
-    fprintf(fs, "%s ", fullName.buffer);
-    fullName.deinit();
+    if (typeRef.genericTypeName.buffer != NULL)
+    {
+        if (var->memberOf != NULL)
+        {
+            option<usize> result = var->memberOf->templateArgs.Contains(typeRef.genericTypeName, &stringEql);
+            if (result.present)
+            {
+                string fullName = templateSpecialization.data[result.value].GetCName(&defaultAllocator);
+                fprintf(fs, "%s ", fullName.buffer);
+                fullName.deinit();
+            }
+        }
+    }
+    else
+    {
+        string fullName = typeRef.GetCName(&defaultAllocator);
+        fprintf(fs, "%s ", fullName.buffer);
+        fullName.deinit();
+    }
     fprintf(fs, "%s", var->name.buffer);
     if (var->defaultValue.present)
     {
@@ -3380,7 +3513,7 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempI
     }
     else if (stmt->ID == LinxcStmt_VarDecl)
     {
-        this->TranspileVar(fs, stmt->data.varDeclaration, tempIndex);
+        this->TranspileVar(fs, stmt->data.varDeclaration, tempIndex, collections::Array<LinxcTypeReference>());
     }
     else if (stmt->ID == LinxcStmt_If)
     {

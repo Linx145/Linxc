@@ -3,6 +3,7 @@
 #include <string.hpp>
 #include <vector.linxc>
 #include <hashmap.linxc>
+#include <hashset.linxc>
 #include <lexer.hpp>
 
 #define ERR_MSG string
@@ -71,6 +72,7 @@ struct LinxcTypeReference
 {
     //We only need to store 1 LinxcType as it is a linked list that leads to parent types if any, and the namespace chain.
     LinxcType *lastType;
+    string genericTypeName;
 
     collections::Array<LinxcExpression> templateArgs;
 
@@ -81,26 +83,12 @@ struct LinxcTypeReference
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
-    string GetCName(IAllocator* allocator);
+    string GetCName(IAllocator* allocator, bool pointerAsPtr = false);
 
     bool CanCastTo(LinxcTypeReference type, bool implicitly);
     //dont need to check const as only const u8* is a special type
     //we parse that within EvaluatePossible
-    bool operator==(LinxcTypeReference B)
-    {
-        if (this->lastType != B.lastType || this->isConst != B.isConst || this->pointerCount != B.pointerCount || this->templateArgs.length != B.templateArgs.length)
-        {
-            return false;
-        }
-        for (usize i = 0; i < this->templateArgs.length; i++)
-        {
-            if (this->templateArgs.data[i].AsTypeReference().value != B.templateArgs.data[i].AsTypeReference().value)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
+    bool operator==(LinxcTypeReference B);
     inline bool operator!=(LinxcTypeReference B)
     {
         return !(*this==B);
@@ -108,6 +96,9 @@ struct LinxcTypeReference
 };
 bool LinxcTypeReferenceEql(LinxcTypeReference A, LinxcTypeReference B);
 u32 LinxcTypeReferenceHash(LinxcTypeReference A);
+
+bool LinxcTemplateSpecializationsEql(collections::Array<LinxcTypeReference> A, collections::Array<LinxcTypeReference> B);
+u32 LinxcTemplateSpecializationsHash(collections::Array<LinxcTypeReference> A);
 
 enum LinxcExpressionID
 {

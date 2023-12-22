@@ -141,7 +141,7 @@ void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* loc
                     typeExpr.resolvesTo.lastType = NULL;
                     typeExpr.data.typeRef.pointerCount = pointerCount;
                     typeExpr.data.typeRef.isConst = clang_isConstQualifiedType(varCXType) != 0;
-                    typeExpr.data.typeRef.templateArgs = collections::Array<LinxcTypeReference>();
+                    typeExpr.data.typeRef.templateArgs = collections::Array<LinxcExpression>();
                     typeExpr.data.typeRef.lastType = varType;
                     LinxcVar field = LinxcVar(var->GetSpelling(allocator), typeExpr, option<LinxcExpression>());
                     type.variables.Add(field);
@@ -156,7 +156,7 @@ void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* loc
                         typeExpr.resolvesTo.lastType = NULL;
                         typeExpr.data.typeRef.pointerCount = pointerCount;
                         typeExpr.data.typeRef.isConst = clang_isConstQualifiedType(varCXType) != 0;
-                        typeExpr.data.typeRef.templateArgs = collections::Array<LinxcTypeReference>();
+                        typeExpr.data.typeRef.templateArgs = collections::Array<LinxcExpression>();
                         typeExpr.data.typeRef.lastType = varType;
                         LinxcVar field = LinxcVar(var->GetSpelling(allocator), typeExpr, option<LinxcExpression>());
                         type.variables.Add(field);

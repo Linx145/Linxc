@@ -1,20 +1,8 @@
 #include <Linxc.h>
-#include <stdio.linxch>
-#include <stdlib.linxch>
-
-struct structA
-{
-    float value;
-    void PrintValue()
-    {
-        printf("%f\n", value);
-    }
-};
+#include <TestArray.linxc>
 
 i32 main()
 {
-    structA instance;
-    instance.value = 2.5f;
-    instance.PrintValue();
+    collections::TestArray<i32> i32Array;
     return 0;
 }

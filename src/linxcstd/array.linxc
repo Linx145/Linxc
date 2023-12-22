@@ -2,12 +2,15 @@
 
 #include <Linxc.h>
 #include <allocators.hpp>
+#include <option.linxc>
 
 namespace collections
 {
     template<typename T>
     struct Array
     {
+        def_delegate(EqlFunc, bool, T, T);
+
         IAllocator *allocator;
         T *data;
         usize length;
@@ -39,6 +42,17 @@ namespace collections
         void deinit()
         {
             allocator->Free((void**)&data);
+        }
+        option<usize> Contains(T value, EqlFunc eqlFunc)
+        {
+            for (usize i = 0; i < length; i++)
+            {
+                if (eqlFunc(this->data[i], value))
+                {
+                    return option<usize>(i);
+                }
+            }
+            return option<usize>();
         }
     };
 }

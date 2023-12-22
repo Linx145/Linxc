@@ -1,5 +1,30 @@
 #include <ast.hpp>
 
+bool LinxcTemplateSpecializationsEql(collections::Array<LinxcTypeReference> A, collections::Array<LinxcTypeReference> B)
+{
+    if (A.length != B.length)
+    {
+        return false;
+    }
+    for (usize i = 0; i < A.length; i++)
+    {
+        if (A.data[i] != B.data[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+u32 LinxcTemplateSpecializationsHash(collections::Array<LinxcTypeReference> A)
+{
+    u32 h1 = 7;
+    for (usize i = 0; i < A.length; i++)
+    {
+        u32 h2 = LinxcTypeReferenceHash(A.data[i]);
+        h1 = ((h1 << 5) + h1) ^ h2;
+    }
+    return h1;
+}
 bool LinxcTypeReferenceEql(LinxcTypeReference A, LinxcTypeReference B)
 {
     if (A.lastType != B.lastType || A.isConst != B.isConst || A.pointerCount != B.pointerCount || A.templateArgs.length != B.templateArgs.length)
@@ -96,6 +121,11 @@ option<LinxcTypeReference> LinxcOperator::EvaluatePossible()
     if (this->operatorType == Linxc_ColonColon || this->operatorType == Linxc_Period || this->operatorType == Linxc_Arrow)
     {
         return option<LinxcTypeReference>(this->rightExpr.resolvesTo);
+    }
+    //TODO: Traits and stuff, maybe
+    if (this->leftExpr.resolvesTo.genericTypeName != NULL || this->rightExpr.resolvesTo.genericTypeName != NULL)
+    {
+        return option<LinxcTypeReference>();
     }
     LinxcOperatorImpl key;
     LinxcOperatorFunc* result = NULL;
@@ -205,14 +235,14 @@ LinxcTypeReference::LinxcTypeReference()
     this->lastType = NULL;
     this->pointerCount = 0;
     this->isConst = false;
-    this->templateArgs = collections::Array<LinxcTypeReference>();
+    this->templateArgs = collections::Array<LinxcExpression>();
 }
 LinxcTypeReference::LinxcTypeReference(LinxcType *type)
 {
     this->lastType = type;
     this->pointerCount = 0;
     this->isConst = false;
-    this->templateArgs = collections::Array<LinxcTypeReference>();
+    this->templateArgs = collections::Array<LinxcExpression>();
 }
 bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
 {
@@ -229,7 +259,21 @@ bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
     castImpl.otherType = type;
     return lastType->operatorOverloads.Contains(castImpl);
 }
-
+bool LinxcTypeReference::operator==(LinxcTypeReference B)
+{
+    if (this->lastType != B.lastType || this->isConst != B.isConst || this->pointerCount != B.pointerCount || this->templateArgs.length != B.templateArgs.length)
+    {
+        return false;
+    }
+    for (usize i = 0; i < this->templateArgs.length; i++)
+    {
+        if (this->templateArgs.data[i].AsTypeReference().value != B.templateArgs.data[i].AsTypeReference().value)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 LinxcNamespace::LinxcNamespace()
 {
     this->parentNamespace = NULL;
@@ -278,7 +322,8 @@ void LinxcPhoneyNamespace::Add(LinxcPhoneyNamespace* other)
         {
             for (usize j = 0; j < other->functionRefs.buckets[i].entries.count; j++)
             {
-                this->functionRefs.Add(other->functionRefs.buckets[i].entries.ptr[j].key, other->functionRefs.buckets[i].entries.ptr[j].value);
+                LinxcFunc* func = other->functionRefs.buckets[i].entries.ptr[j].value;
+                this->functionRefs.Add(other->functionRefs.buckets[i].entries.ptr[j].key, func);
             }
         }
     }
@@ -317,9 +362,9 @@ void LinxcPhoneyNamespace::Add(LinxcPhoneyNamespace* other)
                 else
                 {
                     //clone it, if not, any modification to this namespace would modify the other as well
-                    LinxcPhoneyNamespace newEquivalent = LinxcPhoneyNamespace(this->allocator, this->actualNamespace);
+                    LinxcPhoneyNamespace newEquivalent = LinxcPhoneyNamespace(this->allocator, other->subNamespaces.buckets[i].entries.ptr[j].value.actualNamespace);
                     newEquivalent.Add(&other->subNamespaces.buckets[i].entries.ptr[j].value);
-                    this->subNamespaces.Add(other->subNamespaces.buckets[i].entries.ptr[j].key, newEquivalent);
+                    this->subNamespaces.Add(newEquivalent.name, newEquivalent);
                 }
             }
         }
@@ -560,7 +605,7 @@ string LinxcTypeReference::ToString(IAllocator *allocator)
     }
     return result.CloneDeinit(allocator);
 }
-string LinxcTypeReference::GetCName(IAllocator* allocator)
+string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr)
 {
     string result = string(&defaultAllocator);
     if (this->isConst)
@@ -568,9 +613,24 @@ string LinxcTypeReference::GetCName(IAllocator* allocator)
         result.Append("const ");
     }
     result.AppendDeinit(this->lastType->GetCName(&defaultAllocator));
-    for (i32 i = 0; i < this->pointerCount; i++)
+    for (usize i = 0; i < this->templateArgs.length; i++)
     {
-        result.Append("*");
+        result.Append("_");
+        result.AppendDeinit(this->templateArgs.data[i].AsTypeReference().value.GetCName(&defaultAllocator, true));
+    }
+    if (!pointerAsPtr) //pointer as *
+    {
+        for (i32 i = 0; i < this->pointerCount; i++)
+        {
+            result.Append("*");
+        }
+    }
+    else
+    {
+        for (i32 i = 0; i < this->pointerCount; i++)
+        {
+            result.Append("ptr");
+        }
     }
     return result.CloneDeinit(allocator);
 }
