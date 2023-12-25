@@ -465,7 +465,8 @@ string LinxcType::GetCName(IAllocator* allocator, collections::Array<string> sco
         if (index.present)
         {
             result.Append("_");
-            result.AppendDeinit(scopeTemplateSpecializations.data[index.value].GetCName(&defaultAllocator, true, collections::Array<string>(), collections::Array<LinxcTypeReference>()));
+            string cName = scopeTemplateSpecializations.data[index.value].GetCName(&defaultAllocator, true, collections::Array<string>(), collections::Array<LinxcTypeReference>());
+            result.AppendDeinit(cName);
         }
     }
 
@@ -677,7 +678,7 @@ string LinxcTypeReference::ToString(IAllocator *allocator)
     }
     return result.CloneDeinit(allocator);
 }
-string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
+string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations)
 {
     string result = string(&defaultAllocator);
     if (this->isConst)
@@ -686,50 +687,23 @@ string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr, co
     }
     if (this->genericTypeName.buffer != NULL)
     {
-        option<usize> findResult = templateArgs.Contains(this->genericTypeName, &stringEql);
+        option<usize> findResult = scopeTemplateArgs.Contains(this->genericTypeName, &stringEql);
         if (findResult.present)
         {
-            result.AppendDeinit(templateSpecializations.data[findResult.value].GetCName(&defaultAllocator));
+            //Not sure if wise to pass templateArgs, templateSpecializations to this
+            result.AppendDeinit(scopeTemplateSpecializations.data[findResult.value].GetCName(&defaultAllocator, true, scopeTemplateArgs, scopeTemplateSpecializations));
         }
     }
     else
     {
-        LinxcType* currentParentType = this->lastType->parentType;
-        bool appendNamespace = true;
-        while (currentParentType != NULL)
-        {
-            if (currentParentType->templateArgs.length > 0)
-            {
-                appendNamespace = false;
-                break;
-            }
-            if (currentParentType->name.buffer != NULL)
-            {
-                result.Prepend("_");
-                result.Prepend(currentParentType->name.buffer);
-            }
-            currentParentType = currentParentType->parentType;
-        }
-
-        if (appendNamespace)
-        {
-            LinxcNamespace* currentNamespace = this->lastType->typeNamespace;
-            while (currentNamespace != NULL)
-            {
-                if (currentNamespace->name.buffer != NULL)
-                {
-                    result.Prepend("_");
-                    result.Prepend(currentNamespace->name.buffer);
-                }
-                currentNamespace = currentNamespace->parentNamespace;
-            }
-        }
-        result.Append(this->lastType->name.buffer);
+        string cName = this->lastType->GetCName(&defaultAllocator, scopeTemplateArgs, scopeTemplateSpecializations);
+        result.AppendDeinit(cName);
     }// result.AppendDeinit(this->lastType->GetCName(&defaultAllocator));
     for (usize i = 0; i < this->templateArgs.length; i++)
     {
         result.Append("_");
-        result.AppendDeinit(this->templateArgs.data[i].AsTypeReference().value.GetCName(&defaultAllocator, true, templateArgs, templateSpecializations));
+        string cName = this->templateArgs.data[i].AsTypeReference().value.GetCName(&defaultAllocator, true, scopeTemplateArgs, scopeTemplateSpecializations);
+        result.AppendDeinit(cName);
     }
     if (!pointerAsPtr) //pointer as *
     {

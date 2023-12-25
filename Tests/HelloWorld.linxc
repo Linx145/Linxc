@@ -1,16 +1,28 @@
 #include <Linxc.h>
-#include <TestArray.linxc>
 
 bool intEquals(i32 A, i32 B)
 {
     return A == B;
 };
 
+template<typename A>
+struct No
+{
+    template<typename B>
+    struct Yes
+    {
+        A opt1;
+        B opt2;
+    };
+};
+
 i32 main()
 {
-    collections::TestArray<i32> variable;
-
-    variable.Compare(5, 0, &intEquals);
+    No<i32>::Yes<float> combo1;
+    No<i32>::Yes<float> combo2;
+    No<u64>::Yes<bool> combo3;
+    No<float>::Yes<bool> combo4;
+    No<float>::Yes<i32> combo5;
 
     return 0;
 }

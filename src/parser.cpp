@@ -1475,115 +1475,116 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
 
         if (!parentScopeOverride.present)
         {
-            if (state->parentType != NULL && state->parentType->templateArgs.Contains(identifierName, &stringEql).present)
-            {
-                result.ID = LinxcExpr_TypeRef;
-                result.data.typeRef = LinxcTypeReference(NULL);
-                result.data.typeRef.genericTypeName = identifierName.Clone(this->allocator);
-                result.resolvesTo.lastType = NULL;
-            }
-            else
-            {
-                //check local variables
+            //check local variables
 
-                LinxcVar** asLocalVar = state->varsInScope.Get(identifierName);
-                if (asLocalVar != NULL)
+            LinxcVar** asLocalVar = state->varsInScope.Get(identifierName);
+            if (asLocalVar != NULL)
+            {
+                LinxcVar* localVar = *asLocalVar;
+                if (localVar->memberOf != NULL)
                 {
-                    LinxcVar* localVar = *asLocalVar;
-                    if (localVar->memberOf != NULL)
-                    {
-                        //at this point, we insert the this-> into the ast if it is missing
-                        //this is because all member variables need the this-> reference when transpiling to C
-                        //since C does not have struct-scoped functions and thus relies on passing the
-                        //struct to be operated on as a variable called 'this'
-                        LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
-                        LinxcExpression thisExpr;
-                        thisExpr.priority = false;
-                        thisExpr.resolvesTo.isConst = thisVar->isConst;
-                        thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
-                        thisExpr.ID = LinxcExpr_Variable;
-                        thisExpr.data.variable = thisVar;
+                    //at this point, we insert the this-> into the ast if it is missing
+                    //this is because all member variables need the this-> reference when transpiling to C
+                    //since C does not have struct-scoped functions and thus relies on passing the
+                    //struct to be operated on as a variable called 'this'
+                    LinxcVar* thisVar = *state->varsInScope.Get(this->thisKeyword);
+                    LinxcExpression thisExpr;
+                    thisExpr.priority = false;
+                    thisExpr.resolvesTo.isConst = thisVar->isConst;
+                    thisExpr.resolvesTo = thisVar->type.AsTypeReference().value;
+                    thisExpr.ID = LinxcExpr_Variable;
+                    thisExpr.data.variable = thisVar;
 
-                        LinxcExpression varExpr;
-                        varExpr.priority = false;
-                        varExpr.ID = LinxcExpr_Variable;
-                        varExpr.data.variable = localVar;
-                        varExpr.resolvesTo = localVar->type.AsTypeReference().value;
-                        varExpr.resolvesTo.isConst = localVar->isConst;
+                    LinxcExpression varExpr;
+                    varExpr.priority = false;
+                    varExpr.ID = LinxcExpr_Variable;
+                    varExpr.data.variable = localVar;
+                    varExpr.resolvesTo = localVar->type.AsTypeReference().value;
+                    varExpr.resolvesTo.isConst = localVar->isConst;
 
-                        result.ID = LinxcExpr_OperatorCall;
-                        LinxcOperator* thisDereference = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
-                        thisDereference->leftExpr = thisExpr;
-                        thisDereference->operatorType = Linxc_Arrow;
-                        thisDereference->rightExpr = varExpr;
-                        result.data.operatorCall = thisDereference;
-                        result.resolvesTo = localVar->type.AsTypeReference().value;
-                        result.resolvesTo.isConst = localVar->isConst;
-                    }
-                    else
-                    {
-                        result.ID = LinxcExpr_Variable;
-                        //this SHOULD point to the location of the var stored in the AST
-                        result.data.variable = *asLocalVar;
-                        result.resolvesTo = result.data.variable->type.AsTypeReference().value;
-                        result.resolvesTo.isConst = result.data.variable->isConst;
-                    }
+                    result.ID = LinxcExpr_OperatorCall;
+                    LinxcOperator* thisDereference = (LinxcOperator*)this->allocator->Allocate(sizeof(LinxcOperator));
+                    thisDereference->leftExpr = thisExpr;
+                    thisDereference->operatorType = Linxc_Arrow;
+                    thisDereference->rightExpr = varExpr;
+                    result.data.operatorCall = thisDereference;
+                    result.resolvesTo = localVar->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = localVar->isConst;
                 }
                 else
                 {
-                    //check state namespaces
-                    LinxcPhoneyNamespace* toCheck = state->currentNamespace;
-                    while (toCheck != NULL)
+                    result.ID = LinxcExpr_Variable;
+                    //this SHOULD point to the location of the var stored in the AST
+                    result.data.variable = *asLocalVar;
+                    result.resolvesTo = result.data.variable->type.AsTypeReference().value;
+                    result.resolvesTo.isConst = result.data.variable->isConst;
+                }
+            }
+            else
+            {
+                //check state namespaces
+                LinxcPhoneyNamespace* toCheck = state->currentNamespace;
+                while (toCheck != NULL)
+                {
+                    LinxcFunc* asFunction = toCheck->functionRefs.GetCopyOr(identifierName, NULL);
+                    if (asFunction != NULL)
                     {
-                        LinxcFunc* asFunction = toCheck->functionRefs.GetCopyOr(identifierName, NULL);
-                        if (asFunction != NULL)
+                        result.ID = LinxcExpr_FunctionRef;
+                        result.data.functionRef = asFunction;
+                        result.resolvesTo = asFunction->returnType.AsTypeReference().value;
+                        break;
+                    }
+                    else
+                    {
+                        LinxcVar* asVar = toCheck->variableRefs.GetCopyOr(identifierName, NULL);
+                        if (asVar != NULL)
                         {
-                            result.ID = LinxcExpr_FunctionRef;
-                            result.data.functionRef = asFunction;
-                            result.resolvesTo = asFunction->returnType.AsTypeReference().value;
+                            result.ID = LinxcExpr_Variable;
+                            result.data.variable = asVar;
+                            //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
+                            result.resolvesTo = asVar->type.AsTypeReference().value;
+                            result.resolvesTo.isConst = asVar->isConst;
                             break;
                         }
                         else
                         {
-                            LinxcVar* asVar = toCheck->variableRefs.GetCopyOr(identifierName, NULL);
-                            if (asVar != NULL)
+                            LinxcType* asType = toCheck->typeRefs.GetCopyOr(identifierName, NULL);
+                            if (asType != NULL)
                             {
-                                result.ID = LinxcExpr_Variable;
-                                result.data.variable = asVar;
-                                //this is guaranteed to be present as a variable would only have a typename-resolveable expression as it's type
-                                result.resolvesTo = asVar->type.AsTypeReference().value;
-                                result.resolvesTo.isConst = asVar->isConst;
+                                result.ID = LinxcExpr_TypeRef;
+                                result.data.typeRef = asType;
+                                result.resolvesTo.lastType = NULL;
                                 break;
                             }
                             else
                             {
-                                LinxcType* asType = toCheck->typeRefs.GetCopyOr(identifierName, NULL);
-                                if (asType != NULL)
+                                LinxcPhoneyNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
+                                if (asNamespace != NULL)
                                 {
-                                    result.ID = LinxcExpr_TypeRef;
-                                    result.data.typeRef = asType;
+                                    result.ID = LinxcExpr_NamespaceRef;
+                                    result.data.namespaceRef = asNamespace->actualNamespace;
                                     result.resolvesTo.lastType = NULL;
                                     break;
                                 }
-                                else
-                                {
-                                    LinxcPhoneyNamespace* asNamespace = toCheck->subNamespaces.Get(identifierName);
-                                    if (asNamespace != NULL)
-                                    {
-                                        result.ID = LinxcExpr_NamespaceRef;
-                                        result.data.namespaceRef = asNamespace->actualNamespace;
-                                        result.resolvesTo.lastType = NULL;
-                                        break;
-                                    }
-                                }
                             }
                         }
-
-                        toCheck = toCheck->parentNamespace;
                     }
 
-                    LinxcType* typeCheck = state->parentType;
-                    if (typeCheck != NULL)
+                    toCheck = toCheck->parentNamespace;
+                }
+
+                LinxcType* typeCheck = state->parentType;
+                while (typeCheck != NULL)
+                {
+                    //printf("Checking for identifier %s in type %s\n", identifierName.buffer, typeCheck->name.buffer);
+                    if (typeCheck->templateArgs.Contains(identifierName, &stringEql).present)
+                    {
+                        result.ID = LinxcExpr_TypeRef;
+                        result.data.typeRef = LinxcTypeReference(NULL);
+                        result.data.typeRef.genericTypeName = identifierName.Clone(this->allocator);
+                        result.resolvesTo.lastType = NULL;
+                    }
+                    else
                     {
                         LinxcFunc* asFunction = typeCheck->FindFunction(identifierName);
                         if (asFunction != NULL)
@@ -1613,12 +1614,13 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
                                 }
                             }
                         }
-
-                        typeCheck = typeCheck->parentType;
                     }
 
+                    typeCheck = typeCheck->parentType;
                 }
+
             }
+
         }
         else if (parentScopeOverride.value.ID == LinxcExpr_NamespaceRef)
         {
@@ -3133,6 +3135,10 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
             fclose(fs);
         }
     }
+    else if (io::FileExists(outputPathC))
+    {
+        remove(outputPathC);
+    }
 }
 void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
 {
@@ -3436,29 +3442,31 @@ void LinxcParser::TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePrior
         //variables/functions/types contained in a using'd namespace would be improperly transpiled
         if (expr->data.operatorCall->operatorType == Linxc_ColonColon)
         {
-            //if left is a generic reference or generic type itself
-            if (expr->data.operatorCall->leftExpr.ID == LinxcExpr_TypeRef && (expr->data.operatorCall->leftExpr.data.typeRef.genericTypeName.buffer != NULL || expr->data.operatorCall->leftExpr.data.typeRef.lastType->templateArgs.length > 0))
+            //special case is given if the left is a reference type with template specializations.
+            //we will simply append the template specializations to the scope of the right and transpile,
+            //so as to allow it to transpile all variables correctly when transpiling it's parents
+            //(AKA: The original left expr)
+            if (expr->data.operatorCall->leftExpr.ID == LinxcExpr_TypeRef && expr->data.operatorCall->leftExpr.data.typeRef.lastType != NULL)
             {
-                //actually, this shouldn't be possible at all given the current scenario, 
-                //there should just be a type check error because generic would have been treated as a scope, 
-                //but whatever it'll be possible with generic constraints in the future
-                if (expr->data.operatorCall->leftExpr.data.typeRef.genericTypeName.buffer != NULL)
+                collections::Array<LinxcExpression>* leftExprSpecializations = &expr->data.operatorCall->leftExpr.data.typeRef.templateArgs;
+                collections::Array<string> newTemplateArgs = templateArgs.CloneAdd(&defaultAllocator, expr->data.operatorCall->leftExpr.data.typeRef.lastType->templateArgs);
+                collections::Array<LinxcTypeReference> newTemplateSpecializations = collections::Array<LinxcTypeReference>(&defaultAllocator, templateSpecializations.length + leftExprSpecializations->length);
+                for (usize i = 0; i < newTemplateSpecializations.length; i++)
                 {
-                    option<usize> index = templateArgs.Contains(expr->data.operatorCall->leftExpr.data.typeRef.genericTypeName, &stringEql);
-                    if (index.present)
+                    if (i < templateSpecializations.length)
                     {
-                        string specializedTypeName = templateSpecializations.data[index.value].GetCName(&defaultAllocator, false, templateArgs, templateSpecializations);
-                        fprintf(fs, "%s_", specializedTypeName.buffer);
-                        specializedTypeName.deinit();
+                        newTemplateSpecializations.data[i] = templateSpecializations.data[i];
+                    }
+                    else
+                    {
+                        newTemplateSpecializations.data[i] = leftExprSpecializations->data[i - templateSpecializations.length].AsTypeReference().value;
                     }
                 }
-                else //is generic type
-                {
-                    string specializedTypeName = expr->data.operatorCall->leftExpr.data.typeRef.GetCName(&defaultAllocator, true, templateArgs, templateSpecializations);
-                    fprintf(fs, "%s_", specializedTypeName.buffer);
-                    specializedTypeName.deinit();
-                }
-                this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, false, templateArgs, templateSpecializations);
+
+                this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, false, newTemplateArgs, newTemplateSpecializations);
+
+                newTemplateArgs.deinit();
+                newTemplateSpecializations.deinit();
             }
             else this->TranspileExpr(fs, &expr->data.operatorCall->rightExpr, false, templateArgs, templateSpecializations);
         }
@@ -3754,13 +3762,16 @@ void LinxcParser::TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStat
     {
         LinxcStatement* resultStmt = stmts.Get(i);
         this->TranspileStatementC(fs, resultStmt, tempIndex, templateArgs, templateSpecializations);
-        if (resultStmt->ID != LinxcStmt_If && resultStmt->ID != LinxcStmt_TypeDecl && resultStmt->ID != LinxcStmt_FuncDecl)
+        if (resultStmt->ID != LinxcStmt_Namespace)
         {
-            fprintf(fs, ";\n");
-        }
-        else
-        {
-            fprintf(fs, "\n");
+            if (resultStmt->ID != LinxcStmt_Include && resultStmt->ID != LinxcStmt_If && resultStmt->ID != LinxcStmt_Else && resultStmt->ID != LinxcStmt_TypeDecl && resultStmt->ID != LinxcStmt_FuncDecl)
+            {
+                fprintf(fs, ";\n");
+            }
+            else
+            {
+                fprintf(fs, "\n");
+            }
         }
     }
 }
@@ -3881,6 +3892,6 @@ void LinxcParser::TranspileFuncC(FILE* fs, LinxcFunc* func, collections::Array<s
         i32 tempIndex = 0;
 
         this->TranspileCompoundStmtC(fs, func->body, &tempIndex, templateArgs, templateSpecializations);
-        fprintf(fs, "}\n");
+        fprintf(fs, "}");
     }
 }
