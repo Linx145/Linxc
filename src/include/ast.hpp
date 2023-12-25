@@ -38,6 +38,23 @@ struct LinxcEnumMember
     i32 value;
 };
 
+struct LinxcFuncPtr
+{
+    string name;
+    LinxcExpression* returnType;
+    collections::Array<LinxcExpression> arguments;
+    u16 necessaryArguments;
+
+    LinxcFuncPtr();
+    LinxcFuncPtr(string name, LinxcExpression* returnType);
+    bool operator==(LinxcFuncPtr B);
+};
+struct LinxcFunctionPointerCall
+{
+    LinxcVar* variable;
+    collections::Array<LinxcExpression> inputParams;
+    LinxcFuncPtr* functionPtrType;
+};
 /// Represents a type (struct) in Linxc.
 struct LinxcType
 {
@@ -48,10 +65,18 @@ struct LinxcType
     collections::vector<LinxcVar> variables;
     collections::vector<LinxcFunc> functions;
     collections::vector<LinxcType> subTypes;
+    collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc> operatorOverloads;
+
+    //Enum properties
+    collections::vector<LinxcEnumMember> enumMembers;
+
+    //Function Pointer properties
+    LinxcFuncPtr delegateDecl;
+
+    //template stuff
     collections::Array<string> templateArgs;
     collections::hashset<collections::Array<LinxcTypeReference>> templateSpecializations;
-    collections::vector<LinxcEnumMember> enumMembers;
-    collections::hashmap<LinxcOperatorImpl, LinxcOperatorFunc> operatorOverloads;
+    collections::vector<LinxcStatement> specializationsExpanded;
 
     LinxcType();
     LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent);
@@ -62,7 +87,7 @@ struct LinxcType
     LinxcEnumMember* FindEnumMember(string name);
 
     string GetFullName(IAllocator *allocator);
-    string GetCName(IAllocator* allocator);
+    string GetCName(IAllocator* allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations);
 
     LinxcExpression AsExpression();
 };
@@ -83,7 +108,7 @@ struct LinxcTypeReference
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
-    string GetCName(IAllocator* allocator, bool pointerAsPtr = false);
+    string GetCName(IAllocator* allocator, bool pointerAsPtr = false, collections::Array<string> templateArgs = collections::Array<string>(), collections::Array<LinxcTypeReference> templateSpecializations = collections::Array<LinxcTypeReference>());
 
     bool CanCastTo(LinxcTypeReference type, bool implicitly);
     //dont need to check const as only const u8* is a special type
@@ -114,6 +139,7 @@ enum LinxcExpressionID
     LinxcExpr_Modified,
     LinxcExpr_Indexer,
     LinxcExpr_FuncCall,
+    LinxcExpr_FuncPtrCall,
     LinxcExpr_Sizeof,
     LinxcExpr_Nameof,
     LinxcExpr_Typeof
@@ -131,6 +157,7 @@ union LinxcExpressionData
     LinxcModifiedExpression *modifiedExpression; //Eg: *varName
     LinxcExpression *indexerCall; //Eg: varName[expression]
     LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
+    LinxcFunctionPointerCall functionPointerCall;
     LinxcTypeReference sizeofCall; //Eg: sizeof(type reference)
     LinxcTypeReference nameofCall; //Eg: nameof(type reference)
     LinxcTypeReference typeofCall; //Eg: typeof(type reference)
@@ -151,6 +178,7 @@ struct LinxcExpression
     //However, because LinxcTypeReference may not be immediately accessible,
     //call this function to parse the potential operator tree and retrieve the final type.
     option<LinxcTypeReference> AsTypeReference();
+    option<LinxcFunc*> AsFuncReference();
     LinxcExpression *ToHeap(IAllocator *allocator);
 };
 struct LinxcTypeCast
@@ -170,10 +198,12 @@ struct LinxcFunc
     collections::Array<LinxcVar> arguments;
     u16 necessaryArguments;
     collections::Array<string> templateArgs;
+    LinxcType asType;
 
     LinxcFunc();
     LinxcFunc(string name, LinxcExpression returnType);
-    string GetCName(IAllocator* allocator);
+    LinxcFuncPtr GetSignature(IAllocator* allocator);
+    string GetCName(IAllocator* allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations);
 };
 
 /// Represents a variable in Linxc, including it's type, name and optionally default value.

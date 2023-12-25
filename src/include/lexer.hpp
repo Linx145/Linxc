@@ -130,7 +130,7 @@ enum LinxcTokenID
     Linxc_Keyword_void,
     Linxc_Keyword_volatile,
     Linxc_Keyword_while,
-    Linxc_Keyword_delegate,
+    Linxc_Keyword_def_delegate,
     Linxc_Keyword_namespace,
 
     // ISO C99

@@ -6,12 +6,19 @@ namespace collections
     template<typename T>
     struct TestArray
     {
+        def_delegate(EqlFunc, bool, T, T);
+
         T *data;
+        T instance;
         u64 length;
 
         void deinit()
         {
             free(data);
+        }
+        bool Compare(T input, u64 i, EqlFunc func)
+        {
+            func(instance, input);
         }
     };
 }

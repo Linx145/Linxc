@@ -225,7 +225,11 @@ void string::Append(float value)
 }
 bool string::operator==(const char* other)
 {
-    if (this->buffer == NULL)
+    if (this->buffer == other && other == NULL)
+    {
+        return true;
+    }
+    if (this->buffer == NULL || other == NULL)
     {
         return false;
     }

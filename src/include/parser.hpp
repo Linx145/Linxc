@@ -172,6 +172,7 @@ struct LinxcParser
     collections::hashmap<string, LinxcParsedFile> parsedFiles;
     collections::hashmap<string, LinxcTokenID> nameToToken;
     LinxcType* typeofU8;
+    LinxcType* typeofVoid;
     LinxcNamespace globalNamespace;
     string thisKeyword;
     string linxcstdLocation;
@@ -207,7 +208,12 @@ struct LinxcParser
         {
             return variableType.pointerCount == 1 && exprResult.pointerCount == 1 && variableType.isConst;
         }
-        else if (variableType == exprResult || exprResult.CanCastTo(variableType, true))
+        if (variableType.genericTypeName.buffer != NULL)
+        {
+            return true;
+        }
+        //if exprResult is a generic type, lower the typechecker shields
+        else if ((exprResult.genericTypeName.buffer == NULL) || variableType == exprResult || exprResult.CanCastTo(variableType, true))
         {
             return true;
         }
@@ -217,16 +223,20 @@ struct LinxcParser
     LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
     LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
 
+    void SpecializeTemplatedType(LinxcType* type, collections::hashmap<string, LinxcExpression> specializations);
+
     void TranspileFile(LinxcParsedFile *parsedFile, const char* outputPathC, const char* outputPathH);
-    void TranspileStatementH(FILE* fs, LinxcStatement* stmt);
-    void TranspileFunc(FILE* fs, LinxcFunc* func);
-    void TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex, collections::Array<LinxcTypeReference> templateSpecialization);
-    void TranspileTypeH(FILE* fs, LinxcType* type, collections::Array<LinxcTypeReference> templateSpecialization);
-    void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority);
-    void TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempIndex);
-    void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts, i32* tempIndex);
-    void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent);
-    void SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotatedExpr, i32* tempIndex);
+    void TranspileStatementH(FILE* fs, LinxcStatement* stmt, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileFuncHeader(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileFuncH(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileFuncC(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecialization);
+    void TranspileTypeH(FILE* fs, LinxcType* type, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecialization);
+    void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void RotateFuncCallExpression(LinxcExpression* expr, LinxcExpression** exprRootMutable, LinxcExpression* parent, LinxcExpression* grandParent, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
+    void SegregateFuncCallExpression(FILE* fs, LinxcExpression* rotatedExpr, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
 
     bool Compile(const char* outputDirectory);
     void PrintAllErrors();

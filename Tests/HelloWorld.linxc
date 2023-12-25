@@ -1,8 +1,16 @@
 #include <Linxc.h>
 #include <TestArray.linxc>
 
+bool intEquals(i32 A, i32 B)
+{
+    return A == B;
+};
+
 i32 main()
 {
-    collections::TestArray<i32> i32Array;
+    collections::TestArray<i32> variable;
+
+    variable.Compare(5, 0, &intEquals);
+
     return 0;
 }

@@ -54,5 +54,27 @@ namespace collections
             }
             return option<usize>();
         }
+        Array<T> Clone(IAllocator *allocator)
+        {
+            Array<T> result = Array<T>(allocator, this->length);
+            for (usize i = 0; i < length; i++)
+            {
+                result.data[i] = this->data[i];
+            }
+            return result;
+        }
+        Array<T> CloneAdd(IAllocator* allocator, Array<T> other)
+        {
+            Array<T> result = Array<T>(allocator, this->length + other.length);
+            for (usize i = 0; i < length; i++)
+            {
+                result.data[i] = this->data[i];
+            }
+            for (usize i = 0; i < other.length; i++)
+            {
+                result.data[i + this->length] = other.data[i];
+            }
+            return result;
+        }
     };
 }

@@ -251,6 +251,7 @@ bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
     {
         return true;
     }
+
     LinxcOperatorImpl castImpl;
     castImpl.ID = LinxcOverloadIs_Cast;
     castImpl.implicit = implicitly;
@@ -261,6 +262,16 @@ bool LinxcTypeReference::CanCastTo(LinxcTypeReference type, bool implicitly)
 }
 bool LinxcTypeReference::operator==(LinxcTypeReference B)
 {
+    if (this->genericTypeName == B.genericTypeName.buffer && this->genericTypeName.buffer != NULL)
+    {
+        return true;
+    }
+    //if we are both function pointers, compare the signature
+    if (this->lastType->delegateDecl.name.buffer != NULL && B.lastType->delegateDecl.name.buffer != NULL)
+    {
+        bool result = this->lastType->delegateDecl == B.lastType->delegateDecl;
+        return result;
+    }
     if (this->lastType != B.lastType || this->isConst != B.isConst || this->pointerCount != B.pointerCount || this->templateArgs.length != B.templateArgs.length)
     {
         return false;
@@ -383,6 +394,7 @@ LinxcIncludeStatement::LinxcIncludeStatement()
 
 LinxcType::LinxcType()
 {
+    this->delegateDecl = LinxcFuncPtr();
     this->name = string();
     this->parentType = NULL;
     this->typeNamespace = NULL;
@@ -395,6 +407,7 @@ LinxcType::LinxcType()
 }
 LinxcType::LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent)
 {
+    this->delegateDecl = LinxcFuncPtr();
     this->body = collections::vector<LinxcStatement>();
     this->name = name;
     this->parentType = myParent;
@@ -422,32 +435,39 @@ string LinxcType::GetFullName(IAllocator *allocator)
     
     return result;
 }
-string LinxcType::GetCName(IAllocator* allocator)
+string LinxcType::GetCName(IAllocator* allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations)
 {
     string result = string(&defaultAllocator);
 
-    LinxcType* currentParentType = this->parentType;
-    while (currentParentType != NULL)
+    if (this->parentType != NULL)
     {
-        if (currentParentType->name.buffer != NULL)
+        result.AppendDeinit(this->parentType->GetCName(&defaultAllocator, scopeTemplateArgs, scopeTemplateSpecializations));
+        result.Append("_");
+    }
+    else
+    {
+        LinxcNamespace* currentNamespace = this->typeNamespace;
+        while (currentNamespace != NULL)
         {
-            result.Prepend("_");
-            result.Prepend(currentParentType->name.buffer);
+            if (currentNamespace->name.buffer != NULL)
+            {
+                result.Prepend("_");
+                result.Prepend(currentNamespace->name.buffer);
+            }
+            currentNamespace = currentNamespace->parentNamespace;
         }
-        currentParentType = currentParentType->parentType;
     }
 
-    LinxcNamespace* currentNamespace = this->typeNamespace;
-    while (currentNamespace != NULL)
-    {
-        if (currentNamespace->name.buffer != NULL)
-        {
-            result.Prepend("_");
-            result.Prepend(currentNamespace->name.buffer);
-        }
-        currentNamespace = currentNamespace->parentNamespace;
-    }
     result.Append(this->name.buffer);
+    for (usize i = 0; i < templateArgs.length; i++)
+    {
+        option<usize> index = scopeTemplateArgs.Contains(templateArgs.data[i], &stringEql);
+        if (index.present)
+        {
+            result.Append("_");
+            result.AppendDeinit(scopeTemplateSpecializations.data[index.value].GetCName(&defaultAllocator, true, collections::Array<string>(), collections::Array<LinxcTypeReference>()));
+        }
+    }
 
     return result.CloneDeinit(allocator);
 }
@@ -526,6 +546,38 @@ string LinxcVar::ToString(IAllocator *allocator)
     return string(allocator, this->name.buffer);
 }
 
+LinxcFuncPtr::LinxcFuncPtr()
+{
+    this->arguments = collections::Array<LinxcExpression>();
+    this->name = string();
+    this->necessaryArguments = 0;
+    this->returnType = NULL;
+}
+LinxcFuncPtr::LinxcFuncPtr(string name, LinxcExpression* returnType)
+{
+    this->arguments = collections::Array<LinxcExpression>();
+    this->name = name;
+    this->necessaryArguments = 0;
+    this->returnType = returnType;
+}
+bool LinxcFuncPtr::operator==(LinxcFuncPtr B)
+{
+    if (this->necessaryArguments == B.necessaryArguments && this->arguments.length == B.arguments.length && this->returnType->AsTypeReference().value == B.returnType->AsTypeReference().value)
+    {
+        for (usize i = 0; i < this->arguments.length; i++)
+        {
+            LinxcTypeReference ARef = this->arguments.data[i].AsTypeReference().value;
+            LinxcTypeReference BRef = B.arguments.data[i].AsTypeReference().value;
+            if (ARef != BRef)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 LinxcFunc::LinxcFunc()
 {
     this->body = collections::vector<LinxcStatement>();
@@ -536,6 +588,7 @@ LinxcFunc::LinxcFunc()
     this->arguments = collections::Array<LinxcVar>();
     this->templateArgs = collections::Array<string>();
     this->necessaryArguments = 0;
+    this->asType = LinxcType();
 }
 LinxcFunc::LinxcFunc(string name, LinxcExpression returnType)
 {
@@ -547,15 +600,34 @@ LinxcFunc::LinxcFunc(string name, LinxcExpression returnType)
     this->arguments = collections::Array<LinxcVar>();
     this->templateArgs = collections::Array<string>();
     this->necessaryArguments = 0;
+    this->asType = LinxcType();
 }
-string LinxcFunc::GetCName(IAllocator *allocator)
+LinxcFuncPtr LinxcFunc::GetSignature(IAllocator *allocator)
+{
+    LinxcFuncPtr result = LinxcFuncPtr(this->name, &this->returnType);
+    result.necessaryArguments = this->necessaryArguments;
+    result.arguments = collections::Array<LinxcExpression>(allocator, this->arguments.length);
+    for (usize i = 0; i < this->arguments.length; i++)
+    {
+        result.arguments.data[i] = this->arguments.data[i].type;
+    }
+    return result;
+}
+string LinxcFunc::GetCName(IAllocator *allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations)
 {
     string result = string(&defaultAllocator);
+
+    /*for (usize i = 0; i < templateSpecializations.length; i++)
+    {
+        //TODO
+        result.AppendDeinit(templateSpecializations.data[i].GetCName(&defaultAllocator, true));
+        result.Append("_");
+    }*/
 
     if (this->methodOf != NULL)
     {
         result.Prepend("_");
-        string typeCName = this->methodOf->GetCName(&defaultAllocator);
+        string typeCName = this->methodOf->GetCName(&defaultAllocator, scopeTemplateArgs, scopeTemplateSpecializations);
         result.Prepend(typeCName.buffer);
         typeCName.deinit();
     }
@@ -605,18 +677,59 @@ string LinxcTypeReference::ToString(IAllocator *allocator)
     }
     return result.CloneDeinit(allocator);
 }
-string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr)
+string LinxcTypeReference::GetCName(IAllocator* allocator, bool pointerAsPtr, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
 {
     string result = string(&defaultAllocator);
     if (this->isConst)
     {
         result.Append("const ");
     }
-    result.AppendDeinit(this->lastType->GetCName(&defaultAllocator));
+    if (this->genericTypeName.buffer != NULL)
+    {
+        option<usize> findResult = templateArgs.Contains(this->genericTypeName, &stringEql);
+        if (findResult.present)
+        {
+            result.AppendDeinit(templateSpecializations.data[findResult.value].GetCName(&defaultAllocator));
+        }
+    }
+    else
+    {
+        LinxcType* currentParentType = this->lastType->parentType;
+        bool appendNamespace = true;
+        while (currentParentType != NULL)
+        {
+            if (currentParentType->templateArgs.length > 0)
+            {
+                appendNamespace = false;
+                break;
+            }
+            if (currentParentType->name.buffer != NULL)
+            {
+                result.Prepend("_");
+                result.Prepend(currentParentType->name.buffer);
+            }
+            currentParentType = currentParentType->parentType;
+        }
+
+        if (appendNamespace)
+        {
+            LinxcNamespace* currentNamespace = this->lastType->typeNamespace;
+            while (currentNamespace != NULL)
+            {
+                if (currentNamespace->name.buffer != NULL)
+                {
+                    result.Prepend("_");
+                    result.Prepend(currentNamespace->name.buffer);
+                }
+                currentNamespace = currentNamespace->parentNamespace;
+            }
+        }
+        result.Append(this->lastType->name.buffer);
+    }// result.AppendDeinit(this->lastType->GetCName(&defaultAllocator));
     for (usize i = 0; i < this->templateArgs.length; i++)
     {
         result.Append("_");
-        result.AppendDeinit(this->templateArgs.data[i].AsTypeReference().value.GetCName(&defaultAllocator, true));
+        result.AppendDeinit(this->templateArgs.data[i].AsTypeReference().value.GetCName(&defaultAllocator, true, templateArgs, templateSpecializations));
     }
     if (!pointerAsPtr) //pointer as *
     {
@@ -732,6 +845,23 @@ string LinxcExpression::ToString(IAllocator *allocator)
         default:
             return string("NULL");
     }
+}
+option<LinxcFunc*> LinxcExpression::AsFuncReference()
+{
+    //cannot check this as a FuncRef by default resolves to the return type
+    /*if (this->resolvesTo.lastType != NULL)
+    {
+        return option<LinxcFunc*>();
+    }*/
+    if (this->ID == LinxcExpr_FunctionRef)
+    {
+        return option<LinxcFunc*>(this->data.functionRef);
+    }
+    if (this->ID == LinxcExpr_OperatorCall)
+    {
+        return this->data.operatorCall->rightExpr.AsFuncReference();
+    }
+    return option<LinxcFunc*>();
 }
 option<LinxcTypeReference> LinxcExpression::AsTypeReference()
 {
