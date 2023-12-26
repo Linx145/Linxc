@@ -346,6 +346,14 @@ struct LinxcIfStatement
     collections::vector<LinxcStatement> result;
 };
 
+struct LinxcForLoopStatement
+{
+    collections::vector<LinxcStatement> initialization;
+    LinxcExpression condition;
+    collections::vector<LinxcStatement> step;
+    collections::vector<LinxcStatement> body;
+};
+
 struct LinxcUseLang
 {
     string languageUsed;
@@ -364,6 +372,7 @@ enum LinxcStatementID
     LinxcStmt_If,
     LinxcStmt_Else,
     LinxcStmt_UseLang,
+    LinxcStmt_For,
 };
 union LinxcStatementData
 {
@@ -378,6 +387,7 @@ union LinxcStatementData
     LinxcIfStatement ifStatement;
     collections::vector<LinxcStatement> elseStatement;
     LinxcUseLang useLang;
+    LinxcForLoopStatement forLoop;
 
     LinxcStatementData();
 };

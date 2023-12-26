@@ -14,8 +14,9 @@ typedef struct LinxcParser LinxcParser;
 
 enum LinxcEndOn
 {
-    LinxcEndOn_Semicolon,
+    LinxcEndOn_Semicolon, //note: Does not end on a comma even if commaIsSemicolon is set to true
     LinxcEndOn_RBrace,
+    LinxcEndOn_RParen, //for the final compound statement in a for loop
     LinxcEndOn_Endif,
     LinxcEndOn_Eof,
     LinxcEndOn_SingleStatement
@@ -152,6 +153,7 @@ struct LinxcParserState
     LinxcEndOn endOn;
     collections::hashmap<string, LinxcVar *> varsInScope;
     bool parsingLinxci;
+    bool commaIsSemicolon;
 
     void deinit();
     LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endOn, bool isTopLevel, bool isParsingLinxci);
@@ -223,15 +225,14 @@ struct LinxcParser
     LinxcOperatorFunc NewDefaultCast(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, bool isImplicit);
     LinxcOperatorFunc NewDefaultOperator(LinxcType** primitiveTypePtrs, i32 myTypeIndex, i32 otherTypeIndex, LinxcTokenID op);
 
-    void SpecializeTemplatedType(LinxcType* type, collections::hashmap<string, LinxcExpression> specializations);
-
-    void TranspileFile(LinxcParsedFile *parsedFile, const char* outputPathC, const char* outputPathH);
+    bool TranspileFile(LinxcParsedFile *parsedFile, const char* outputPathC, const char* outputPathH);
     void TranspileStatementH(FILE* fs, LinxcStatement* stmt, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileFuncHeader(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileFuncH(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileFuncC(FILE* fs, LinxcFunc* func, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileVar(FILE* fs, LinxcVar* var, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecialization);
     void TranspileTypeH(FILE* fs, LinxcType* type, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecialization);
+    void TranspileTypeC(FILE* fs, LinxcType* type, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileExpr(FILE* fs, LinxcExpression* expr, bool writePriority, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);
     void TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStatement> stmts, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations);

@@ -6,6 +6,7 @@
 
 LinxcParserState::LinxcParserState(LinxcParser *myParser, LinxcParsedFile *currentFile, LinxcTokenizer *myTokenizer, LinxcEndOn endsOn, bool isTopLevel, bool isParsingLinxci)
 {
+    this->commaIsSemicolon = false;
     this->tokenizer = myTokenizer;
     this->parser = myParser;
     this->parsingFile = currentFile;
@@ -331,10 +332,13 @@ bool LinxcParser::Compile(const char* outputDirectory)
                     string pathC = path::SwapExtension(&defaultAllocator, outputPath, ".c");
                     string pathH = path::SwapExtension(&defaultAllocator, outputPath, ".h");
 
-                    cmd.Append(" ");
-                    cmd.Append(pathC.buffer);
+                    bool transpiledC = this->TranspileFile(parsedFile, pathC.buffer, pathH.buffer);
 
-                    this->TranspileFile(parsedFile, pathC.buffer, pathH.buffer);
+                    if (transpiledC)
+                    {
+                        cmd.Append(" ");
+                        cmd.Append(pathC.buffer);
+                    }
 
                     outputPath.deinit();
                     pathC.deinit();
@@ -363,7 +367,13 @@ bool LinxcParser::Compile(const char* outputDirectory)
 
         cmd.Append(outputFile.buffer);
 
+        printf("%s\n\n", cmd.buffer);
         result = system(cmd.buffer);
+
+        if (result == 0)
+        {
+            result = system(outputFile.buffer);
+        }
         outputFile.deinit();
     }
     //i32 run = system(outputFile.buffer);
@@ -1060,7 +1070,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
             collections::Array<LinxcExpression> potentialTemplateArgs;
             if ((result.value.ID == LinxcExpr_TypeRef || result.value.ID == LinxcExpr_FunctionRef) && state->tokenizer->PeekNextUntilValid().ID == Linxc_AngleBracketLeft)
             {
-                if ((result.value.ID == LinxcExpr_TypeRef && result.value.data.typeRef.lastType->templateArgs.length > 0) || (result.value.ID == LinxcExpr_FunctionRef && result.value.data.functionRef->templateArgs.length > 0))
+                if ((result.value.ID == LinxcExpr_TypeRef && result.value.data.typeRef.lastType != NULL && result.value.data.typeRef.lastType->templateArgs.length > 0) || (result.value.ID == LinxcExpr_FunctionRef && result.value.data.functionRef->templateArgs.length > 0))
                 {
                     collections::vector<LinxcExpression> templateArgs = collections::vector<LinxcExpression>(&defaultAllocator);
                     state->tokenizer->NextUntilValid();
@@ -1146,14 +1156,14 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                     {
                         ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
                         msg.AppendDeinit(token.ToString(&defaultAllocator));
-                        msg.Append(" is not generic and is not accepting template types");
+                        msg.Append(" is not a generic type");
                         state->parsingFile->errors.Add(msg);
                     }
                     else
                     {
                         ERR_MSG msg = ERR_MSG(this->allocator, "Function ");
                         msg.AppendDeinit(token.ToString(&defaultAllocator));
-                        msg.Append(" is not generic and is not accepting template types");
+                        msg.Append(" is not a generic function");
                         state->parsingFile->errors.Add(msg);
                     }
                 }
@@ -1895,7 +1905,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
 
         if (errorSkipUntilSemicolon)
         {
-            if (token.ID == Linxc_Semicolon || token.ID == Linxc_LineComment || token.ID == Linxc_MultiLineComment || token.ID == Linxc_Hash || (token.ID == Linxc_RBrace && state->endOn == LinxcEndOn_RBrace))
+            if (token.ID == Linxc_Semicolon || (token.ID == Linxc_Comma && state->commaIsSemicolon) || token.ID == Linxc_LineComment || token.ID == Linxc_MultiLineComment || token.ID == Linxc_Hash || (token.ID == Linxc_RBrace && state->endOn == LinxcEndOn_RBrace) || (token.ID == Linxc_RParen && state->endOn == LinxcEndOn_RParen))
             {
                 errorSkipUntilSemicolon = false;
             }
@@ -1906,14 +1916,30 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
         }
         if (!isComment)
         {
-            if (token.ID == Linxc_Semicolon && expectSemicolon)
+            if (token.ID == Linxc_Semicolon && state->endOn == LinxcEndOn_Semicolon)
+            {
+                break;
+            }
+            else if (token.ID == Linxc_RParen && state->endOn == LinxcEndOn_RParen)
+            {
+                break;
+            }
+            else if (((token.ID == Linxc_Semicolon && !state->commaIsSemicolon) || (token.ID == Linxc_Comma && state->commaIsSemicolon)) && expectSemicolon)
             {
                 expectSemicolon = false;
                 continue;
             }
             else if (expectSemicolon)
             {
-                errors->Add(ERR_MSG(this->allocator, "Expected semicolon"));
+                if (!state->commaIsSemicolon)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expected semicolon ;"));
+                }
+                else
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Expected comma ,"));
+                }
+                printf("Token was %s\n", token.ToString(this->allocator).buffer);
                 expectSemicolon = false; //dont get the same error twice
             }
         }
@@ -2641,7 +2667,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     }
 
                     LinxcToken next = tokenizer->NextUntilValid();
-                    if (next.ID == Linxc_Semicolon || next.ID == Linxc_Equal)
+                    if (((next.ID == Linxc_Semicolon && (!state->commaIsSemicolon || state->endOn == LinxcEndOn_Semicolon)) || (next.ID == Linxc_Comma && state->commaIsSemicolon)) || next.ID == Linxc_Equal)
                     {
                         option<LinxcExpression> defaultValue;
                         if (next.ID == Linxc_Equal)
@@ -2727,6 +2753,12 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             stmt.ID = LinxcStmt_VarDecl;
                             result.Add(stmt);
                             state->varsInScope.Add(varDecl.name, ptr);
+                        }
+
+                        if (next.ID == Linxc_Semicolon && state->endOn == LinxcEndOn_Semicolon)
+                        {
+                            toBreak = true;
+                            break;
                         }
                     }
                     else if (next.ID == Linxc_LParen) //function declaration
@@ -3020,8 +3052,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
             if (tokenizer->PeekNextUntilValid().ID == Linxc_Semicolon)
             {
                 //return; statement. Only valid in functions that return void
-
-                if (state->currentFunction->returnType.AsTypeReference().value.lastType->name != "void")
+                LinxcTypeReference expectedReturnType = state->currentFunction->returnType.AsTypeReference().value;
+                if (expectedReturnType.lastType != this->typeofVoid)
                 {
                     state->parsingFile->errors.Add(ERR_MSG(this->allocator, "Empty return statement not allowed in function that expects a return type"));
                 }
@@ -3047,6 +3079,111 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                 {
                     errors->Add(ERR_MSG(this->allocator, "Returned type does not match expected function return type, and cannot be converted to it"));
                 }
+            }
+        }
+        break;
+        case Linxc_Keyword_for:
+        {
+            LinxcToken next = tokenizer->NextUntilValid();
+            if (next.ID != Linxc_LParen)
+            {
+                errors->Add(ERR_MSG(this->allocator, "Expected ( after for statement"));
+            }
+            //for (stmt; expression; stmt;)
+            LinxcParserState nextState = LinxcParserState(this, state->parsingFile, tokenizer, LinxcEndOn_Semicolon, false, false);
+            nextState.currentFunction = state->currentFunction;
+            nextState.currentNamespace = state->currentNamespace;
+            nextState.varsInScope = state->varsInScope.Clone(&defaultAllocator);
+            nextState.commaIsSemicolon = true;
+
+            option<collections::vector<LinxcStatement>> init = this->ParseCompoundStmt(&nextState);
+            if (!init.present)
+            {
+                toBreak = true;
+                break;
+            }
+            for (usize i = 0; i < init.value.count; i++)
+            {
+                if (init.value.Get(i)->ID != LinxcStmt_VarDecl && init.value.Get(i)->ID != LinxcStmt_Expr)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Only variable declarations or expressions are allowed in the initialization statement of a for loop"));
+                    toBreak = true;
+                    break;
+                }
+            }
+
+            option<LinxcExpression> primaryExprOpt = this->ParseExpressionPrimary(&nextState);
+            if (!primaryExprOpt.present)
+            {
+                toBreak = true;
+                break;
+            }
+            LinxcExpression conditionExpr = this->ParseExpression(&nextState, primaryExprOpt.value, -1);
+            if (conditionExpr.resolvesTo.lastType == NULL || conditionExpr.resolvesTo.lastType->name != "bool")
+            {
+                printf("%s\n", conditionExpr.ToString(this->allocator).buffer);
+                errors->Add(ERR_MSG(this->allocator, "For loop condition must result in a boolean"));
+                toBreak = true;
+                break;
+            }
+
+            nextState.endOn = LinxcEndOn_RParen;
+            option<collections::vector<LinxcStatement>> step = this->ParseCompoundStmt(&nextState);
+            if (!step.present)
+            {
+                toBreak = true;
+                break;
+            }
+            for (usize i = 0; i < step.value.count; i++)
+            {
+                if (step.value.Get(i)->ID != LinxcStmt_Expr)
+                {
+                    errors->Add(ERR_MSG(this->allocator, "Only expressions are allowed in the step statement of a for loop"));
+                    toBreak = true;
+                    break;
+                }
+            }
+
+            nextState.commaIsSemicolon = false;
+            if (tokenizer->PeekNextUntilValid().ID == Linxc_LBrace)
+            {
+                tokenizer->NextUntilValid();
+                nextState.endOn = LinxcEndOn_RBrace;
+            }
+            else
+                nextState.endOn = LinxcEndOn_SingleStatement;
+
+            option<collections::vector<LinxcStatement>> body = this->ParseCompoundStmt(&nextState);
+            if (!body.present)
+            {
+                toBreak = true;
+                break;
+            }
+
+            LinxcForLoopStatement forLoop;
+            forLoop.initialization = init.value;
+            forLoop.condition = conditionExpr;
+            forLoop.step = step.value;
+            forLoop.body = body.value;
+
+            LinxcStatement stmt;
+            stmt.ID = LinxcStmt_For;
+            stmt.data.forLoop = forLoop;
+
+            result.Add(stmt);
+
+            nextState.deinit();
+        }
+        break;
+        case Linxc_RParen: //EndOnRParen settled before the while loop, so if we encounter a random ) here, always throw an error (Unless it's a comment)
+        {
+            if (isComment)
+            {
+                continue;
+            }
+            else
+            {
+                errors->Add(ERR_MSG(this->allocator, "Unexpected )"));
             }
         }
         break;
@@ -3107,18 +3244,27 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
     return option<collections::vector<LinxcStatement>>(result);
 }
 
-void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputPathC, const char* outputPathH)
+bool LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputPathC, const char* outputPathH)
 {
-    FILE* fs = io::CreateDirectoriesAndFile(outputPathH);
-    //transpile header
-    if (fs != NULL)
+    bool transpiledC = false;
+    FILE* fs;
+    if (parsedFile->ast.count > 0)
     {
-        fprintf(fs, "#include <Linxc.h>\n#include <stdbool.h>\n");
-        for (usize i = 0; i < parsedFile->ast.count; i++)
+        fs = io::CreateDirectoriesAndFile(outputPathH);
+        //transpile header
+        if (fs != NULL)
         {
-            TranspileStatementH(fs, parsedFile->ast.Get(i), collections::Array<string>(), collections::Array<LinxcTypeReference>());
+            fprintf(fs, "#pragma once\n#include <Linxc.h>\n#include <stdbool.h>\n");
+            for (usize i = 0; i < parsedFile->ast.count; i++)
+            {
+                TranspileStatementH(fs, parsedFile->ast.Get(i), collections::Array<string>(), collections::Array<LinxcTypeReference>());
+            }
+            fclose(fs);
         }
-        fclose(fs);
+    }
+    else if (io::FileExists(outputPathH))
+    {
+        remove(outputPathH);
     }
     //transpile source
     if (parsedFile->mustTranspileC)
@@ -3133,12 +3279,16 @@ void LinxcParser::TranspileFile(LinxcParsedFile* parsedFile, const char* outputP
             this->TranspileCompoundStmtC(fs, parsedFile->ast, NULL, collections::Array<string>(), collections::Array<LinxcTypeReference>());
 
             fclose(fs);
+
+            transpiledC = true;
         }
     }
     else if (io::FileExists(outputPathC))
     {
         remove(outputPathC);
     }
+
+    return transpiledC;
 }
 void LinxcParser::TranspileStatementH(FILE* fs, LinxcStatement* stmt, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
 {
@@ -3764,7 +3914,7 @@ void LinxcParser::TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStat
         this->TranspileStatementC(fs, resultStmt, tempIndex, templateArgs, templateSpecializations);
         if (resultStmt->ID != LinxcStmt_Namespace)
         {
-            if (resultStmt->ID != LinxcStmt_Include && resultStmt->ID != LinxcStmt_If && resultStmt->ID != LinxcStmt_Else && resultStmt->ID != LinxcStmt_TypeDecl && resultStmt->ID != LinxcStmt_FuncDecl)
+            if (resultStmt->ID != LinxcStmt_Include && resultStmt->ID != LinxcStmt_For && resultStmt->ID != LinxcStmt_If && resultStmt->ID != LinxcStmt_Else && resultStmt->ID != LinxcStmt_TypeDecl && resultStmt->ID != LinxcStmt_FuncDecl)
             {
                 fprintf(fs, ";\n");
             }
@@ -3775,40 +3925,52 @@ void LinxcParser::TranspileCompoundStmtC(FILE* fs, collections::vector<LinxcStat
         }
     }
 }
+void LinxcParser::TranspileTypeC(FILE* fs, LinxcType* type, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
+{
+    if (type->templateArgs.length > 0)
+    {
+        collections::Array<string> typeTemplateArgs = templateArgs.CloneAdd(&defaultAllocator, type->templateArgs);
+        for (usize i = 0; i < type->templateSpecializations.bucketsCount; i++)
+        {
+            if (type->templateSpecializations.buckets[i].initialized)
+            {
+                for (usize j = 0; j < type->templateSpecializations.buckets[i].entries.count; j++)
+                {
+                    collections::Array<LinxcTypeReference> typeTemplateSpecializations = templateSpecializations.CloneAdd(&defaultAllocator, type->templateSpecializations.buckets[i].entries.ptr[j]);
+
+                    for (usize c = 0; c < type->subTypes.count; c++)
+                    {
+                        TranspileTypeC(fs, type->subTypes.Get(c), typeTemplateArgs, typeTemplateSpecializations);
+                    }
+                    for (usize c = 0; c < type->functions.count; c++)
+                    {
+                        TranspileFuncC(fs, type->functions.Get(c), typeTemplateArgs, typeTemplateSpecializations);
+                    }
+
+                    typeTemplateSpecializations.deinit();
+                }
+            }
+        }
+        typeTemplateArgs.deinit();
+    }
+    else
+    {
+        for (usize c = 0; c < type->subTypes.count; c++)
+        {
+            TranspileTypeC(fs, type->subTypes.Get(c), templateArgs, templateSpecializations);
+        }
+        for (usize c = 0; c < type->functions.count; c++)
+        {
+            TranspileFuncC(fs, type->functions.Get(c), templateArgs, templateSpecializations);
+        }
+    }
+}
 void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempIndex, collections::Array<string> templateArgs, collections::Array<LinxcTypeReference> templateSpecializations)
 {
     if (stmt->ID == LinxcStmt_TypeDecl)
     {
         LinxcType* type = stmt->data.typeDeclaration;
-        if (type->templateArgs.length > 0)
-        {
-            collections::Array<string> typeTemplateArgs = templateArgs.CloneAdd(&defaultAllocator, type->templateArgs);
-            for (usize i = 0; i < type->templateSpecializations.bucketsCount; i++)
-            {
-                if (type->templateSpecializations.buckets[i].initialized)
-                {
-                    for (usize j = 0; j < type->templateSpecializations.buckets[i].entries.count; j++)
-                    {
-                        collections::Array<LinxcTypeReference> typeTemplateSpecializations = templateSpecializations.CloneAdd(&defaultAllocator, type->templateSpecializations.buckets[i].entries.ptr[j]);
-                        
-                        for (usize c = 0; c < type->functions.count; c++)
-                        {
-                            TranspileFuncC(fs, type->functions.Get(c), typeTemplateArgs, typeTemplateSpecializations);
-                        }
-
-                        typeTemplateSpecializations.deinit();
-                    }
-                }
-            }
-            typeTemplateArgs.deinit();
-        }
-        else
-        {
-            for (usize c = 0; c < type->functions.count; c++)
-            {
-                TranspileFuncC(fs, type->functions.Get(c), templateArgs, templateSpecializations);
-            }
-        }
+        TranspileTypeC(fs, type, templateArgs, templateSpecializations);
     }
     else if (stmt->ID == LinxcStmt_FuncDecl)
     {
@@ -3825,6 +3987,78 @@ void LinxcParser::TranspileStatementC(FILE* fs, LinxcStatement* stmt, i32* tempI
         this->SegregateFuncCallExpression(fs, expr, tempIndex, templateArgs, templateSpecializations);
         
         this->TranspileExpr(fs, expr, false, templateArgs, templateSpecializations);
+    }
+    else if (stmt->ID == LinxcStmt_For)
+    {
+        LinxcForLoopStatement* forLoop = &stmt->data.forLoop;
+        LinxcExpression* conditionExpr = &forLoop->condition;
+
+        //we cannot actually transpile for loops back into for loops.
+        //this is because if someone did for (structureA A; A.index < 5; A.Method().MethodB()),
+        //we would not be able to segregate the final statement.
+        //Instead, we transpile it as a while loop within a scope (So that the initialized variable doesn't clash with anything else
+
+        fprintf(fs, "{\n");
+        this->TranspileCompoundStmtC(fs, forLoop->initialization, tempIndex, templateArgs, templateSpecializations);
+
+        fprintf(fs, "while (true) {\n");
+
+        this->RotateFuncCallExpression(conditionExpr, &conditionExpr, NULL, NULL, templateArgs, templateSpecializations);
+        this->SegregateFuncCallExpression(fs, conditionExpr, tempIndex, templateArgs, templateSpecializations);
+
+        i32 conditionIndex = *tempIndex;
+        fprintf(fs, "bool _condition%i = ", conditionIndex);
+        *tempIndex += 1;
+
+        this->TranspileExpr(fs, conditionExpr, false, templateArgs, templateSpecializations);
+        fprintf(fs, ";\n");
+
+        fprintf(fs, "if (!_condition%i) break;\n", conditionIndex);
+
+        this->TranspileCompoundStmtC(fs, forLoop->body, tempIndex, templateArgs, templateSpecializations);
+
+        this->TranspileCompoundStmtC(fs, forLoop->step, tempIndex, templateArgs, templateSpecializations);
+
+        fprintf(fs, "}\n");
+        fprintf(fs, "}");
+
+        /*
+        fprintf(fs, "for (");
+
+        collections::vector<LinxcStatement>* stmts = &forLoop->initialization;
+        for (usize i = 0; i < stmts->count; i++)
+        {
+            LinxcStatement* resultStmt = stmts->Get(i);
+            this->TranspileStatementC(fs, resultStmt, tempIndex, templateArgs, templateSpecializations);
+            if (i < stmts->count - 1)
+            {
+                fprintf(fs, ",\n");
+            }
+        }
+        fprintf(fs, "; ");
+
+        this->RotateFuncCallExpression(conditionExpr, &conditionExpr, NULL, NULL, templateArgs, templateSpecializations);
+        this->SegregateFuncCallExpression(fs, conditionExpr, tempIndex, templateArgs, templateSpecializations);
+
+        this->TranspileExpr(fs, conditionExpr, false, templateArgs, templateSpecializations);
+        fprintf(fs, "; ");
+        
+        stmts = &forLoop->step;
+        for (usize i = 0; i < stmts->count; i++)
+        {
+            LinxcStatement* resultStmt = stmts->Get(i);
+            this->TranspileStatementC(fs, resultStmt, tempIndex, templateArgs, templateSpecializations);
+            if (i < stmts->count - 1)
+            {
+                fprintf(fs, ",\n");
+            }
+        }
+
+        fprintf(fs, ") {\n");
+
+        this->TranspileCompoundStmtC(fs, forLoop->body, tempIndex, templateArgs, templateSpecializations);
+
+        fprintf(fs, "}");*/
     }
     else if (stmt->ID == LinxcStmt_Return)
     {

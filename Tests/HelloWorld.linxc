@@ -1,28 +1,16 @@
 #include <Linxc.h>
+#include <stdio.linxch>
 
 bool intEquals(i32 A, i32 B)
 {
     return A == B;
 };
 
-template<typename A>
-struct No
-{
-    template<typename B>
-    struct Yes
-    {
-        A opt1;
-        B opt2;
-    };
-};
-
 i32 main()
 {
-    No<i32>::Yes<float> combo1;
-    No<i32>::Yes<float> combo2;
-    No<u64>::Yes<bool> combo3;
-    No<float>::Yes<bool> combo4;
-    No<float>::Yes<i32> combo5;
-
-    return 0;
+    for (i32 i = 0; i < 10; i += 1)
+    {
+        printf("%i\n", i + 1);
+    }
+        return 0;
 }

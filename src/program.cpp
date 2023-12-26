@@ -17,7 +17,7 @@ i32 main()
 
     printf("Program started\n");
     LinxcParser parser = LinxcParser(&arena.asAllocator);
-    //parser.appName = string(&arena.asAllocator, "Hello World");
+    parser.appName = string(&arena.asAllocator, "Hello World");
     parser.SetLinxcStdLocation(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/src/linxcstd"));
     
     //parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));

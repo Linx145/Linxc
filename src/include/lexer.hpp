@@ -28,18 +28,18 @@ enum LinxcTokenID
     Linxc_PipeEqual,
     Linxc_Equal,
     Linxc_EqualEqual,
-    //(
-    Linxc_LParen,
-    //)
-    Linxc_RParen,
-    //{
-    Linxc_LBrace,
-    //}
-    Linxc_RBrace,
-    //[
-    Linxc_LBracket,
-    //]
-    Linxc_RBracket,
+
+    Linxc_LParen,    //(
+
+    Linxc_RParen,    //)
+
+    Linxc_LBrace,    //{
+
+    Linxc_RBrace,    //}
+
+    Linxc_LBracket,    //[
+
+    Linxc_RBracket,    //]
     Linxc_Period,
     Linxc_Ellipsis,
     Linxc_Caret,
