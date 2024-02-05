@@ -175,6 +175,7 @@ struct LinxcParser
     collections::hashmap<string, LinxcTokenID> nameToToken;
     LinxcType* typeofU8;
     LinxcType* typeofVoid;
+    LinxcType *typeofU64;
     LinxcNamespace globalNamespace;
     string thisKeyword;
     string linxcstdLocation;
@@ -198,6 +199,7 @@ struct LinxcParser
 
     void deinit();
     void SetLinxcStdLocation(string path);
+    void AddFile(const char* path, const char* includeName);
     void AddAllFilesFromDirectory(string directoryPath);
     string FullPathFromIncludeName(string includeName);
 

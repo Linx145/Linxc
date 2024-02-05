@@ -215,7 +215,7 @@ LinxcParsedFile::LinxcParsedFile()
     this->definedMacros = collections::vector<LinxcMacro>();
     //this->definedTypes = collections::vector<LinxcType *>();
     //this->definedVars = collections::vector<LinxcVar *>();
-    this->errors = collections::vector<ERR_MSG>();
+    this->errors = collections::vector<LinxcErrorMessage>();
     this->fullPath = string();
     this->includeName = string();
     this->ast = collections::vector<LinxcStatement>();
@@ -228,7 +228,7 @@ LinxcParsedFile::LinxcParsedFile(IAllocator *allocator, string fullPath, string 
     this->definedMacros = collections::vector<LinxcMacro>(allocator);
     //this->definedTypes = collections::vector<LinxcType *>(allocator);
     //this->definedVars = collections::vector<LinxcVar *>(allocator);
-    this->errors = collections::vector<ERR_MSG>(allocator);
+    this->errors = collections::vector<LinxcErrorMessage>(allocator);
     this->fullPath = fullPath;
     this->includeName = includeName;
     this->ast = collections::vector<LinxcStatement>();
@@ -325,7 +325,7 @@ LinxcPhoneyNamespace::LinxcPhoneyNamespace()
     this->variableRefs = collections::hashmap<string, LinxcVar*>();
     this->typedefs = collections::hashmap<string, LinxcTypeReference>();
 }
-LinxcPhoneyNamespace::LinxcPhoneyNamespace(IAllocator* allocator, LinxcNamespace* thisActualNamespace)
+LinxcPhoneyNamespace::LinxcPhoneyNamespace(IAllocator* allocator, LinxcType* u8type, LinxcType* u64type, LinxcNamespace* thisActualNamespace)
 {
     this->allocator = allocator;
     this->parentNamespace = NULL;
@@ -336,6 +336,10 @@ LinxcPhoneyNamespace::LinxcPhoneyNamespace(IAllocator* allocator, LinxcNamespace
     this->typeRefs = collections::hashmap<string, LinxcType*>(allocator, &stringHash, &stringEql);
     this->variableRefs = collections::hashmap<string, LinxcVar*>(allocator, &stringHash, &stringEql);
     this->typedefs = collections::hashmap<string, LinxcTypeReference>(allocator, &stringHash, &stringEql);
+    if (u8type != NULL)
+        this->typedefs.Add(string(allocator, "char"), u8type);
+    if (u64type != NULL)
+        this->typedefs.Add(string(allocator, "usize"), u64type);
 }
 void LinxcPhoneyNamespace::Add(LinxcPhoneyNamespace* other)
 {
@@ -395,7 +399,7 @@ void LinxcPhoneyNamespace::Add(LinxcPhoneyNamespace* other)
                 else
                 {
                     //clone it, if not, any modification to this namespace would modify the other as well
-                    LinxcPhoneyNamespace newEquivalent = LinxcPhoneyNamespace(this->allocator, other->subNamespaces.buckets[i].entries.ptr[j].value.actualNamespace);
+                    LinxcPhoneyNamespace newEquivalent = LinxcPhoneyNamespace(this->allocator, NULL, NULL, other->subNamespaces.buckets[i].entries.ptr[j].value.actualNamespace);
                     newEquivalent.Add(&other->subNamespaces.buckets[i].entries.ptr[j].value);
                     this->subNamespaces.Add(newEquivalent.name, newEquivalent);
                 }

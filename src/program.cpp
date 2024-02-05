@@ -6,6 +6,7 @@
 
 i32 main()
 {
+    SetDefaultAllocator(GetCAllocator());
     ArenaAllocator arena = ArenaAllocator(GetDefaultAllocator());
 
     //CIMGUI_DEFINE_ENUMS_AND_STRUCTS
@@ -20,8 +21,9 @@ i32 main()
     //parser.appName = string(&arena.asAllocator, "Hello World");
     parser.SetLinxcStdLocation(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/src/linxcstd"));
     
-    //parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
-    parser.AddAllFilesFromDirectory(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
+    parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/SomnialGametech/Astral.Canvas/include"));
+
+    parser.AddFile("C:/Users/Linus/source/repos/SomnialGametech/Astral.Canvas/src/TargetBindings.linxc", "TargetBindings.linxc"); // AddAllFilesFromDirectory(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));
     if (!parser.Compile("C:/Users/Linus/source/repos/Linxc/linxc-out"))
     {
         parser.PrintAllErrors();
@@ -30,7 +32,7 @@ i32 main()
     else printf("Compilation success!\n");
 
     parser.deinit();
-    //printf("Program finish, freeing remaining %i allocations\n", (i32)arena.ptrs.count);
+    printf("Program finish, freeing remaining %i allocations\n", (i32)arena.ptrs.count);
     arena.deinit();
     getchar();
 

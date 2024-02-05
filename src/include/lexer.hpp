@@ -157,6 +157,7 @@ enum LinxcTokenID
     Linxc_Keyword_error,
     Linxc_Keyword_pragma,
     Linxc_Keyword_endif,
+    Linxc_Keyword_NULL,
 
     //Astral Canvas Shading Language (Acsl) AKA Glsl with a (cool) preprocessor
 
@@ -326,7 +327,7 @@ enum LinxcTokenizerState
 
 struct LinxcTokenizer
 {
-    const char *buffer;
+    char *buffer;
     usize bufferLength;
     usize index;
     usize prevIndex;
@@ -340,12 +341,17 @@ struct LinxcTokenizer
     collections::vector<LinxcToken> tokenStream;
 
     LinxcTokenizer();
-    LinxcTokenizer(const char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
+    LinxcTokenizer(char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
 
     LinxcToken TokenizeAdvance();
     inline LinxcToken Next()
     {
-        return this->tokenStream.ptr[this->currentToken++];
+        LinxcToken result = this->tokenStream.ptr[this->currentToken++];
+        if (result.ID == Linxc_Nl)
+        {
+            currentLine += 1;
+        }
+        return result;
     }
     LinxcToken PeekNext();
     LinxcToken NextUntilValid();

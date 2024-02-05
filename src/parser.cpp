@@ -41,6 +41,10 @@ LinxcParser::LinxcParser(IAllocator *allocator)
         {
             typeofU8 = primitiveTypePtrs[i];
         }
+        if (i == 3)
+        {
+            typeofU64 = primitiveTypePtrs[i];
+        }
         if (i == 11)
         {
             typeofVoid = primitiveTypePtrs[i];
@@ -242,6 +246,7 @@ LinxcParser::LinxcParser(IAllocator *allocator)
     nameToToken.Add(string(nameToToken.allocator, "uselang"), Linxc_keyword_uselang);
     nameToToken.Add(string(nameToToken.allocator, "enduselang"), Linxc_keyword_enduselang);
     nameToToken.Add(string(nameToToken.allocator, "endif"), Linxc_Keyword_endif);
+    nameToToken.Add(string(nameToToken.allocator, "NULL"), Linxc_Keyword_NULL);
 }
 void LinxcParserState::deinit()
 {
@@ -265,7 +270,7 @@ void LinxcParser::PrintAllErrors()
             {
                 for (usize c = 0; c < this->parsedFiles.buckets[i].entries.ptr[j].value.errors.count; c++)
                 {
-                    printf("%s: %s\n", this->parsedFiles.buckets[i].entries.ptr[j].value.includeName.buffer, this->parsedFiles.buckets[i].entries.ptr[j].value.errors.ptr[c].buffer);
+                    printf("%s line %llu: %s\n", this->parsedFiles.buckets[i].entries.ptr[j].value.includeName.buffer, this->parsedFiles.buckets[i].entries.ptr[j].value.errors.ptr[c].line, this->parsedFiles.buckets[i].entries.ptr[j].value.errors.ptr[c].internalMessage.buffer);
                 }
             }
         }
@@ -394,6 +399,13 @@ void LinxcParser::SetLinxcStdLocation(string path)
     this->linxcstdLocation = path;
     this->includeDirectories.Add(path);
 }
+void LinxcParser::AddFile(const char* path, const char* includeName)
+{
+    LinxcIncludedFile includedFile;
+    includedFile.includeName = string(this->allocator, includeName);
+    includedFile.fullNameAndPath = string(this->allocator, path);
+    this->includedFiles.Add(includedFile.includeName, includedFile);
+}
 void LinxcParser::AddAllFilesFromDirectory(string directoryPath)
 {
     collections::Array<string> result = io::GetFilesInDirectory(GetDefaultAllocator(), directoryPath.buffer);
@@ -442,7 +454,7 @@ LinxcParsedFile *LinxcParser::ParseFile(string fileFullPath, string includeName,
     if (this->TokenizeFile(&tokenizer, allocator, &file))
     {
         LinxcParserState parserState = LinxcParserState(this, &file, &tokenizer, LinxcEndOn_Eof, true, parsingLinxci);
-        file.fileNamespace = LinxcPhoneyNamespace(this->allocator, &this->globalNamespace);
+        file.fileNamespace = LinxcPhoneyNamespace(this->allocator, this->typeofU8, this->typeofU64, &this->globalNamespace);
         parserState.currentNamespace = &file.fileNamespace;
         option<collections::vector<LinxcStatement>> ast = this->ParseCompoundStmt(&parserState);
 
@@ -605,7 +617,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
 
         if (token.ID == Linxc_Eof && expectEndif > 0)
         {
-            parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected #endif before end of file"));
+            parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "Expected #endif before end of file", tokenizer->currentLine));
             identifierToMacro.deinit();
             return false;
         }
@@ -635,7 +647,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                 }
                 else
                 {
-                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Unexpected #endif statement"));
+                    parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "Unexpected #endif statement", tokenizer->currentLine));
                 }
             }
             else if (!skipUntilEndif)
@@ -666,7 +678,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                                     {
                                         if (foundEllipsis)
                                         {
-                                            parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: No macro arguments allowed after open-ended argument ... !"));
+                                            parsingFile->errors.Add(LinxcErrorMessage(allocator, "Preprocessor: No macro arguments allowed after open-ended argument ... !", tokenizer->currentLine));
                                             compilingFlagMacro.name.deinit();
                                             identifierToMacro.deinit();
                                             return false;
@@ -687,7 +699,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                                     }
                                     else
                                     {
-                                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Unexpected token after macro argument. Token after macro argument must be either , or )"));
+                                        parsingFile->errors.Add(LinxcErrorMessage(allocator, "Preprocessor: Unexpected token after macro argument. Token after macro argument must be either , or )", tokenizer->currentLine));
                                         return false;
                                     }
                                 }
@@ -739,7 +751,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                     }
                     else
                     {
-                        parsingFile->errors.Add(ERR_MSG(allocator, "Preprocessor: Expected non-reserved identifier name after #define directive"));
+                        parsingFile->errors.Add(LinxcErrorMessage(allocator, "Preprocessor: Expected non-reserved identifier name after #define directive", tokenizer->currentLine));
                         return false;
                     }
                 }
@@ -781,7 +793,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                     LinxcToken next = tokenizer->TokenizeAdvance();
                     if (next.ID != Linxc_MacroString && next.ID != Linxc_StringLiteral)
                     {
-                        parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected <file to be included> after #include declaration"));
+                        parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "Expected <file to be included> after #include declaration", tokenizer->currentLine));
                         compilingFlagMacro.name.deinit();
                         identifierToMacro.deinit();
                         return false;
@@ -789,7 +801,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
 
                     if (next.end - 1 <= next.start + 1)
                     {
-                        parsingFile->errors.Add(ERR_MSG(this->allocator, "#include directive is empty!"));
+                        parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "#include directive is empty!", tokenizer->currentLine));
                     }
                     else
                     {
@@ -815,7 +827,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                         LinxcToken next = tokenizer->TokenizeAdvance();
                         if (next.ID != Linxc_LParen)
                         {
-                            parsingFile->errors.Add(ERR_MSG(this->allocator, "Expected ( after function macro identifier"));
+                            parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "Expected ( after function macro identifier", tokenizer->currentLine));
                             compilingFlagMacro.name.deinit();
                             identifierToMacro.deinit();
                             return false;
@@ -826,7 +838,7 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                         {
                             if (next.ID != Linxc_RParen)
                             {
-                                parsingFile->errors.Add(ERR_MSG(this->allocator, "This macro does not have arguments"));
+                                parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "This macro does not have arguments", tokenizer->currentLine));
                                 compilingFlagMacro.name.deinit();
                                 identifierToMacro.deinit();
                                 return false;
@@ -878,7 +890,8 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                             {
                                 if (argsInMacro.Count != expectedArguments)
                                 {
-                                    parsingFile->errors.Add(ERR_MSG(this->allocator, "Improper amount of arguments provided to macro"));
+                                    
+                                    parsingFile->errors.Add(LinxcErrorMessage(this->allocator, "Improper amount of arguments provided to macro", tokenizer->currentLine));
                                     compilingFlagMacro.name.deinit();
                                     identifierToMacro.deinit();
                                     argsInMacro.deinit();
@@ -924,7 +937,14 @@ bool LinxcParser::TokenizeFile(LinxcTokenizer* tokenizer, IAllocator* allocator,
                     continue;
                 }
             }
-            tokenizer->tokenStream.Add(token);
+            else if (token.ID == Linxc_Keyword_NULL)
+            {
+                token.ID = Linxc_IntegerLiteral;
+                token.tokenizer->buffer[token.start] = '0';
+                token.end = token.start + 1;
+                tokenizer->tokenStream.Add(token);
+            }
+            else tokenizer->tokenStream.Add(token);
         }
 
         if (token.ID == Linxc_Eof || token.ID == Linxc_Invalid)
@@ -1066,7 +1086,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
             //we have to handle it here as a primary expression
             if (!result.present)
             {
-                ERR_MSG msg = ERR_MSG(this->allocator, "No type, function, namespace or variable of name ");
+                LinxcErrorMessage msg = ERR_MSG(this->allocator, "No type, function, namespace or variable of name ");
                 msg.AppendDeinit(token.ToString(GetDefaultAllocator()));
                 msg.Append(" exists");
                 if (prevScopeIfAny.present && (prevScopeIfAny.value.ID != LinxcExpr_NamespaceRef || prevScopeIfAny.value.data.namespaceRef->actualNamespace->name.buffer != NULL))
@@ -1168,7 +1188,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         }
                         else
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Type expects ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Type expects ");
                             msg.Append((u64)result.value.data.typeRef.lastType->templateArgs.length);
                             msg.Append(" template arguments, but provided ");
                             msg.Append((u64)templateArgs.count);
@@ -1185,14 +1205,14 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 {
                     if (result.value.ID == LinxcExpr_TypeRef)
                     {
-                        ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
+                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "Type ");
                         msg.AppendDeinit(token.ToString(GetDefaultAllocator()));
                         msg.Append(" is not a generic type");
                         state->parsingFile->errors.Add(msg);
                     }
                     else
                     {
-                        ERR_MSG msg = ERR_MSG(this->allocator, "Function ");
+                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "Function ");
                         msg.AppendDeinit(token.ToString(GetDefaultAllocator()));
                         msg.Append(" is not a generic function");
                         state->parsingFile->errors.Add(msg);
@@ -1210,7 +1230,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                 //printf("Found reference to variable %s\n", result.value.data.variable->name.buffer);
                 if (varType.pointerCount == 0 && state->tokenizer->PeekNextUntilValid().ID == Linxc_LBracket)
                 {
-                    ERR_MSG msg = ERR_MSG(this->allocator, "Attempting to index into a type that does not support indexing");
+                    LinxcErrorMessage msg = ERR_MSG(this->allocator, "Attempting to index into a type that does not support indexing");
                     state->parsingFile->errors.Add(msg);
                 }
 
@@ -1330,7 +1350,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 {
                                     if (!CanAssign(expectedType.value, fullExpression.resolvesTo))
                                     {
-                                        ERR_MSG msg = ERR_MSG(this->allocator, "Argument of type ");
+                                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "Argument of type ");
                                         msg.AppendDeinit(fullExpression.resolvesTo.ToString(GetDefaultAllocator()));
                                         msg.Append(" cannot be implicitly converted to parameter type ");
                                         msg.AppendDeinit(expectedType.value.ToString(GetDefaultAllocator()));
@@ -1350,7 +1370,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 }
                                 else
                                 {
-                                    ERR_MSG msg = ERR_MSG(this->allocator, "Expected , or ) after function input argument. Got ");
+                                    LinxcErrorMessage msg = ERR_MSG(this->allocator, "Expected , or ) after function input argument. Got ");
                                     msg.AppendDeinit(peekNext.ToString(GetDefaultAllocator()));
                                     msg.Append(" instead.");
                                     state->parsingFile->errors.Add(msg);
@@ -1362,7 +1382,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
 
                         if (inputArgs.count > funcPtrDecl->arguments.length)
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too many input params to function pointer invocation, expected ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Provided too many input params to function pointer invocation, expected ");
                             msg.Append(funcPtrDecl->arguments.length);
                             msg.Append(" arguments, provided ");
                             msg.Append(inputArgs.count);
@@ -1370,7 +1390,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         }
                         else if (inputArgs.count < funcPtrDecl->necessaryArguments)
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too few input params to function pointer invocation, expected ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Provided too few input params to function pointer invocation, expected ");
                             msg.Append((u64)funcPtrDecl->necessaryArguments);
                             msg.Append(" arguments, provided ");
                             msg.Append(inputArgs.count);
@@ -1447,7 +1467,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                     //printf("is const: %s\n", expectedType.value.isConst ? "true" : "false");
                                     if (!CanAssign(expectedType.value, fullExpression.resolvesTo))
                                     {
-                                        ERR_MSG msg = ERR_MSG(this->allocator, "Argument of type ");
+                                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "Argument of type ");
                                         msg.AppendDeinit(fullExpression.resolvesTo.ToString(GetDefaultAllocator()));
                                         msg.Append(" cannot be implicitly converted to parameter type ");
                                         msg.AppendDeinit(expectedType.value.ToString(GetDefaultAllocator()));
@@ -1467,7 +1487,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                                 }
                                 else
                                 {
-                                    ERR_MSG msg = ERR_MSG(this->allocator, "Expected , or ) after function input argument. Got ");
+                                    LinxcErrorMessage msg = ERR_MSG(this->allocator, "Expected , or ) after function input argument. Got ");
                                     msg.AppendDeinit(peekNext.ToString(GetDefaultAllocator()));
                                     msg.Append(" instead.");
                                     state->parsingFile->errors.Add(msg);
@@ -1484,7 +1504,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         //this only applies to non-open ended functions
                         if ((func->arguments.length == 0 || func->arguments.data[func->arguments.length - 1].name != "...") && inputArgs.count > func->arguments.length)
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too many input params to function, expected ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Provided too many input params to function, expected ");
                             msg.Append(func->arguments.length);
                             msg.Append(" arguments, provided ");
                             msg.Append(inputArgs.count);
@@ -1492,7 +1512,7 @@ option<LinxcExpression> LinxcParser::ParseExpressionPrimary(LinxcParserState *st
                         }
                         else if (inputArgs.count < func->necessaryArguments)
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Provided too few input params to function, expected ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Provided too few input params to function, expected ");
                             msg.Append((u64)func->necessaryArguments);
                             msg.Append(" arguments, provided ");
                             msg.Append(inputArgs.count);
@@ -1597,7 +1617,7 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
             option<LinxcTypeReference> resolvesTo = incrementCall->EvaluatePossible();
             if (!resolvesTo.present)
             {
-                ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
+                LinxcErrorMessage msg = ERR_MSG(this->allocator, "Type ");
                 msg.AppendDeinit(incrementCall->leftExpr.resolvesTo.ToString(GetDefaultAllocator()));
                 if (op.ID == Linxc_PlusPlus)
                 {
@@ -1666,7 +1686,7 @@ LinxcExpression LinxcParser::ParseExpression(LinxcParserState *state, LinxcExpre
             {
                 printf("Left type: %i, right type: %i\n", operatorCall->leftExpr.resolvesTo.templateArgs.length, operatorCall->rightExpr.resolvesTo.templateArgs.length);
             }
-            ERR_MSG msg = ERR_MSG(this->allocator, "Type ");
+            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Type ");
             msg.AppendDeinit(operatorCall->leftExpr.resolvesTo.ToString(GetDefaultAllocator()));
             msg.Append(" cannot be ");
             msg.Append(LinxcTokenIDToString(op.ID));
@@ -1700,7 +1720,8 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
 
         result.ID = LinxcExpr_TypeRef;
         result.data.typeRef = reference;
-        result.resolvesTo.lastType = NULL; // = LinxcTypeReference(type);
+        result.resolvesTo.lastType = NULL;
+        printf("identifier %s, next is %i\n", identifierName.buffer, state->tokenizer->PeekNextUntilValid().ID);
     }
     else
     {
@@ -1983,6 +2004,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
             }
         }
     }
+
     if (result.ID == LinxcExpr_TypeRef)
     {
         while (state->tokenizer->PeekNextUntilValid().ID == Linxc_Asterisk)
@@ -2002,7 +2024,7 @@ option<LinxcExpression> LinxcParser::ParseIdentifier(LinxcParserState *state, op
 
 collections::Array<LinxcVar> LinxcParser::ParseFunctionArgs(LinxcParserState *state, u32* necessaryArguments)
 {
-    collections::vector<ERR_MSG> *errors = &state->parsingFile->errors;
+    collections::vector<LinxcErrorMessage> *errors = &state->parsingFile->errors;
     collections::vector<LinxcVar> variables = collections::vector<LinxcVar>(this->allocator);
 
     LinxcToken peekNext = state->tokenizer->PeekNextUntilValid();
@@ -2152,7 +2174,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
     //this is to avoid causing even more errors because the first member of an expression is invalid.
     bool errorSkipUntilSemicolon = false;
     collections::Array<string> nextTemplateArgs = collections::Array<string>();
-    collections::vector<ERR_MSG>* errors = &state->parsingFile->errors;
+    collections::vector<LinxcErrorMessage>* errors = &state->parsingFile->errors;
     collections::vector<LinxcStatement> result = collections::vector<LinxcStatement>(this->allocator);
     //collections::vector<ERR_MSG> errors = collections::vector<ERR_MSG>(this->allocator);
     LinxcTokenizer* tokenizer = state->tokenizer;
@@ -2337,7 +2359,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                         }
                         else
                         {
-                            ERR_MSG msg = ERR_MSG(this->allocator, "Could not find included file ");
+                            LinxcErrorMessage msg = ERR_MSG(this->allocator, "Could not find included file ");
                             msg.Append(macroString.buffer);
                             errors->Add(msg);
                         }
@@ -2382,7 +2404,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     string namespaceNameStr = namespaceName.ToString(this->allocator);
                     LinxcNamespace newNamespace = LinxcNamespace(this->allocator, namespaceNameStr);
                     newNamespace.parentNamespace = state->currentNamespace->actualNamespace;
-                    thisNamespace = state->currentNamespace->AddNamespaceToOrigin(namespaceNameStr, newNamespace);
+                    thisNamespace = state->currentNamespace->AddNamespaceToOrigin(namespaceNameStr, newNamespace, this->typeofU8, this->typeofU64);
                     thisNamespace->parentNamespace = state->currentNamespace;
                     thisNamespace->name = namespaceNameStr;
                 }
@@ -2559,7 +2581,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             member.value = value;
                             if (nameToEnumMember.Contains(memberName))
                             {
-                                ERR_MSG msg = ERR_MSG(this->allocator, "Enum already has member of name ");
+                                LinxcErrorMessage msg = ERR_MSG(this->allocator, "Enum already has member of name ");
                                 msg.Append(memberName.buffer);
                                 errors->Add(msg);
                                 memberName.deinit();
@@ -2588,7 +2610,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             member.value = maxCount;
                             if (nameToEnumMember.Contains(memberName))
                             {
-                                ERR_MSG msg = ERR_MSG(this->allocator, "Enum already has member of name ");
+                                LinxcErrorMessage msg = ERR_MSG(this->allocator, "Enum already has member of name ");
                                 msg.Append(memberName.buffer);
                                 errors->Add(msg);
                                 memberName.deinit();
@@ -2662,7 +2684,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     LinxcToken next = tokenizer->NextUntilValid();
                     if (next.ID != Linxc_Identifier)
                     {
-                        ERR_MSG msg = ERR_MSG(this->allocator, "Invalid alias for type: ");
+                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "Invalid alias for type: ");
                         msg.AppendDeinit(next.ToString(GetDefaultAllocator()));
                         errors->Add(msg);
                     }
@@ -2809,7 +2831,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     LinxcExpression argTypeExpr = this->ParseExpression(state, primaryExprOpt.value, -1);
                     if (argTypeExpr.resolvesTo.lastType != NULL)
                     {
-                        ERR_MSG msg = ERR_MSG(this->allocator, "3rd argument and onwards of a delegate definition must refer to a type");
+                        LinxcErrorMessage msg = ERR_MSG(this->allocator, "3rd argument and onwards of a delegate definition must refer to a type");
                         state->parsingFile->errors.Add(msg);
                         errorSkipUntilSemicolon = true;
                         break;
@@ -2969,7 +2991,7 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                     LinxcToken identifier = tokenizer->NextUntilValid();
                     if (identifier.ID != Linxc_Identifier)
                     {
-                        ERR_MSG error = ERR_MSG(this->allocator, "Expected identifier after type name, token was ");
+                        LinxcErrorMessage error = ERR_MSG(this->allocator, "Expected identifier after type name, token was ");
                         error.AppendDeinit(identifier.ToString(GetDefaultAllocator()));
                         errors->Add(error);
                         toBreak = true;
@@ -3003,7 +3025,8 @@ option<collections::vector<LinxcStatement>> LinxcParser::ParseCompoundStmt(Linxc
                             //expected type is not what the default value expression resolves to, and there is no implicit cast for it
                             if (!CanAssign(expectedType, defaultValue.value.resolvesTo))
                             {
-                                ERR_MSG msg = ERR_MSG(this->allocator, "Variable's initial value is not of the same type as the variable itself, and no implicit cast was found.");
+                                
+                                LinxcErrorMessage msg = ERR_MSG(this->allocator, "Variable's initial value is not of the same type as the variable itself, and no implicit cast was found.");
                                 if (defaultValue.value.resolvesTo.CanCastTo(expectedType, false))
                                 {
                                     msg.Append(" An explicit cast is required.");

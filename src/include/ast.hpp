@@ -6,8 +6,6 @@
 #include "hashset.hpp"
 #include "lexer.hpp"
 
-#define ERR_MSG string
-
 typedef struct LinxcType LinxcType;
 typedef struct LinxcVar LinxcVar;
 typedef struct LinxcFunc LinxcFunc;
@@ -25,6 +23,44 @@ typedef struct LinxcPhoneyNamespace LinxcPhoneyNamespace;
 
 typedef collections::Array<LinxcTypeReference> TemplateSpecialization;
 typedef collections::Array<string> TemplateArgs;
+
+#define ERR_MSG(allocator, buffer) LinxcErrorMessage(allocator, buffer, state->tokenizer->currentLine)
+
+struct LinxcErrorMessage
+{
+    string internalMessage;
+    usize line;
+
+    LinxcErrorMessage(IAllocator *allocator, const char* buffer, usize line)
+    {
+        internalMessage = string(allocator, buffer);
+        this->line = line;
+    }
+    inline void Append(const char* ptr)
+    {
+        internalMessage.Append(ptr);
+    }
+    inline void AppendDeinit(string other)
+    {
+        internalMessage.AppendDeinit(other);
+    }
+    inline void Prepend(const char* ptr)
+    {
+        internalMessage.Prepend(ptr);
+    }
+    inline void PrependDeinit(string other)
+    {
+        internalMessage.PrependDeinit(other);
+    }
+    inline void Append(i64 integer)
+    {
+        internalMessage.Append(integer);
+    }
+    inline void Append(u64 uinteger)
+    {
+        internalMessage.Append(uinteger);
+    }
+};
 
 struct LinxcFunctionCall
 {
@@ -272,7 +308,7 @@ struct LinxcPhoneyNamespace
     collections::hashmap<string, LinxcPhoneyNamespace> subNamespaces; //dont need pointer here as internal is pointer already
 
     LinxcPhoneyNamespace();
-    LinxcPhoneyNamespace(IAllocator* allocator, LinxcNamespace* thisActualNamespace);
+    LinxcPhoneyNamespace(IAllocator* allocator, LinxcType* u8type, LinxcType* u64type, LinxcNamespace* thisActualNamespace);
 
     inline LinxcVar* AddVariableToOrigin(string name, LinxcVar variable)
     {
@@ -292,10 +328,10 @@ struct LinxcPhoneyNamespace
         this->typeRefs.Add(name, result);
         return result;
     }
-    inline LinxcPhoneyNamespace* AddNamespaceToOrigin(string name, LinxcNamespace linxcNamespace)
+    inline LinxcPhoneyNamespace* AddNamespaceToOrigin(string name, LinxcNamespace linxcNamespace, LinxcType* u8type, LinxcType* u64type)
     {
         LinxcNamespace *actualSubNamespace = actualNamespace->subNamespaces.Add(name, linxcNamespace);
-        return this->subNamespaces.Add(name, LinxcPhoneyNamespace(actualNamespace->functions.allocator, actualSubNamespace));
+        return this->subNamespaces.Add(name, LinxcPhoneyNamespace(actualNamespace->functions.allocator, u8type, u64type, actualSubNamespace));
     }
     void Add(LinxcPhoneyNamespace* other);
 };
@@ -321,7 +357,7 @@ struct LinxcParsedFile
     //Needed so we can keep track of what functions to transpile when transpiling this file
     collections::vector<LinxcFunc*> definedFuncs;
 
-    collections::vector<ERR_MSG> errors;
+    collections::vector<LinxcErrorMessage> errors;
 
     collections::vector<LinxcStatement> ast;
 

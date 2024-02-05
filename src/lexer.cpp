@@ -4,9 +4,11 @@
 
 LinxcToken LinxcTokenizer::PeekNextUntilValid()
 {
+    usize prevLine = this->currentLine;
     usize prevToken = this->currentToken;
     LinxcToken result = NextUntilValid();
     this->currentToken = prevToken;
+    this->currentLine = prevLine;
 
     return result;
 }
@@ -21,14 +23,20 @@ LinxcToken LinxcTokenizer::NextUntilValid()
         {
             return nextToken;
         }
+        else
+        {
+            this->currentLine += 1;
+        }
     }
 }
 
 LinxcToken LinxcTokenizer::PeekNext()
 {
+    usize prevLine = this->currentLine;
     usize prevToken = this->currentToken;
     LinxcToken result = this->Next();
     this->currentToken = prevToken;
+    this->currentLine = prevLine;
 
     return result;
 }
@@ -1145,7 +1153,7 @@ LinxcTokenizer::LinxcTokenizer()
     this->buffer = NULL;
     this->bufferLength = 0;
     this->lineStartIndex = 0;
-    this->currentLine = 0;
+    this->currentLine = 1;
     this->index = 0;
     this->preprocessorDirective = false;
     this->prevIndex = 0;
@@ -1155,12 +1163,12 @@ LinxcTokenizer::LinxcTokenizer()
     this->tokenStream = collections::vector<LinxcToken>();
 }
 
-LinxcTokenizer::LinxcTokenizer(const char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef)
+LinxcTokenizer::LinxcTokenizer(char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef)
 {
     this->buffer = buffer;
     this->bufferLength = bufferLength;
     this->lineStartIndex = 0;
-    this->currentLine = 0;
+    this->currentLine = 1;
     this->index = 0;
     this->preprocessorDirective = false;
     this->prevIndex = 0;
