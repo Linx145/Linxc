@@ -1,0 +1,30 @@
+#include <Linxc.h>
+
+#define SEEK_CUR 1
+#define SEEK_END 2
+#define SEEK_SET 0
+
+struct FILE
+{
+	void* ptr;
+};
+
+void printf(const u8* format, ...);
+
+i32 scanf(const u8* format, ...);
+
+i32 sprintf(u8* str, const u8* format, ...);
+
+FILE* fopen(const u8* fileName, const u8* mode);
+
+i32 fopen_s(FILE** filePtr, const u8* fileName, const u8* mode);
+
+void fclose(FILE* file);
+
+i64 ftell(FILE* stream);
+
+void fseek(FILE* stream, i64 position, i32 origin);
+
+i32 fputs(const u8* str, FILE* stream);
+
+void fprintf(FILE* stream, const u8* format, ...);

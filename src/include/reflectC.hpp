@@ -2,7 +2,7 @@
 #include <clang-c/Index.h>
 #include <string.hpp>
 #include <stdio.h>
-#include <vector.linxc>
+#include <vector.hpp>
 #include <lexer.hpp>
 #include <Linxc.h>
 #include <ast.hpp>

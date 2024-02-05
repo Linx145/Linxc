@@ -1,4 +1,10 @@
-#include <path.hpp>
+#pragma once
+
+#include "Linxc.h"
+#include "string.hpp"
+#include "array.hpp"
+#include "option.hpp"
+#include <math.h>
 
 namespace path
 {
@@ -34,6 +40,7 @@ namespace path
             return result;
         }
     }
+    //Including the '.'
     string GetExtension(IAllocator *allocator, string path)
     {
         usize dotPosition = path.length + 1; //impossible number
@@ -61,5 +68,30 @@ namespace path
         {
             return string();
         }
+    }
+    string GetDirectory(IAllocator *allocator, string path)
+    {
+        option<usize> lastWindows = FindLast(path.buffer, '\\');
+        option<usize> lastNormalFileSystem = FindLast(path.buffer, '/');
+
+        usize actualLastIndex = 0;
+        if (lastWindows.present && lastNormalFileSystem.present)
+        {
+            actualLastIndex = fmax(lastWindows.value, lastNormalFileSystem.value);
+        }
+        else if (lastWindows.present)
+        {
+            actualLastIndex = lastWindows.value;
+        }
+        else if (lastNormalFileSystem.present)
+        {
+            actualLastIndex = lastNormalFileSystem.value;
+        }
+        else
+        {
+            return string();
+        }
+
+        return string(allocator, path.buffer, actualLastIndex);
     }
 }

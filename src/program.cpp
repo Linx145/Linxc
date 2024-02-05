@@ -6,7 +6,7 @@
 
 i32 main()
 {
-    ArenaAllocator arena = ArenaAllocator(&defaultAllocator);
+    ArenaAllocator arena = ArenaAllocator(GetDefaultAllocator());
 
     //CIMGUI_DEFINE_ENUMS_AND_STRUCTS
     //"C:/Users/Linus/source/repos/Linxc/linxc-out/HelloWorld.h"
@@ -17,7 +17,7 @@ i32 main()
 
     printf("Program started\n");
     LinxcParser parser = LinxcParser(&arena.asAllocator);
-    parser.appName = string(&arena.asAllocator, "Hello World");
+    //parser.appName = string(&arena.asAllocator, "Hello World");
     parser.SetLinxcStdLocation(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/src/linxcstd"));
     
     //parser.includeDirectories.Add(string(&arena.asAllocator, "C:/Users/Linus/source/repos/Linxc/Tests"));

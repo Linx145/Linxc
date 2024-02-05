@@ -3,7 +3,7 @@
 #define HASHSET_MAX_WEIGHT 0.8f
 
 #include "Linxc.h"
-#include "vector.linxc"
+#include "vector.hpp"
 
 namespace collections
 {
@@ -30,27 +30,13 @@ namespace collections
 
         hashset()
         {
-            this->allocator = &defaultAllocator;
+            this->allocator = NULL;
             this->hashFunc = NULL;
             this->eqlFunc = NULL;
             this->Count = 0;
             this->filledBuckets = 0;
             this->bucketsCount = 32;
             this->buckets = NULL;
-        }
-        hashset(HashFunc hashFunction, EqlFunc eqlFunc)
-        {
-            this->allocator = &defaultAllocator;
-            this->hashFunc = hashFunction;
-            this->eqlFunc = eqlFunc;
-            this->Count = 0;
-            this->filledBuckets = 0;
-            this->bucketsCount = 32;
-            this->buckets = (Bucket*)this->allocator->Allocate(this->bucketsCount * sizeof(Bucket));
-            for (usize i = 0; i < this->bucketsCount; i++)
-            {
-                this->buckets[i].initialized = false;
-            }
         }
         hashset(IAllocator *allocator, HashFunc hashFunction, EqlFunc eqlFunc)
         {
@@ -113,7 +99,7 @@ namespace collections
             {
                 buckets[index].initialized = true;
                 buckets[index].keyHash = hash;
-                buckets[index].entries = collections::vector<T>();
+                buckets[index].entries = collections::vector<T>(allocator);
 
                 filledBuckets++;
             }

@@ -3,7 +3,7 @@
 #define HASHMAP_MAX_WEIGHT 0.8f
 
 #include "Linxc.h"
-#include "vector.linxc"
+#include "vector.hpp"
 #include <stdio.h>
 
 namespace collections
@@ -55,27 +55,13 @@ namespace collections
 
         hashmap()
         {
-            this->allocator = &defaultAllocator;
+            this->allocator = NULL;
             this->hashFunc = NULL;
             this->eqlFunc = NULL;
             this->Count = 0;
             this->filledBuckets = 0;
             this->bucketsCount = 32;
             this->buckets = NULL;
-        }
-        hashmap(HashFunc hashFunction, EqlFunc eqlFunc)
-        {
-            this->allocator = &defaultAllocator;
-            this->hashFunc = hashFunction;
-            this->eqlFunc = eqlFunc;
-            this->Count = 0;
-            this->filledBuckets = 0;
-            this->bucketsCount = 32;
-            this->buckets = (Bucket*)malloc(this->bucketsCount * sizeof(Bucket));
-            for (usize i = 0; i < this->bucketsCount; i++)
-            {
-                this->buckets[i] = Bucket(this->allocator);
-            }
         }
         hashmap(IAllocator *myAllocator, HashFunc hashFunction, EqlFunc eqlFunc)
         {
@@ -93,15 +79,18 @@ namespace collections
         }
         void deinit()
         {
-            for (usize i = 0; i < bucketsCount; i++)
+            if (buckets != NULL)
             {
-                if (buckets[i].initialized)
+                for (usize i = 0; i < bucketsCount; i++)
                 {
-                    buckets[i].entries.deinit();
+                    if (buckets[i].initialized)
+                    {
+                        buckets[i].entries.deinit();
+                    }
+                    //buckets[i].entries.~();
                 }
-                //buckets[i].entries.~();
+                allocator->Free((void**)&buckets);
             }
-            allocator->Free((void**)&buckets);
         }
 
         void EnsureCapacity()

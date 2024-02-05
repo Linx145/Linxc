@@ -1,10 +1,10 @@
 #pragma once
 
-#include <string.hpp>
-#include <vector.linxc>
-#include <hashmap.linxc>
-#include <hashset.linxc>
-#include <lexer.hpp>
+#include "string.hpp"
+#include "vector.hpp"
+#include "hashmap.hpp"
+#include "hashset.hpp"
+#include "lexer.hpp"
 
 #define ERR_MSG string
 
@@ -21,6 +21,10 @@ typedef struct LinxcTypeReference LinxcTypeReference;
 typedef struct LinxcOperatorImpl LinxcOperatorImpl;
 typedef struct LinxcOperatorFunc LinxcOperatorFunc;
 typedef struct LinxcTypeCast LinxcTypeCast;
+typedef struct LinxcPhoneyNamespace LinxcPhoneyNamespace;
+
+typedef collections::Array<LinxcTypeReference> TemplateSpecialization;
+typedef collections::Array<string> TemplateArgs;
 
 struct LinxcFunctionCall
 {
@@ -30,6 +34,13 @@ struct LinxcFunctionCall
     collections::Array<LinxcExpression> templateArgs;
 
     string ToString(IAllocator *allocator);
+};
+
+struct LinxcIndexerCall
+{
+    LinxcOperatorFunc* indexerOperator;
+    LinxcVar* variableToIndex;
+    LinxcExpression* inputParams;
 };
 
 struct LinxcEnumMember
@@ -69,17 +80,19 @@ struct LinxcType
 
     //Enum properties
     collections::vector<LinxcEnumMember> enumMembers;
+    TemplateSpecialization isSpecializedType;
 
     //Function Pointer properties
     LinxcFuncPtr delegateDecl;
 
     //template stuff
-    collections::Array<string> templateArgs;
-    collections::hashset<collections::Array<LinxcTypeReference>> templateSpecializations;
-    collections::vector<LinxcStatement> specializationsExpanded;
+    TemplateArgs templateArgs;
+    collections::hashmap<TemplateSpecialization, LinxcType> templateSpecializations;
 
     LinxcType();
     LinxcType(IAllocator *allocator, string name, LinxcNamespace *myNamespace, LinxcType *myParent);
+
+    LinxcType Specialize(IAllocator* allocator, TemplateArgs inputArgs, TemplateSpecialization specialization);
 
     LinxcType *FindSubtype(string name);
     LinxcFunc *FindFunction(string name);
@@ -87,7 +100,7 @@ struct LinxcType
     LinxcEnumMember* FindEnumMember(string name);
 
     string GetFullName(IAllocator *allocator);
-    string GetCName(IAllocator* allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations);
+    string GetCName(IAllocator* allocator);
 
     LinxcExpression AsExpression();
 };
@@ -108,7 +121,7 @@ struct LinxcTypeReference
     LinxcTypeReference();
     LinxcTypeReference(LinxcType *type);
     string ToString(IAllocator *allocator);
-    string GetCName(IAllocator* allocator, bool pointerAsPtr = false, collections::Array<string> templateArgs = collections::Array<string>(), collections::Array<LinxcTypeReference> templateSpecializations = collections::Array<LinxcTypeReference>());
+    string GetCName(IAllocator* allocator, bool pointerAsPtr = false, TemplateArgs templateArgs = TemplateArgs(), TemplateSpecialization templateSpecializations = TemplateSpecialization());
 
     bool CanCastTo(LinxcTypeReference type, bool implicitly);
     //dont need to check const as only const u8* is a special type
@@ -122,8 +135,8 @@ struct LinxcTypeReference
 bool LinxcTypeReferenceEql(LinxcTypeReference A, LinxcTypeReference B);
 u32 LinxcTypeReferenceHash(LinxcTypeReference A);
 
-bool LinxcTemplateSpecializationsEql(collections::Array<LinxcTypeReference> A, collections::Array<LinxcTypeReference> B);
-u32 LinxcTemplateSpecializationsHash(collections::Array<LinxcTypeReference> A);
+bool LinxcTemplateSpecializationsEql(TemplateSpecialization A, TemplateSpecialization B);
+u32 LinxcTemplateSpecializationsHash(TemplateSpecialization A);
 
 enum LinxcExpressionID
 {
@@ -142,7 +155,8 @@ enum LinxcExpressionID
     LinxcExpr_FuncPtrCall,
     LinxcExpr_Sizeof,
     LinxcExpr_Nameof,
-    LinxcExpr_Typeof
+    LinxcExpr_Typeof,
+    LinxcExpr_IndexerCall
 };
 union LinxcExpressionData
 {
@@ -152,15 +166,15 @@ union LinxcExpressionData
     LinxcFunc *functionRef; //Eg: funcName <- is incomplete
     LinxcTypeReference typeRef; //Eg: typeName <- is incomplete
     LinxcEnumMember* enumMemberRef;
-    LinxcNamespace *namespaceRef; //Eg: namespaceName <- is incomplete
+    LinxcPhoneyNamespace *namespaceRef; //Eg: namespaceName <- is incomplete
     LinxcTypeCast *typeCast; //Eg: (typeName)
     LinxcModifiedExpression *modifiedExpression; //Eg: *varName
-    LinxcExpression *indexerCall; //Eg: varName[expression]
     LinxcFunctionCall functionCall; // Eg: Function(expression1, expression2, ...);
     LinxcFunctionPointerCall functionPointerCall;
     LinxcTypeReference sizeofCall; //Eg: sizeof(type reference)
     LinxcTypeReference nameofCall; //Eg: nameof(type reference)
     LinxcTypeReference typeofCall; //Eg: typeof(type reference)
+    LinxcIndexerCall indexerCall;
 
     LinxcExpressionData();
 };
@@ -179,6 +193,8 @@ struct LinxcExpression
     //call this function to parse the potential operator tree and retrieve the final type.
     option<LinxcTypeReference> AsTypeReference();
     option<LinxcFunc*> AsFuncReference();
+    LinxcExpression SpecializeSignature(IAllocator* allocator, collections::Array<string> args, TemplateSpecialization with);
+    //void Specialize(collections::Array<string> args, TemplateSpecialization with);
     LinxcExpression *ToHeap(IAllocator *allocator);
 };
 struct LinxcTypeCast
@@ -203,7 +219,8 @@ struct LinxcFunc
     LinxcFunc();
     LinxcFunc(string name, LinxcExpression returnType);
     LinxcFuncPtr GetSignature(IAllocator* allocator);
-    string GetCName(IAllocator* allocator, collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations);
+    LinxcFunc SpecializeSignature(IAllocator* allocator, collections::Array<string> templateArgs, TemplateSpecialization specialization);
+    string GetCName(IAllocator* allocator);// , collections::Array<string> scopeTemplateArgs, collections::Array<LinxcTypeReference> scopeTemplateSpecializations);
 };
 
 /// Represents a variable in Linxc, including it's type, name and optionally default value.
@@ -251,6 +268,7 @@ struct LinxcPhoneyNamespace
     collections::hashmap<string, LinxcVar*> variableRefs;
     collections::hashmap<string, LinxcFunc*> functionRefs;
     collections::hashmap<string, LinxcType*> typeRefs;
+    collections::hashmap<string, LinxcTypeReference> typedefs;
     collections::hashmap<string, LinxcPhoneyNamespace> subNamespaces; //dont need pointer here as internal is pointer already
 
     LinxcPhoneyNamespace();

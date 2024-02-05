@@ -1,0 +1,9 @@
+#include <Linxc.h>
+
+void free(void* ptr);
+
+void* malloc(u64 bytes);
+
+void* calloc(u64 bytes);
+
+void* realloc(void* block, u64 size);

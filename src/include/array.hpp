@@ -1,8 +1,8 @@
 #pragma once
 
-#include <Linxc.h>
-#include <allocators.hpp>
-#include <option.linxc>
+#include "Linxc.h"
+#include "allocators.hpp"
+#include "option.hpp"
 
 namespace collections
 {
@@ -21,16 +21,20 @@ namespace collections
             this->data = NULL;
             this->length = 0;
         }
-        Array(T *data, usize itemsCount)
+        Array(IAllocator* allocator)
         {
-            this->allocator = &defaultAllocator;
-            this->data = data;
-            this->length = itemsCount;
+            this->allocator = allocator;
+            this->data = NULL;
+            this->length = 0;
         }
         Array(IAllocator* allocator, usize itemsCount)
         {
             this->allocator = allocator;
-            this->data = (T*)allocator->Allocate(sizeof(T) * itemsCount);
+            if (itemsCount == 0)
+            {
+                this->data = NULL;
+            }
+            else this->data = (T*)allocator->Allocate(sizeof(T) * itemsCount);
             this->length = itemsCount;
         }
         Array(IAllocator *allocator, T *data, usize itemsCount)
@@ -41,7 +45,10 @@ namespace collections
         }
         void deinit()
         {
-            allocator->Free((void**)&data);
+            if (data != NULL && allocator != NULL)
+            {
+                allocator->Free((void**)&data);
+            }
         }
         option<usize> Contains(T value, EqlFunc eqlFunc)
         {

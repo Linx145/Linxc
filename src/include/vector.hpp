@@ -1,10 +1,10 @@
 #pragma once
 
-#include <Linxc.h>
-#include <allocators.hpp>
+#include "Linxc.h"
+#include "allocators.hpp"
 #include <stdlib.h>
-#include <array.linxc>
-#include <option.linxc>
+#include "array.hpp"
+#include "option.hpp"
 
 namespace collections
 {
@@ -20,16 +20,9 @@ namespace collections
 
         vector()
         {
-            allocator = &defaultAllocator;
+            allocator = NULL;
             ptr = NULL;
             capacity = 0;
-            count = 0;
-        }
-        vector(usize minCapacity)
-        {
-            this->allocator = &defaultAllocator;
-            ptr = (T*)this->allocator->Allocate(sizeof(T) * minCapacity);
-            capacity = minCapacity;
             count = 0;
         }
         vector(IAllocator *myAllocator)
@@ -48,10 +41,9 @@ namespace collections
         }
         void deinit()
         {
-            if (ptr != NULL)
+            if (ptr != NULL && this->allocator != NULL)
             {
                 this->allocator->Free((void**)&ptr);
-                ptr = NULL;
             }
             count = 0;
             capacity = 0;
@@ -134,7 +126,7 @@ namespace collections
         {
             if (this->ptr == NULL)
             {
-                return collections::Array<T>();
+                return collections::Array<T>(newAllocator);
             }
             T *slice = (T*)newAllocator->Allocate(sizeof(T) * this->count);
             for (usize i = 0; i < this->count; i++)

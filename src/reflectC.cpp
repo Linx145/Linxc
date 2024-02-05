@@ -20,10 +20,10 @@ string LinxcCursor::GetSpelling(IAllocator* allocator)
 }
 string LinxcCursor::ToString(IAllocator* allocator, i32 whiteSpaces)
 {
-    string myWhitespaces = string(&defaultAllocator);
+    string myWhitespaces = string(GetDefaultAllocator());
     if (whiteSpaces > 0)
     {
-        myWhitespaces.buffer = (char*)defaultAllocator.Allocate(sizeof(char) * (whiteSpaces + 2));
+        myWhitespaces.buffer = (char*)GetDefaultAllocator()->Allocate(sizeof(char) * (whiteSpaces + 2));
         myWhitespaces.length = whiteSpaces + 2;
         for (usize i = 0; i < whiteSpaces + 1; i++)
         {
@@ -32,7 +32,7 @@ string LinxcCursor::ToString(IAllocator* allocator, i32 whiteSpaces)
         myWhitespaces.buffer[whiteSpaces + 1] = '\0';
     }
 
-    string result = string(&defaultAllocator);
+    string result = string(GetDefaultAllocator());
 
     CXString str = clang_getCursorKindSpelling(this->kind);
     if (myWhitespaces.buffer != NULL)
@@ -49,7 +49,7 @@ string LinxcCursor::ToString(IAllocator* allocator, i32 whiteSpaces)
         result.Append("\n");
         for (i32 i = 0; i < this->body.count; i++)
         {
-            result.AppendDeinit(this->body.ptr[i].ToString(&defaultAllocator, whiteSpaces + 1));
+            result.AppendDeinit(this->body.ptr[i].ToString(GetDefaultAllocator(), whiteSpaces + 1));
             if (i < this->body.count - 1)
             {
                 result.Append("\n");
@@ -66,7 +66,7 @@ LinxcReflectCState::LinxcReflectCState(IAllocator * myAllocator)
 }
 void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* localNamespace, IAllocator* allocator, LinxcCursor* cursor)
 {
-    string structName = cursor->GetSpelling(&defaultAllocator);
+    string structName = cursor->GetSpelling(GetDefaultAllocator());
     if (!localNamespace->types.Contains(structName))
     {
         //printf("struct %s\n", structName.buffer);
@@ -132,7 +132,7 @@ void LinxcGetStructDeclInfo(LinxcNamespace* globalNamespace, LinxcNamespace* loc
                 //printf(" %s\n", cstr);
                 //we now have the accurate string representation of the type (hopefully)
                 //now, we check for the presence of the type
-                string searchString = string(&defaultAllocator, cstr);
+                string searchString = string(GetDefaultAllocator(), cstr);
                 LinxcType* varType = globalNamespace->types.Get(searchString);
                 if (varType != NULL)
                 {

@@ -1,7 +1,7 @@
 #ifndef linxclinkedlist
 #define linxclinkedlist
 
-#include <allocators.hpp>
+#include "allocators.hpp"
 
 namespace collections
 {
@@ -29,7 +29,7 @@ namespace collections
 
 		linkedlist()
 		{
-			allocator = &defaultAllocator;
+			allocator = NULL;
 			first = NULL;
 			last = NULL;
 			count = 0;

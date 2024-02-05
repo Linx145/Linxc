@@ -1,110 +1,6 @@
 #include <lexer.hpp>
 #include <ctype.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <string.hpp>
-
-bool LinxcIsPrimitiveType(LinxcTokenID ID)
-{
-    switch (ID)
-    {
-        case Linxc_Keyword_void:
-        case Linxc_Keyword_i8:
-        case Linxc_Keyword_i16:
-        case Linxc_Keyword_i32:
-        case Linxc_Keyword_i64:
-        case Linxc_Keyword_u8:
-        case Linxc_Keyword_u16:
-        case Linxc_Keyword_u32:
-        case Linxc_Keyword_u64:
-        case Linxc_Keyword_bool:
-        case Linxc_Keyword_float:
-        case Linxc_Keyword_double:
-        case Linxc_Keyword_char:
-            return true;
-        default:
-            return false;
-    }
-}
-
-const char *LinxcTokenIDToString(LinxcTokenID ID)
-{
-    switch (ID)
-    {
-        case Linxc_BangEqual:
-            return "!=";
-        case Linxc_Pipe:
-            return "|";
-        case Linxc_PipeEqual:
-            return "|=";
-        case Linxc_PipePipe:
-            return "||";
-        case Linxc_Equal:
-            return "=";
-        case Linxc_EqualEqual:
-            return "==";
-        case Linxc_AngleBracketLeft:
-            return "<";
-        case Linxc_AngleBracketRight:
-            return ">";
-        case Linxc_AngleBracketLeftEqual:
-            return "<=";
-        case Linxc_AngleBracketRightEqual:
-            return ">=";
-        case Linxc_Period:
-            return ".";
-        case Linxc_Ellipsis:
-            return "...";
-        case Linxc_Caret:
-            return "^";
-        case Linxc_CaretEqual:
-            return "^=";
-        case Linxc_Plus:
-            return "+";
-        case Linxc_PlusEqual:
-            return "+=";
-        case Linxc_PlusPlus:
-            return "++";
-        case Linxc_Minus:
-            return "-";
-        case Linxc_MinusEqual:
-            return "-=";
-        case Linxc_MinusMinus:
-            return "--";
-        case Linxc_Asterisk:
-            return "*";
-        case Linxc_AsteriskEqual:
-            return "*=";
-        case Linxc_Percent:
-            return "%";
-        case Linxc_PercentEqual:
-            return "%=";
-        case Linxc_Arrow:
-            return "->";
-        case Linxc_Slash:
-            return "/";
-        case Linxc_SlashEqual:
-            return "/=";
-        case Linxc_Colon:
-            return ":";
-        case Linxc_ColonColon:
-            return "::";
-        case Linxc_Comma:
-            return ",";
-        case Linxc_Ampersand:
-            return "&";
-        case Linxc_AmpersandAmpersand:
-            return "&&";
-        case Linxc_AmpersandEqual:
-            return "&=";
-        case Linxc_QuestionMark:
-            return "?";
-        case Linxc_Tilde:
-            return "~";
-        default:
-            return "";
-    }
-}
 
 LinxcToken LinxcTokenizer::PeekNextUntilValid()
 {
@@ -1239,6 +1135,10 @@ string LinxcToken::ToString(IAllocator *allocator)
 {
     return string(allocator, this->tokenizer->buffer + this->start, this->end - this->start);
 }
+CharSlice LinxcToken::ToCharSlice()
+{
+    return CharSlice(this->tokenizer->buffer + this->start, this->end - this->start);
+}
 
 LinxcTokenizer::LinxcTokenizer()
 {
@@ -1255,7 +1155,7 @@ LinxcTokenizer::LinxcTokenizer()
     this->tokenStream = collections::vector<LinxcToken>();
 }
 
-LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef)
+LinxcTokenizer::LinxcTokenizer(const char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef)
 {
     this->buffer = buffer;
     this->bufferLength = bufferLength;
@@ -1272,7 +1172,8 @@ LinxcTokenizer::LinxcTokenizer(const char *buffer, i32 bufferLength, collections
 
 LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocessorDirective, collections::hashmap<string, LinxcTokenID> *nameToToken)
 {
-    string str = string(chars, strlen);
+    IAllocator defaultAllocator = GetCAllocator();
+    string str = string(&defaultAllocator, chars, strlen); // string(chars, strlen);
 
     LinxcTokenID *tokenIDPtr = nameToToken->Get(str);
 
@@ -1281,7 +1182,8 @@ LinxcTokenID LinxcGetKeyword(const char *chars, usize strlen, bool isPreprocesso
     if (tokenIDPtr != NULL)
     {
         LinxcTokenID tokenID = *tokenIDPtr;
-        if (tokenID == Linxc_Keyword_endif || tokenID == Linxc_Keyword_include || tokenID == Linxc_Keyword_define || tokenID == Linxc_Keyword_ifdef || tokenID == Linxc_Keyword_ifndef || tokenID == Linxc_Keyword_error || tokenID == Linxc_Keyword_pragma)
+        if (tokenID == Linxc_Keyword_endif || tokenID == Linxc_Keyword_include || tokenID == Linxc_Keyword_define || tokenID == Linxc_Keyword_ifdef || tokenID == Linxc_Keyword_ifndef || tokenID == Linxc_Keyword_error || tokenID == Linxc_Keyword_pragma
+        || tokenID == Acsl_Keyword_Fragment || tokenID == Acsl_Keyword_Vertex || tokenID == Acsl_Keyword_Compute || tokenID == Acsl_Keyword_Buffer || tokenID == Acsl_Keyword_End)
         {
             if (!isPreprocessorDirective)
             {

@@ -1,9 +1,7 @@
 #pragma once
-
-#include <Linxc.h>
-#include <stdbool.h>
-#include <string.hpp>
-#include <hashmap.linxc>
+#include "Linxc.h"
+#include "string.hpp"
+#include "hashmap.hpp"
 
 typedef struct LinxcToken LinxcToken;
 typedef struct LinxcTokenizer LinxcTokenizer;
@@ -16,6 +14,7 @@ enum LinxcTokenID
     Linxc_Identifier,
 
     /// special case for #include <...>
+    
     Linxc_MacroString,
     Linxc_StringLiteral,
     Linxc_CharLiteral,
@@ -134,6 +133,7 @@ enum LinxcTokenID
     Linxc_Keyword_namespace,
 
     // ISO C99
+
     Linxc_Keyword_bool,
     Linxc_Keyword_complex,
     Linxc_Keyword_imaginary,
@@ -141,6 +141,7 @@ enum LinxcTokenID
     Linxc_Keyword_restrict,
 
     // ISO C11
+
     Linxc_Keyword_alignas,
     Linxc_Keyword_alignof,
     Linxc_Keyword_atomic,
@@ -148,6 +149,7 @@ enum LinxcTokenID
     Linxc_Keyword_thread_local,
 
     // Preprocessor directives
+
     Linxc_Keyword_include,
     Linxc_Keyword_define,
     Linxc_Keyword_ifdef,
@@ -155,9 +157,110 @@ enum LinxcTokenID
     Linxc_Keyword_error,
     Linxc_Keyword_pragma,
     Linxc_Keyword_endif,
+
+    //Astral Canvas Shading Language (Acsl) AKA Glsl with a (cool) preprocessor
+
+    Acsl_Keyword_Vertex,
+    Acsl_Keyword_Fragment,
+    Acsl_Keyword_Compute,
+    Acsl_Keyword_Layout,
+    Acsl_Keyword_Version,
+    Acsl_Keyword_Buffer,
+    Acsl_Keyword_End,
+    Acsl_Keyword_In,
+    Acsl_Keyword_Out,
+    Acsl_Keyword_Location
 };
 
-const char *LinxcTokenIDToString(LinxcTokenID ID);
+struct LinxcToken
+{
+    LinxcTokenizer *tokenizer;
+    LinxcTokenID ID;
+    u32 start;
+    u32 end;
+
+    string ToString(IAllocator *allocator);
+    CharSlice ToCharSlice();
+};
+
+inline const char *LinxcTokenIDToString(LinxcTokenID ID)
+{
+    switch (ID)
+    {
+        case Linxc_BangEqual:
+            return "!=";
+        case Linxc_Pipe:
+            return "|";
+        case Linxc_PipeEqual:
+            return "|=";
+        case Linxc_PipePipe:
+            return "||";
+        case Linxc_Equal:
+            return "=";
+        case Linxc_EqualEqual:
+            return "==";
+        case Linxc_AngleBracketLeft:
+            return "<";
+        case Linxc_AngleBracketRight:
+            return ">";
+        case Linxc_AngleBracketLeftEqual:
+            return "<=";
+        case Linxc_AngleBracketRightEqual:
+            return ">=";
+        case Linxc_Period:
+            return ".";
+        case Linxc_Ellipsis:
+            return "...";
+        case Linxc_Caret:
+            return "^";
+        case Linxc_CaretEqual:
+            return "^=";
+        case Linxc_Plus:
+            return "+";
+        case Linxc_PlusEqual:
+            return "+=";
+        case Linxc_PlusPlus:
+            return "++";
+        case Linxc_Minus:
+            return "-";
+        case Linxc_MinusEqual:
+            return "-=";
+        case Linxc_MinusMinus:
+            return "--";
+        case Linxc_Asterisk:
+            return "*";
+        case Linxc_AsteriskEqual:
+            return "*=";
+        case Linxc_Percent:
+            return "%";
+        case Linxc_PercentEqual:
+            return "%=";
+        case Linxc_Arrow:
+            return "->";
+        case Linxc_Slash:
+            return "/";
+        case Linxc_SlashEqual:
+            return "/=";
+        case Linxc_Colon:
+            return ":";
+        case Linxc_ColonColon:
+            return "::";
+        case Linxc_Comma:
+            return ",";
+        case Linxc_Ampersand:
+            return "&";
+        case Linxc_AmpersandAmpersand:
+            return "&&";
+        case Linxc_AmpersandEqual:
+            return "&=";
+        case Linxc_QuestionMark:
+            return "?";
+        case Linxc_Tilde:
+            return "~";
+        default:
+            return "";
+    }
+}
 
 enum LinxcTokenizerState
 {
@@ -221,20 +324,10 @@ enum LinxcTokenizerState
     Linxc_State_FloatSuffix,
 };
 
-struct LinxcToken
-{
-    LinxcTokenizer *tokenizer;
-    LinxcTokenID ID;
-    u32 start;
-    u32 end;
-
-    string ToString(IAllocator *allocator);
-};
-
 struct LinxcTokenizer
 {
     const char *buffer;
-    i32 bufferLength;
+    usize bufferLength;
     usize index;
     usize prevIndex;
     LinxcTokenID prevTokenID;
@@ -247,7 +340,7 @@ struct LinxcTokenizer
     collections::vector<LinxcToken> tokenStream;
 
     LinxcTokenizer();
-    LinxcTokenizer(const char *buffer, i32 bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
+    LinxcTokenizer(const char *buffer, usize bufferLength, collections::hashmap<string, LinxcTokenID>* nameToTokenRef);
 
     LinxcToken TokenizeAdvance();
     inline LinxcToken Next()
@@ -262,8 +355,33 @@ struct LinxcTokenizer
         if (this->currentToken > 0)
             this->currentToken -= 1;
     }
+    inline void deinit()
+    {
+        tokenStream.deinit();
+    }
 };
 
-bool LinxcIsPrimitiveType(LinxcTokenID ID);
+inline bool LinxcIsPrimitiveType(LinxcTokenID ID)
+{
+    switch (ID)
+    {
+        case Linxc_Keyword_void:
+        case Linxc_Keyword_i8:
+        case Linxc_Keyword_i16:
+        case Linxc_Keyword_i32:
+        case Linxc_Keyword_i64:
+        case Linxc_Keyword_u8:
+        case Linxc_Keyword_u16:
+        case Linxc_Keyword_u32:
+        case Linxc_Keyword_u64:
+        case Linxc_Keyword_bool:
+        case Linxc_Keyword_float:
+        case Linxc_Keyword_double:
+        case Linxc_Keyword_char:
+            return true;
+        default:
+            return false;
+    }
+}
 
 LinxcTokenID LinxcGetKeyword(const char *str, usize strlen, bool isPreprocessorDirective, collections::hashmap<string, LinxcTokenID>* nameToToken);
